@@ -1,7 +1,7 @@
 # Spec: Household AI Agent v1 (hh-assistant)
 
 > **Status: DRAFT — Phase 1 (Specify), awaiting human approval.**
-> Architecture decisions live in `household-ai-agent-architecture-v3_4.md` (the locked source of truth for *why*). This spec is the source of truth for *building*: scope, conventions, structure, verification, and boundaries. Where the two overlap, the architecture doc wins on rationale, this spec wins on implementation detail.
+> Architecture decisions live in `household-ai-agent-architecture-v3_5.md` (the locked source of truth for *why*). This spec is the source of truth for *building*: scope, conventions, structure, verification, and boundaries. Where the two overlap, the architecture doc wins on rationale, this spec wins on implementation detail.
 
 ## Confirmed facts (were assumptions; confirmed by the builder 2026-06-09)
 
@@ -13,7 +13,7 @@
 
 4. Household timezone is **Asia/Jerusalem** — all reminder scheduling anchors to it, never to server time.
 5. Node 22 LTS, TypeScript strict mode, single-package repo (no monorepo — one process, one deployable).
-6. Local dev runs Postgres (journal + state + pgvector) via Docker Compose; production topology per architecture decision 8.
+6. Local dev runs a single Postgres (journal + state + pgvector in one instance) via Docker Compose, mirroring the production single-Postgres topology — co-location is a correctness requirement (transactional steps, decision 3), so dev must not split what prod co-locates.
 7. Build order is gated: **Phase-0 spikes and the staged soak precede agent implementation** (per decisions 1 and 4 — no agent on an unsoaked transport, no cost plan without verified prompt caching).
 8. Test framework is Vitest; lint is ESLint (load-bearing, not a style choice — decision 3 requires a *custom ESLint rule* for workflow determinism, which rules out Biome for v1).
 
@@ -39,7 +39,7 @@ Everything else (subagents, self-improving loops, code execution) is explicitly 
 | Orchestration | DBOS (TS durable execution, embedded) | Decision 3 |
 | Reasoning | Vercel AI SDK Core primitives only (`generateText`/`generateObject` + Zod tools); DBOS owns the loop | Decision 4 |
 | Models | Claude via Console API key — Haiku-class routing/classification, Sonnet-class reasoning | Decision 6 |
-| State | Postgres: Neon (state + pgvector, PITR) + co-located journal Postgres on the box | Decisions 5, 8 |
+| State | One local Postgres on the box: DBOS journal + structured state + pgvector, co-located so state writes commit atomically with their step record (exactly-once); WAL + base backups shipped off-box, encrypted, to B2/R2 for PITR | Decisions 3, 5, 8 |
 | Tracing | Langfuse | Decision 9 |
 | Host | Oracle PAYG if verified at provisioning, else Hetzner | Decision 7 |
 | Runtime/tooling | Node 22 LTS, TypeScript strict, pnpm (exact pins), Vitest, ESLint + custom determinism rule | Assumptions 3, 4, 7 |
@@ -51,7 +51,7 @@ All dependency versions pinned exact; lockfile committed; WhatsApp-adjacent tran
 The scaffold must provide these from day one (they are the verification interface for every task):
 
 ```
-Dev DBs up:   docker compose up -d        # journal PG + state PG with pgvector
+Dev DB up:    docker compose up -d        # one Postgres with pgvector (journal + state co-located, mirrors prod)
 Build:        pnpm build                  # tsc, strict
 Test:         pnpm test                   # vitest run (unit + integration; integration needs dev DBs)
 Lint:         pnpm lint                   # eslint, includes the custom DBOS-determinism rule; CI-failing
@@ -80,7 +80,8 @@ src/ops/            socket-health monitor, independent alert channel, dead-man p
 tests/              unit + integration (mirrors src/)
 evals/              decision-9 scenario suite + fixtures
 docs/               architecture doc, this spec, ADRs, recovery runbook, soak log
-infra/              compose files, host provisioning notes, egress allowlist
+infra/              compose files, host provisioning notes, egress allowlist,
+                    backup/PITR config (WAL archiving + base backups to B2/R2)
 ```
 
 ## Code Style
@@ -112,7 +113,7 @@ Conventions: kebab-case files, camelCase symbols, no default exports, dependency
 Three levels, each owning a different failure class:
 
 1. **Unit (Vitest, CI):** pure logic — debounce grouping, idempotency-key derivation, send-class selection, status-transition guards, self-echo filtering, Zod schemas. No network, no DB.
-2. **Integration (Vitest + Docker Postgres, CI):** DBOS workflows against real Postgres — the full `handleTurn` with a stubbed model and stubbed transport; the **recovery replay test** (kill mid-flight, replay, diff output, assert no double external effect); pending-action execute-once under duplicate approvals.
+2. **Integration (Vitest + Docker Postgres, CI):** DBOS workflows against real Postgres — the full `handleTurn` with a stubbed model and stubbed transport; the **recovery replay test** (kill mid-flight, replay, diff output, assert no double external effect); **exactly-once state writes** (kill between a transactional step's work and any later point, assert the state mutation is neither lost nor double-applied); pending-action execute-once under duplicate approvals.
 3. **Eval (model-in-the-loop, on-demand):** the decision-9 scenarios — approve-after-delay, deny, abandon-by-unrelated-message, refine-the-pending-action, stale-action-at-execution — plus relatedness-classifier accuracy on a fixture set (including mixed Hebrew/English fixtures per assumption 1).
 
 Never in CI: real WhatsApp traffic, real calendar writes, real model calls. The transport is exercised only by the staged soak (manual, logged in `docs/`).
@@ -122,6 +123,7 @@ Never in CI: real WhatsApp traffic, real calendar writes, real model calls. The 
 **Always:**
 - Run `pnpm lint && pnpm test` before any commit; the determinism lint rule is CI-blocking.
 - Every external effect carries an idempotency key or declared delivery class (at-least-once / at-most-once) — no unclassified sends.
+- Every write to the structured state goes through a DBOS transactional step (decision 3) — never a plain step or a direct query; the atomic state-write + step-record commit is the exactly-once guarantee and it only holds inside a transactional step.
 - Every `tool_use` gets a `tool_result`, including denials and parks.
 - New/changed tools declare a risk tier; confirm-before tools declare a revalidation check.
 - Exact-pin every dependency; lockfile in every commit that touches deps.
@@ -130,7 +132,7 @@ Never in CI: real WhatsApp traffic, real calendar writes, real model calls. The 
 - Adding any dependency (anything WhatsApp-adjacent gets the full transitive review).
 - Database schema changes; changing a tool's risk tier; changing delivery class of a message type.
 - Anything that sends real WhatsApp traffic or touches the burner number.
-- Spending decisions (host provisioning, Neon tier, model-tier changes).
+- Spending decisions (host provisioning, backup storage (B2/R2), model-tier changes).
 
 **Never:**
 - Commit secrets, tokens, or Baileys session state.
@@ -146,7 +148,7 @@ Never in CI: real WhatsApp traffic, real calendar writes, real model calls. The 
 - [ ] `cache_control` verified through AI SDK provider passthrough: second identical-prefix call shows `cache_read_input_tokens > 0` (decision 4's named gate).
 - [ ] Host provisioned; Oracle reclamation policy re-verified against current docs, or Hetzner chosen.
 - [ ] Soak stages A, B, C passed and logged (decision 1).
-- [ ] Neon CU-hour numbers re-verified at provisioning (decision 8 flag).
+- [ ] Off-box encrypted backup pipeline (WAL archiving + base backups to B2/R2) running, and one restore into a scratch DB verified — an untested backup is a hypothesis (decision 8).
 
 **Functional (each verified by an eval or integration scenario):**
 - [ ] "Remind us at 7am" fires at 07:00 Asia/Jerusalem, at-least-once, logged in the sent-log.
