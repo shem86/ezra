@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+.env.*
+*.local
+# Baileys session state is secret-class and never committed (SPEC.md Boundaries)
+auth_state/
+baileys-session/
+*.creds.json

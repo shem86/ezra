@@ -1,0 +1,171 @@
+# Spec: Household AI Agent v1 (hh-assistant)
+
+> **Status: DRAFT — Phase 1 (Specify), awaiting human approval.**
+> Architecture decisions live in `household-ai-agent-architecture-v3_4.md` (the locked source of truth for *why*). This spec is the source of truth for *building*: scope, conventions, structure, verification, and boundaries. Where the two overlap, the architecture doc wins on rationale, this spec wins on implementation detail.
+
+## Confirmed facts (were assumptions; confirmed by the builder 2026-06-09)
+
+1. Household language is **mixed Hebrew + English** — prompts and eval fixtures cover both, including code-switched messages for the relatedness classifier.
+2. Package manager is **pnpm** with `save-exact` pinning and a committed lockfile (the pinning requirement in architecture decision 1 makes exact versions non-negotiable regardless of tool).
+3. Monthly Claude API budget for the runtime: **$10–30/mo** — the cost-control success criterion below derives from the upper bound.
+
+## Remaining assumptions
+
+4. Household timezone is **Asia/Jerusalem** — all reminder scheduling anchors to it, never to server time.
+5. Node 22 LTS, TypeScript strict mode, single-package repo (no monorepo — one process, one deployable).
+6. Local dev runs Postgres (journal + state + pgvector) via Docker Compose; production topology per architecture decision 8.
+7. Build order is gated: **Phase-0 spikes and the staged soak precede agent implementation** (per decisions 1 and 4 — no agent on an unsoaked transport, no cost plan without verified prompt caching).
+8. Test framework is Vitest; lint is ESLint (load-bearing, not a style choice — decision 3 requires a *custom ESLint rule* for workflow determinism, which rules out Biome for v1).
+
+→ Correct any of these now; otherwise they harden into the spec.
+
+## Objective
+
+A WhatsApp-based household assistant for two users (the builder and his wife) in a shared group, with dual goals: production-grade agentic-systems learning, and genuine daily utility. Reliability beats sophistication in every v1 trade-off (governing principle + blast-radius note in the architecture doc).
+
+**v1 capabilities (confirmed scope):**
+- Reminders / scheduling (proactive sends, anchored to household timezone)
+- Shared lists (groceries / todos)
+- Google Calendar read/write
+- Memory-backed household Q&A
+
+Everything else (subagents, self-improving loops, code execution) is explicitly later-phase.
+
+## Tech Stack
+
+| Layer | Choice | Locked by |
+|---|---|---|
+| Transport | Baileys (unofficial WhatsApp), burner number | Decision 1 |
+| Orchestration | DBOS (TS durable execution, embedded) | Decision 3 |
+| Reasoning | Vercel AI SDK Core primitives only (`generateText`/`generateObject` + Zod tools); DBOS owns the loop | Decision 4 |
+| Models | Claude via Console API key — Haiku-class routing/classification, Sonnet-class reasoning | Decision 6 |
+| State | Postgres: Neon (state + pgvector, PITR) + co-located journal Postgres on the box | Decisions 5, 8 |
+| Tracing | Langfuse | Decision 9 |
+| Host | Oracle PAYG if verified at provisioning, else Hetzner | Decision 7 |
+| Runtime/tooling | Node 22 LTS, TypeScript strict, pnpm (exact pins), Vitest, ESLint + custom determinism rule | Assumptions 3, 4, 7 |
+
+All dependency versions pinned exact; lockfile committed; WhatsApp-adjacent transitive tree reviewed per the burner-hygiene checklist (open item).
+
+## Commands
+
+The scaffold must provide these from day one (they are the verification interface for every task):
+
+```
+Dev DBs up:   docker compose up -d        # journal PG + state PG with pgvector
+Build:        pnpm build                  # tsc, strict
+Test:         pnpm test                   # vitest run (unit + integration; integration needs dev DBs)
+Lint:         pnpm lint                   # eslint, includes the custom DBOS-determinism rule; CI-failing
+Dev:          pnpm dev                    # run the agent locally against dev DBs, transport stubbed
+Eval:         pnpm eval                   # decision-9 scenario suite (model-in-the-loop; on-demand, not CI)
+Recovery:     pnpm test:recovery          # kill-mid-flight replay scenario (decision 3/9)
+```
+
+## Project Structure
+
+```
+src/transport/      Baileys socket, ingestion (durable-enqueue-before-ack), self-echo
+                    filter, send classes (at-least-once / at-most-once), sent-log
+src/orchestration/  DBOS workflows + queue config, consumer-side debounce,
+                    scheduled (timer) jobs
+src/agent/          handleTurn loop, model calls, prompt assembly, compaction,
+                    relatedness classifier
+src/tools/          typed tool definitions (Zod), risk tiers, idempotency keys,
+                    revalidation checks
+src/memory/         structured store (source of truth), semantic store (pgvector),
+                    routing rule, secret class
+src/hitl/           pending_actions store + status transitions, approval binding
+                    (quoted-reply), TTL GC
+src/ops/            socket-health monitor, independent alert channel, dead-man ping,
+                    config/secrets loading
+tests/              unit + integration (mirrors src/)
+evals/              decision-9 scenario suite + fixtures
+docs/               architecture doc, this spec, ADRs, recovery runbook, soak log
+infra/              compose files, host provisioning notes, egress allowlist
+```
+
+## Code Style
+
+Strict TS, no `any` at module boundaries, Zod at every boundary (inbound messages, tool args, model outputs). One representative snippet — a tool definition showing the conventions every tool follows (typed schema, risk tier, idempotency, revalidation):
+
+```ts
+export const createCalendarEvent = defineTool({
+  name: 'create_calendar_event',
+  description: 'Create an event on the shared household calendar.',
+  schema: z.object({
+    title: z.string().min(1),
+    startsAt: z.string().datetime({ offset: true }), // always tz-explicit, household tz
+    durationMin: z.number().int().positive().default(60),
+  }),
+  riskTier: 'confirm-before',
+  // Deterministic external ID: makes the create idempotent (decision 10).
+  externalId: (ctx) => `hh-${ctx.actionId}`,
+  // Re-checked at execute time, not propose time (approval window can be long).
+  revalidate: async (args, deps) => deps.calendar.isFree(args.startsAt, args.durationMin),
+  execute: async (args, deps, ctx) => deps.calendar.create({ ...args, id: ctx.externalId }),
+});
+```
+
+Conventions: kebab-case files, camelCase symbols, no default exports, dependency injection via a `deps` object (no module-level singletons — required for testability of workflows).
+
+## Testing Strategy
+
+Three levels, each owning a different failure class:
+
+1. **Unit (Vitest, CI):** pure logic — debounce grouping, idempotency-key derivation, send-class selection, status-transition guards, self-echo filtering, Zod schemas. No network, no DB.
+2. **Integration (Vitest + Docker Postgres, CI):** DBOS workflows against real Postgres — the full `handleTurn` with a stubbed model and stubbed transport; the **recovery replay test** (kill mid-flight, replay, diff output, assert no double external effect); pending-action execute-once under duplicate approvals.
+3. **Eval (model-in-the-loop, on-demand):** the decision-9 scenarios — approve-after-delay, deny, abandon-by-unrelated-message, refine-the-pending-action, stale-action-at-execution — plus relatedness-classifier accuracy on a fixture set (including mixed Hebrew/English fixtures per assumption 1).
+
+Never in CI: real WhatsApp traffic, real calendar writes, real model calls. The transport is exercised only by the staged soak (manual, logged in `docs/`).
+
+## Boundaries
+
+**Always:**
+- Run `pnpm lint && pnpm test` before any commit; the determinism lint rule is CI-blocking.
+- Every external effect carries an idempotency key or declared delivery class (at-least-once / at-most-once) — no unclassified sends.
+- Every `tool_use` gets a `tool_result`, including denials and parks.
+- New/changed tools declare a risk tier; confirm-before tools declare a revalidation check.
+- Exact-pin every dependency; lockfile in every commit that touches deps.
+
+**Ask first:**
+- Adding any dependency (anything WhatsApp-adjacent gets the full transitive review).
+- Database schema changes; changing a tool's risk tier; changing delivery class of a message type.
+- Anything that sends real WhatsApp traffic or touches the burner number.
+- Spending decisions (host provisioning, Neon tier, model-tier changes).
+
+**Never:**
+- Commit secrets, tokens, or Baileys session state.
+- Wire the agent to an unsoaked transport, or skip a soak stage.
+- Auto-execute a confirm-before tool, or block the consumer slot on a human.
+- Let secret-class data into prompts, semantic store, or Langfuse traces.
+- Restore Baileys session state from backup (re-pair via QR is the only recovery).
+- Remove or weaken a failing test/lint rule to make CI pass.
+
+## Success Criteria
+
+**Phase-0 gates (must pass before agent implementation):**
+- [ ] `cache_control` verified through AI SDK provider passthrough: second identical-prefix call shows `cache_read_input_tokens > 0` (decision 4's named gate).
+- [ ] Host provisioned; Oracle reclamation policy re-verified against current docs, or Hetzner chosen.
+- [ ] Soak stages A, B, C passed and logged (decision 1).
+- [ ] Neon CU-hour numbers re-verified at provisioning (decision 8 flag).
+
+**Functional (each verified by an eval or integration scenario):**
+- [ ] "Remind us at 7am" fires at 07:00 Asia/Jerusalem, at-least-once, logged in the sent-log.
+- [ ] Concurrent list edits from both spouses serialize with no lost update.
+- [ ] Calendar create round-trips with a deterministic event ID; re-execution is a no-op.
+- [ ] Household Q&A answers from the structured store for exact facts, semantic store for episodic recall.
+
+**Reliability (the blast-radius criteria):**
+- [ ] `kill -9` mid-turn: recovery completes the turn; no duplicate calendar event; reminder duplicates only within the declared at-least-once class.
+- [ ] Socket drop alerts on the independent channel within 5 minutes; host death alerts via dead-man's switch within 2× ping interval.
+- [ ] All five decision-9 HITL scenarios pass, including execute-once under double approval.
+- [ ] One full restore drill: state restored to scratch DB, diffed, and the recovery runbook's reconciliation steps executed against the sent-log.
+
+**Cost:**
+- [ ] Steady-state runtime spend ≤ $30/mo at realistic household volume, with prompt caching verified active (cache-read tokens visible in Langfuse traces) and Haiku-class handling routing/classification turns.
+
+## Open Questions
+
+1. **Soft TTL default for approvals** — proposing 12h (architecture says "hours to a day; exact value barely matters").
+2. **`MAX_ROUNDS` default** — proposing 8.
+3. **Bot persona name** for the group (also needed for the warming phase).
+4. Oracle vs Hetzner — deliberately resolved at provisioning per decision 7, not here.
