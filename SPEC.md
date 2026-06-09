@@ -14,7 +14,7 @@
 4. Household timezone is **Eastern Time Zone** — all reminder scheduling anchors to it, never to server time.
 5. Node 22 LTS, TypeScript strict mode, single-package repo (no monorepo — one process, one deployable).
 6. Local dev runs a single Postgres (journal + state + pgvector in one instance) via Docker Compose, mirroring the production single-Postgres topology — co-location is a correctness requirement (transactional steps, decision 3), so dev must not split what prod co-locates.
-7. Build order is gated: **Phase-0 spikes and the staged soak precede agent implementation** (per decisions 1 and 4 — no agent on an unsoaked transport, no cost plan without verified prompt caching).
+7. Build order is gated: **Phase-0 spikes precede agent implementation** (per decision 4 — no cost plan without verified prompt caching). Number acquisition, warming, and soak testing are **out of scope** for this project; the transport is assumed paired and usable.
 8. Test framework is Vitest; lint is ESLint (load-bearing, not a style choice — decision 3 requires a *custom ESLint rule* for workflow determinism, which rules out Biome for v1).
 
 → Hardened on spec approval (2026-06-09).
@@ -35,7 +35,7 @@ Everything else (subagents, self-improving loops, code execution) is explicitly 
 
 | Layer | Choice | Locked by |
 |---|---|---|
-| Transport | Baileys (unofficial WhatsApp), burner number | Decision 1 |
+| Transport | Baileys (unofficial WhatsApp); number provisioning out of scope | Decision 1 |
 | Orchestration | DBOS (TS durable execution, embedded) | Decision 3 |
 | Reasoning | Vercel AI SDK Core primitives only (`generateText`/`generateObject` + Zod tools); DBOS owns the loop | Decision 4 |
 | Models | Claude via Console API key — Haiku-class routing/classification, Sonnet-class reasoning | Decision 6 |
@@ -44,7 +44,7 @@ Everything else (subagents, self-improving loops, code execution) is explicitly 
 | Host | Oracle PAYG if verified at provisioning, else Hetzner | Decision 7 |
 | Runtime/tooling | Node 22 LTS, TypeScript strict, pnpm (exact pins), Vitest, ESLint + custom determinism rule | Assumptions 3, 4, 7 |
 
-All dependency versions pinned exact; lockfile committed; WhatsApp-adjacent transitive tree reviewed per the burner-hygiene checklist (open item).
+All dependency versions pinned exact; lockfile committed; WhatsApp-adjacent transitive tree reviewed per the supply-chain hygiene checklist (architecture open item).
 
 ## Commands
 
@@ -79,7 +79,7 @@ src/ops/            socket-health monitor, independent alert channel, dead-man p
                     config/secrets loading
 tests/              unit + integration (mirrors src/)
 evals/              decision-9 scenario suite + fixtures
-docs/               architecture doc, this spec, ADRs, recovery runbook, soak log
+docs/               architecture doc, this spec, ADRs, recovery runbook
 infra/              compose files, host provisioning notes, egress allowlist,
                     backup/PITR config (WAL archiving + base backups to B2/R2)
 ```
@@ -137,7 +137,7 @@ Three levels, each owning a different failure class:
 2. **Integration (Vitest + Docker Postgres, CI):** DBOS workflows against real Postgres — the full `handleTurn` with a stubbed model and stubbed transport; the **recovery replay test** (kill mid-flight, replay, diff output, assert no double external effect); **exactly-once state writes** (kill between a transactional step's work and any later point, assert the state mutation is neither lost nor double-applied); pending-action execute-once under duplicate approvals.
 3. **Eval (model-in-the-loop, on-demand):** the decision-9 scenarios — approve-after-delay, deny, abandon-by-unrelated-message, refine-the-pending-action, stale-action-at-execution — plus relatedness-classifier accuracy on a fixture set (including mixed Hebrew/English fixtures per assumption 1).
 
-Never in CI: real WhatsApp traffic, real calendar writes, real model calls. The transport is exercised only by the staged soak (manual, logged in `docs/`).
+Never in CI: real WhatsApp traffic, real calendar writes, real model calls. Real-traffic transport verification is out of scope for this project.
 
 ## Boundaries
 
@@ -152,12 +152,11 @@ Never in CI: real WhatsApp traffic, real calendar writes, real model calls. The 
 **Ask first:**
 - Adding any dependency (anything WhatsApp-adjacent gets the full transitive review).
 - Database schema changes; changing a tool's risk tier; changing delivery class of a message type.
-- Anything that sends real WhatsApp traffic or touches the burner number.
+- Anything that sends real WhatsApp traffic.
 - Spending decisions (host provisioning, backup storage (B2/R2), model-tier changes).
 
 **Never:**
 - Commit secrets, tokens, or Baileys session state.
-- Wire the agent to an unsoaked transport, or skip a soak stage.
 - Auto-execute a confirm-before tool, or block the consumer slot on a human.
 - Let secret-class data into prompts, semantic store, or Langfuse traces.
 - Restore Baileys session state from backup (re-pair via QR is the only recovery).
@@ -168,7 +167,6 @@ Never in CI: real WhatsApp traffic, real calendar writes, real model calls. The 
 **Phase-0 gates (must pass before agent implementation):**
 - [ ] `cache_control` verified through AI SDK provider passthrough: second identical-prefix call shows `cache_read_input_tokens > 0` (decision 4's named gate).
 - [ ] Host provisioned; Oracle reclamation policy re-verified against current docs, or Hetzner chosen.
-- [ ] Soak stages A, B, C passed and logged (decision 1).
 - [ ] Off-box encrypted backup pipeline (WAL archiving + base backups to B2/R2) running, and one restore into a scratch DB verified — an untested backup is a hypothesis (decision 8).
 
 **Functional (each verified by an eval or integration scenario):**
@@ -191,5 +189,5 @@ Never in CI: real WhatsApp traffic, real calendar writes, real model calls. The 
 1. **Soft TTL default for approvals** — proposing 12h (architecture says "hours to a day; exact value barely matters").
 2. **`MAX_ROUNDS` default** — proposing 8.
 3. **Compaction threshold and summary shape** — at what transcript size to compact, and what the summary keeps verbatim (e.g., open commitments) vs folds into semantic memory.
-4. **Bot persona name** for the group (also needed for the warming phase).
+4. **Bot persona name** for the group.
 5. Oracle vs Hetzner — deliberately resolved at provisioning per decision 7, not here.

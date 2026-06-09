@@ -1,30 +1,7 @@
 # Tasks: Household AI Agent v1 (hh-assistant)
 
 > **Status: DRAFT — Phase 3 (Tasks), awaiting human approval.**
-> Breakdown of `PLAN.md` (approved 2026-06-09). Tasks are dependency-ordered within each milestone; each is sized for one focused session and touches ≤ ~5 files. M0–M3 are fully specified; M4–M6 tasks are named and gated but get their full acceptance criteria refined at milestone entry (their shape depends on what M1/M3 validate). `[H]` marks tasks the builder does by hand (purchases, drills, approvals).
-
-## Track W — transport (start now; runs alongside everything)
-
-- [ ] **W1 [H]: Acquire burner and stand up the group**
-  - Acceptance: physical prepaid SIM purchased; WhatsApp registered on it; 2-person group created; both spouses have the number saved as a contact.
-  - Verify: manual; first entry written to `docs/soak-log.md`.
-  - Files: `docs/soak-log.md` (created).
-
-- [ ] **W2 [H]: Warming window (Stage A)**
-  - Acceptance: 1–2 weeks of realistic human traffic on the number, logged; no enforcement events.
-  - Verify: soak-log entries spanning the window; connection stable once M2 harness observes it.
-  - Files: `docs/soak-log.md`.
-  - Depends on: W1.
-
-- [ ] **W3 [H]: Stage B — low-rate bot soak** *(gated on M2)*
-  - Acceptance: ≥5 days of one harness-driven proactive send/day with human-like delays; ≥1 forced reconnect; no enforcement.
-  - Verify: soak log + harness logs.
-  - Depends on: W2, T14.
-
-- [ ] **W4 [H]: Stage C — ramp**
-  - Acceptance: proactive cadence raised stepwise to expected v1 volume; no enforcement over the ramp.
-  - Verify: soak log. Gate for M6.
-  - Depends on: W3.
+> Breakdown of `PLAN.md` (approved 2026-06-09). Tasks are dependency-ordered within each milestone; each is sized for one focused session and touches ≤ ~5 files. M0–M3 are fully specified; M4–M6 tasks are named and gated but get their full acceptance criteria refined at milestone entry (their shape depends on what M1/M3 validate). `[H]` marks tasks the builder does by hand (drills, approvals, external accounts). Number acquisition, warming, and soak testing are out of scope; tasks assume a paired, usable WhatsApp number.
 
 ## M0 — Scaffold
 
@@ -87,13 +64,13 @@
   - Verify: gate recorded in the doc with a date.
   - Depends on: T7, T8, T9.
 
-## M2 — Transport soak harness (agent-free)
+## M2 — Transport adapter + ops monitoring (agent-free)
 
 - [ ] **T11: Transport interface + Baileys connection**
   - Acceptance: `Transport` interface (connect, send, onMessage, onStateChange, forceReconnect) that M3's stub and M6's real adapter both implement; Baileys connects with session state persisted to a configurable writable dir; QR pairing flow documented; session dir is gitignored and never backed up for restore (re-pair on loss).
-  - Verify: manual pairing against the warmed burner; reconnect after process restart without re-pairing.
+  - Verify: manual pairing with the project's WhatsApp number (provisioning out of scope); reconnect after process restart without re-pairing.
   - Files: `src/transport/types.ts`, `src/transport/baileys.ts`, `src/transport/session-store.ts`, `docs/pairing.md`.
-  - Depends on: T6, W1.
+  - Depends on: T6; needs a paired WhatsApp number available.
 
 - [ ] **T12: Health monitoring + independent alerting + dead-man ping**
   - Acceptance: socket-state monitor emitting down-alerts over a non-WhatsApp channel (Telegram bot unless builder objects at T10); scheduled dead-man ping to an external check service; both configurable via T6 config.
@@ -101,15 +78,15 @@
   - Files: `src/ops/health.ts`, `src/ops/alerts.ts`, `src/ops/deadman.ts`, `tests/unit/health.test.ts`.
   - Depends on: T11.
 
-- [ ] **T13: Soak harness entry point**
-  - Acceptance: standalone runnable (`pnpm soak`) that connects, monitors, sends one configurable daily proactive message with human-like delay jitter, supports a forced-reconnect command, and appends structured entries to the soak log. No LLM, no DB beyond the log.
-  - Verify: dry-run locally; one real send to the group.
-  - Files: `src/soak/harness.ts`, `package.json`, `docs/soak-log.md`.
+- [ ] **T13: Standalone transport runner**
+  - Acceptance: standalone runnable (`pnpm transport`) that connects, monitors, supports a manual test send (human-like delay jitter) and a forced-reconnect command. No LLM, no DB writes.
+  - Verify: dry-run locally; one manual test send arrives in the group.
+  - Files: `src/transport/runner.ts`, `package.json`.
   - Depends on: T11, T12.
 
 - [ ] **T14 [H]: M2 operational drill**
-  - Acceptance: on the running harness — socket kill produces an alert on the independent channel; process kill trips the dead-man within 2× ping interval; forced reconnect recovers cleanly. Results logged.
-  - Verify: manual drill, soak-log entries. **Unblocks W3.**
+  - Acceptance: on the running transport runner — socket kill produces an alert on the independent channel; process kill trips the dead-man within 2× ping interval; forced reconnect recovers cleanly. Results logged.
+  - Verify: manual drill; results in `docs/ops-drills.md`.
   - Depends on: T13.
 
 ## M2.5 — Host + backups (parallel to M3–M5; all required before M6)
@@ -191,17 +168,17 @@
 - [ ] **T40: Calendar tools — deterministic event IDs from action_id, confirm-before tier, revalidation (slot still free)**
 - [ ] **T41: Round-trip gate — create/read on a test calendar; re-execute no-ops; manufactured conflict caught**
 
-## M6 — Wire-up and launch *(refined at milestone entry; requires W4, T17, M5 gate)*
+## M6 — Wire-up and launch *(refined at milestone entry; requires T14, T17, M5 gate)*
 
-- [ ] **T42: Swap stub for soaked Baileys adapter; durable-enqueue-before-ack against the real socket**
+- [ ] **T42: Swap stub for the M2 Baileys adapter; durable-enqueue-before-ack against the real socket**
 - [ ] **T43: Send classes live — at-least-once (reminders, nags, approval prompts; send-then-log) and at-most-once (echoes; log-then-send) against `sent_log`**
 - [ ] **T44: Recovery runbook (`docs/recovery-runbook.md`) + full restore drill incl. external-effect reconciliation**
 - [ ] **T45 [H]: Deploy hardened process to host; egress allowlist final**
-- [ ] **T46 [H]: Launch sweep — SPEC success-criteria checklist top to bottom; ramp per Stage C**
+- [ ] **T46 [H]: Launch sweep — SPEC success-criteria checklist top to bottom**
 
 ## Sequencing notes
 
-- Start today: W1 (hand) + T1–T6 (code). W2's clock runs while M0/M1 land.
+- Start with T1–T6 (scaffold batch).
 - T7/T8/T9 are independent — good parallel batch after M0.
-- T11 needs W1 (a number to pair with) — schedule M2 right after the SIM exists, even if warming is mid-window.
+- T11 needs a paired WhatsApp number available (provisioning out of scope) — everything else in M2–M5 proceeds without it via the stub transport.
 - M4 tasks stay coarse on purpose: T25's exact shape depends on T7's verdict, T29's threshold on real transcript sizes from T33's scripted days. Refine at milestone entry per the living-document rule.
