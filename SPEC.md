@@ -1,6 +1,6 @@
 # Spec: Household AI Agent v1 (hh-assistant)
 
-> **Status: DRAFT — Phase 1 (Specify), awaiting human approval.**
+> **Status: APPROVED 2026-06-09 — Phase 2 (Plan) in progress, see `PLAN.md`.**
 > Architecture decisions live in `household-ai-agent-architecture-v3_5.md` (the locked source of truth for *why*). This spec is the source of truth for *building*: scope, conventions, structure, verification, and boundaries. Where the two overlap, the architecture doc wins on rationale, this spec wins on implementation detail.
 
 ## Confirmed facts (were assumptions; confirmed by the builder 2026-06-09)
@@ -17,7 +17,7 @@
 7. Build order is gated: **Phase-0 spikes and the staged soak precede agent implementation** (per decisions 1 and 4 — no agent on an unsoaked transport, no cost plan without verified prompt caching).
 8. Test framework is Vitest; lint is ESLint (load-bearing, not a style choice — decision 3 requires a *custom ESLint rule* for workflow determinism, which rules out Biome for v1).
 
-→ Correct any of these now; otherwise they harden into the spec.
+→ Hardened on spec approval (2026-06-09).
 
 ## Objective
 
