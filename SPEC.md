@@ -11,7 +11,7 @@
 
 ## Remaining assumptions
 
-4. Household timezone is **Asia/Jerusalem** — all reminder scheduling anchors to it, never to server time.
+4. Household timezone is **Eastern Time Zone** — all reminder scheduling anchors to it, never to server time.
 5. Node 22 LTS, TypeScript strict mode, single-package repo (no monorepo — one process, one deployable).
 6. Local dev runs a single Postgres (journal + state + pgvector in one instance) via Docker Compose, mirroring the production single-Postgres topology — co-location is a correctness requirement (transactional steps, decision 3), so dev must not split what prod co-locates.
 7. Build order is gated: **Phase-0 spikes and the staged soak precede agent implementation** (per decisions 1 and 4 — no agent on an unsoaked transport, no cost plan without verified prompt caching).
@@ -71,8 +71,8 @@ src/agent/          handleTurn loop, model calls, prompt assembly, compaction,
                     relatedness classifier
 src/tools/          typed tool definitions (Zod), risk tiers, idempotency keys,
                     revalidation checks
-src/memory/         structured store (source of truth), semantic store (pgvector),
-                    routing rule, secret class
+src/memory/         structured store (source of truth), semantic store (pgvector,
+                    pull-only recall tool), routing rule, secret class
 src/hitl/           pending_actions store + status transitions, approval binding
                     (quoted-reply), TTL GC
 src/ops/            socket-health monitor, independent alert channel, dead-man ping,
@@ -83,6 +83,27 @@ docs/               architecture doc, this spec, ADRs, recovery runbook, soak lo
 infra/              compose files, host provisioning notes, egress allowlist,
                     backup/PITR config (WAL archiving + base backups to B2/R2)
 ```
+
+## Runtime Model: Sessions, Turns, and Context
+
+How the single agent serves two users and many co-living tasks (grounded in architecture decisions 2, 4, 10; the items marked **locked here** are spec-level decisions made on top of them).
+
+**No resident sessions.** The agent is a sequence of short-lived durable turns, not a long-lived process holding a conversation open. All continuity — conversation memory, in-flight tasks, schedules — lives in Postgres, never in process memory.
+
+**One lane, three event sources.** A single DBOS queue (keyed by the group conversation, concurrency 1) receives everything that makes the agent act: debounced human message batches, scheduled-job firings, and approval/denial events. Exactly one turn executes at a time; tasks **co-exist** freely as state (pending_actions rows, scheduled workflows, store rows) but never **co-execute**. Single-step tasks start and finish inside one turn; approval tasks park as rows (fire-and-fold) and resume in a fresh turn; scheduled tasks just enqueue a proactive turn into the same lane.
+
+**Context lifecycle per turn:**
+- Every turn starts with a `loadContext(convId)` step (the persisted model-message transcript) and ends with `persistContext`. The concurrency-1 consumer is the transcript's only writer, so there is no context-merge problem by construction.
+- Within a turn, `msgs` is workflow-local; each step records only its delta (assistant message, tool result), and replay rebuilds the transcript deterministically. The full transcript is never journaled per step.
+- The live window is bounded by two mechanisms: `cache_control` on the stable prefix (system + tool defs + older turns; gated on the Phase-0 passthrough spike) and compaction (threshold-crossing summarize-and-truncate that folds older turns into the semantic store, idempotency-keyed).
+
+**Truth vs continuity.** Exact facts (lists, reminders, schedules, household facts) are never trusted to the transcript — they are read through typed tools at the moment of use. The transcript records that a read/write happened; the database is the truth. Secret-class data never enters context, traces, or the semantic store.
+
+**Cross-turn task state is injected, not remembered:**
+- A parked action's real outcome enters the resuming turn as a *new* context message — never a second `tool_result` for the already-answered `tool_use` (architecture decision 10's transcript note).
+- **Locked here:** turn assembly injects a small digest of currently outstanding pending actions every turn, so the reasoning model always sees what is in flight (the relatedness classifier decides what a new message *means* for them; the digest is how the model knows they exist).
+
+**Semantic recall is pull-only (locked here).** Episodic recall from pgvector happens through a retrieval tool the model invokes when it judges it needs history — nothing is auto-attached top-k per turn. Rationale: cheaper, and auto-attached recall pollutes context with irrelevant history. Revisit only if evals show the model under-recalls.
 
 ## Code Style
 
@@ -151,7 +172,7 @@ Never in CI: real WhatsApp traffic, real calendar writes, real model calls. The 
 - [ ] Off-box encrypted backup pipeline (WAL archiving + base backups to B2/R2) running, and one restore into a scratch DB verified — an untested backup is a hypothesis (decision 8).
 
 **Functional (each verified by an eval or integration scenario):**
-- [ ] "Remind us at 7am" fires at 07:00 Asia/Jerusalem, at-least-once, logged in the sent-log.
+- [ ] "Remind us at 7am" fires at 07:00 Eastern Time Zone, at-least-once, logged in the sent-log.
 - [ ] Concurrent list edits from both spouses serialize with no lost update.
 - [ ] Calendar create round-trips with a deterministic event ID; re-execution is a no-op.
 - [ ] Household Q&A answers from the structured store for exact facts, semantic store for episodic recall.
@@ -169,5 +190,6 @@ Never in CI: real WhatsApp traffic, real calendar writes, real model calls. The 
 
 1. **Soft TTL default for approvals** — proposing 12h (architecture says "hours to a day; exact value barely matters").
 2. **`MAX_ROUNDS` default** — proposing 8.
-3. **Bot persona name** for the group (also needed for the warming phase).
-4. Oracle vs Hetzner — deliberately resolved at provisioning per decision 7, not here.
+3. **Compaction threshold and summary shape** — at what transcript size to compact, and what the summary keeps verbatim (e.g., open commitments) vs folds into semantic memory.
+4. **Bot persona name** for the group (also needed for the warming phase).
+5. Oracle vs Hetzner — deliberately resolved at provisioning per decision 7, not here.
