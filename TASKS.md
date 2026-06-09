@@ -1,0 +1,207 @@
+# Tasks: Household AI Agent v1 (hh-assistant)
+
+> **Status: DRAFT — Phase 3 (Tasks), awaiting human approval.**
+> Breakdown of `PLAN.md` (approved 2026-06-09). Tasks are dependency-ordered within each milestone; each is sized for one focused session and touches ≤ ~5 files. M0–M3 are fully specified; M4–M6 tasks are named and gated but get their full acceptance criteria refined at milestone entry (their shape depends on what M1/M3 validate). `[H]` marks tasks the builder does by hand (purchases, drills, approvals).
+
+## Track W — transport (start now; runs alongside everything)
+
+- [ ] **W1 [H]: Acquire burner and stand up the group**
+  - Acceptance: physical prepaid SIM purchased; WhatsApp registered on it; 2-person group created; both spouses have the number saved as a contact.
+  - Verify: manual; first entry written to `docs/soak-log.md`.
+  - Files: `docs/soak-log.md` (created).
+
+- [ ] **W2 [H]: Warming window (Stage A)**
+  - Acceptance: 1–2 weeks of realistic human traffic on the number, logged; no enforcement events.
+  - Verify: soak-log entries spanning the window; connection stable once M2 harness observes it.
+  - Files: `docs/soak-log.md`.
+  - Depends on: W1.
+
+- [ ] **W3 [H]: Stage B — low-rate bot soak** *(gated on M2)*
+  - Acceptance: ≥5 days of one harness-driven proactive send/day with human-like delays; ≥1 forced reconnect; no enforcement.
+  - Verify: soak log + harness logs.
+  - Depends on: W2, T14.
+
+- [ ] **W4 [H]: Stage C — ramp**
+  - Acceptance: proactive cadence raised stepwise to expected v1 volume; no enforcement over the ramp.
+  - Verify: soak log. Gate for M6.
+  - Depends on: W3.
+
+## M0 — Scaffold
+
+- [ ] **T1: Repo + TypeScript scaffold**
+  - Acceptance: pnpm project with `save-exact` enforced via `.npmrc`; strict `tsconfig.json`; `src/index.ts` placeholder; `pnpm build` compiles.
+  - Verify: `pnpm build`.
+  - Files: `package.json`, `.npmrc`, `tsconfig.json`, `src/index.ts`.
+
+- [ ] **T2: Vitest wiring**
+  - Acceptance: `pnpm test` runs a passing smoke test; unit/integration split configured (integration suite skipped when DB env is absent).
+  - Verify: `pnpm test`.
+  - Files: `vitest.config.ts`, `tests/unit/smoke.test.ts`, `package.json`.
+
+- [ ] **T3: ESLint baseline**
+  - Acceptance: flat-config ESLint with TS support; `pnpm lint` clean on scaffold; rule slot reserved for the custom determinism rule (T9).
+  - Verify: `pnpm lint`.
+  - Files: `eslint.config.js`, `package.json`.
+
+- [ ] **T4: Dev database (single Postgres + pgvector)**
+  - Acceptance: `docker compose up -d` starts one Postgres with pgvector; a connect-and-`CREATE EXTENSION vector` smoke check passes. Note in `infra/README.md`: local runtime is Colima on the dev Mac; CI (Linux) is the arbiter.
+  - Verify: `pnpm test` integration smoke against the dev DB.
+  - Files: `docker-compose.yml`, `infra/README.md`, `.env.example`, `tests/integration/db-smoke.test.ts`.
+  - Depends on: T2.
+
+- [ ] **T5: CI pipeline**
+  - Acceptance: GitHub Actions running `pnpm build && pnpm lint && pnpm test` with a Postgres+pgvector service container; red CI blocks merge.
+  - Verify: CI green on a pushed branch.
+  - Files: `.github/workflows/ci.yml`.
+  - Depends on: T1–T4.
+
+- [ ] **T6: Config and secrets loading**
+  - Acceptance: env-based config module, Zod-validated at startup with clear failure messages; placeholders for Anthropic key, Langfuse keys, DB URL, alert-channel token; no secret ever read outside this module.
+  - Verify: unit tests (valid env passes, missing/invalid env fails loudly).
+  - Files: `src/ops/config.ts`, `tests/unit/config.test.ts`, `.env.example`.
+  - Depends on: T1, T2.
+  - **Gate M0 complete:** CI green end-to-end.
+
+## M1 — De-risking spikes (T7–T9 parallelizable)
+
+- [ ] **T7: Prompt-caching spike (SPEC Phase-0 gate)**
+  - Acceptance: script calls Claude twice via AI SDK Core with `cache_control` on a stable prefix through provider passthrough; usage fields captured; result (cache_read tokens > 0, or failure) written to `docs/spike-results.md`. On failure: stop, surface the `@anthropic-ai/sdk` escape-hatch decision to the builder before M4.
+  - Verify: run `spikes/cache-control.ts` twice; read the recorded usage numbers.
+  - Files: `spikes/cache-control.ts`, `docs/spike-results.md`, `package.json`.
+  - Depends on: T6.
+
+- [ ] **T8: DBOS semantics spike (SPEC Phase-0 foundation)**
+  - Acceptance: committed integration test proving, against the dev Postgres: (1) transactional step = state write + step record atomic; (2) kill-mid-flight then recover replays to identical output with no double effect; (3) queue concurrency-1 FIFO; (4) a scheduled workflow fires; (5) journal/state/pgvector co-reside in one Postgres. DBOS version pinned to what this validates.
+  - Verify: `pnpm test` (spike suite); kill/replay test green.
+  - Files: `spikes/dbos/spike.ts`, `tests/integration/dbos-spike.test.ts`, `package.json`, `docs/spike-results.md`.
+  - Depends on: T4.
+
+- [ ] **T9: Determinism ESLint rule**
+  - Acceptance: custom rule bans `Date.now`/`new Date`, `Math.random`, `process.env` reads, and direct I/O calls inside `@DBOS.workflow` function bodies; red on violation fixtures, green on clean fixtures; wired into `pnpm lint` as CI-failing.
+  - Verify: rule's own fixture tests + `pnpm lint`.
+  - Files: `eslint-rules/no-nondeterminism-in-workflow.ts`, `eslint-rules/no-nondeterminism-in-workflow.test.ts`, `eslint.config.js`.
+  - Depends on: T3.
+
+- [ ] **T10 [H]: M1 gate review**
+  - Acceptance: builder reads `docs/spike-results.md`; caching confirmed or escape hatch decided; DBOS version pin accepted.
+  - Verify: gate recorded in the doc with a date.
+  - Depends on: T7, T8, T9.
+
+## M2 — Transport soak harness (agent-free)
+
+- [ ] **T11: Transport interface + Baileys connection**
+  - Acceptance: `Transport` interface (connect, send, onMessage, onStateChange, forceReconnect) that M3's stub and M6's real adapter both implement; Baileys connects with session state persisted to a configurable writable dir; QR pairing flow documented; session dir is gitignored and never backed up for restore (re-pair on loss).
+  - Verify: manual pairing against the warmed burner; reconnect after process restart without re-pairing.
+  - Files: `src/transport/types.ts`, `src/transport/baileys.ts`, `src/transport/session-store.ts`, `docs/pairing.md`.
+  - Depends on: T6, W1.
+
+- [ ] **T12: Health monitoring + independent alerting + dead-man ping**
+  - Acceptance: socket-state monitor emitting down-alerts over a non-WhatsApp channel (Telegram bot unless builder objects at T10); scheduled dead-man ping to an external check service; both configurable via T6 config.
+  - Verify: unit tests for state transitions; manual: kill socket → alert arrives; stop process → external dead-man fires.
+  - Files: `src/ops/health.ts`, `src/ops/alerts.ts`, `src/ops/deadman.ts`, `tests/unit/health.test.ts`.
+  - Depends on: T11.
+
+- [ ] **T13: Soak harness entry point**
+  - Acceptance: standalone runnable (`pnpm soak`) that connects, monitors, sends one configurable daily proactive message with human-like delay jitter, supports a forced-reconnect command, and appends structured entries to the soak log. No LLM, no DB beyond the log.
+  - Verify: dry-run locally; one real send to the group.
+  - Files: `src/soak/harness.ts`, `package.json`, `docs/soak-log.md`.
+  - Depends on: T11, T12.
+
+- [ ] **T14 [H]: M2 operational drill**
+  - Acceptance: on the running harness — socket kill produces an alert on the independent channel; process kill trips the dead-man within 2× ping interval; forced reconnect recovers cleanly. Results logged.
+  - Verify: manual drill, soak-log entries. **Unblocks W3.**
+  - Depends on: T13.
+
+## M2.5 — Host + backups (parallel to M3–M5; all required before M6)
+
+- [ ] **T15 [H]: Provision host** — Oracle PAYG with reclamation policy re-verified that week, else Hetzner; decision + evidence in `infra/host.md`.
+- [ ] **T16: Production runtime hardening** — non-root service user, read-only rootfs, writable volumes only for Baileys session + Postgres data, egress allowlist v0 (Anthropic, Google, B2/R2, alert channel, WhatsApp iterated), secrets injected at runtime. Files: `infra/` (compose/systemd + allowlist). Verify: process runs hardened; blocked egress to a non-listed host confirmed.
+- [ ] **T17: Backup pipeline + restore drill (SPEC Phase-0 gate)** — WAL archiving + base backups, client-side encrypted, to B2/R2; restore into a scratch DB and diff. Files: `infra/backup/`. Verify: documented successful restore. Depends on: T15.
+
+## M3 — Durable core (stubbed model, stubbed transport)
+
+- [ ] **T18: Structured store schema v0**
+  - Acceptance: migrations for `lists`, `reminders`, `household_facts` (with secret-class flag), `pending_actions`, `sent_log`, `conversation_context`; migration runner wired into dev/CI setup.
+  - Verify: migrations apply cleanly in CI; store round-trip tests.
+  - Files: `migrations/*.sql`, `src/memory/store.ts`, `tests/integration/store.test.ts`.
+  - Depends on: T8 (validated DBOS/Postgres setup).
+
+- [ ] **T19: Step helpers — transactional writes + idempotency keys**
+  - Acceptance: helper enforcing every structured-state write goes through a DBOS transactional step (SPEC boundary); `(workflowID, stepNumber)` idempotency-key helper for external effects; both unit-tested.
+  - Verify: `pnpm test`; exactly-once write test (kill around the step, state neither lost nor doubled).
+  - Files: `src/orchestration/steps.ts`, `tests/integration/steps.test.ts`.
+  - Depends on: T18.
+
+- [ ] **T20: Ingestion seam — durable-enqueue-before-ack**
+  - Acceptance: inbound message contract (Zod); stub transport implementing the `Transport` interface with explicit ack callback; ingestion enqueues durably *then* acks; self-echo (`fromMe`) filtered; crash-between-receive-and-enqueue test shows redelivery path (un-acked message not lost).
+  - Verify: integration tests including the crash window.
+  - Files: `src/orchestration/ingest.ts`, `src/transport/stub.ts`, `tests/integration/ingest.test.ts`.
+  - Depends on: T11 (interface), T19.
+
+- [ ] **T21: Conversation queue + consumer-side debounce**
+  - Acceptance: one concurrency-1 DBOS queue keyed by conversation; dequeue groups a sender's rapid bubbles within the silence window (1.5–3s, configurable) into one batch; FIFO across human + proactive items.
+  - Verify: integration tests — debounce grouping, no pre-enqueue holding, FIFO interleave with a proactive job.
+  - Files: `src/orchestration/queue.ts`, `src/orchestration/debounce.ts`, `tests/integration/queue.test.ts`.
+  - Depends on: T20.
+
+- [ ] **T22: `handleTurn` skeleton + context persistence**
+  - Acceptance: the SPEC loop shape with stubbed `callModel` (scripted tool calls); `loadContext`/`persistContext` steps; every `tool_use` answered incl. deny/park paths; `MAX_ROUNDS` cap with forced final message; msgs never journaled whole.
+  - Verify: integration tests for loop invariants; recovery replay on the skeleton.
+  - Files: `src/agent/handle-turn.ts`, `src/agent/context.ts`, `tests/integration/handle-turn.test.ts`.
+  - Depends on: T19, T21.
+
+- [ ] **T23: Scheduled reminders → proactive turns**
+  - Acceptance: DBOS scheduled workflows that enqueue proactive turns into the same lane; reminder times anchored to household timezone (Eastern), never server time.
+  - Verify: integration test — scheduled job waits behind an in-flight turn; tz conversion unit tests.
+  - Files: `src/orchestration/scheduled.ts`, `tests/integration/scheduled.test.ts`, `tests/unit/tz.test.ts`.
+  - Depends on: T21.
+
+- [ ] **T24: M3 reliability suite (`pnpm test:recovery`)**
+  - Acceptance: the named gate tests in one suite — recovery replay (kill mid-flight, diff vs uninterrupted, no double effect), exactly-once state write, execute-once pending-action guard under duplicate approvals (table + guard land here even though full HITL is M5), debounce grouping, FIFO ordering.
+  - Verify: `pnpm test:recovery` green in CI.
+  - Files: `tests/integration/recovery.test.ts`, `src/hitl/pending-actions.ts`, `package.json`.
+  - Depends on: T22, T23.
+  - **Gate M3 complete.**
+
+## M4 — Reasoning layer *(full acceptance criteria refined at milestone entry)*
+
+- [ ] **T25: `callModel` via AI SDK Core + prompt caching (per T7's verdict); model-call step records assistant msg + tool_use ids atomically**
+- [ ] **T26: Tool registry — `defineTool` (Zod schema, risk tier, idempotency, revalidation hooks)**
+- [ ] **T27: Tools — lists, reminders, household facts read/write**
+- [ ] **T28: Pull-only semantic recall tool (pgvector) + embedding write path**
+- [ ] **T29: Compaction step (threshold per Open Q3 proposal: ~30 turns; idempotency-keyed; open commitments kept verbatim)**
+- [ ] **T30: Haiku router (cheap-vs-reasoning model selection)**
+- [ ] **T31: Langfuse tracing on every step; secret-class redaction in traces**
+- [ ] **T32: System prompt + mixed Hebrew/English fixture set; pending-actions digest injection slot**
+- [ ] **T33 [H]: Cost gate — measure per-turn cost on realistic scripted days, extrapolate ≤ $30/mo; cache reads visible in traces**
+  - **Gate M4 complete:** every tool exercised through `pnpm dev` stub conversations; T33 numbers recorded.
+
+## M5 — HITL *(refined at milestone entry)*
+
+- [ ] **T34: Fire-and-fold park path (synthetic pending result, `pending_actions` row, approval prompt as closing message)**
+- [ ] **T35: Quoted-reply approval binding + fresh-turn execution (status transitions from T24, revalidation, result injected as new context message)**
+- [ ] **T36: Relatedness classifier (Haiku) — refine / unrelated / approve-deny routing while actions pend**
+- [ ] **T37: TTL GC + gentle expiry surfacing**
+- [ ] **T38: Eval harness (`pnpm eval`) + the five SPEC scenarios incl. code-switched fixtures**
+  - **Gate M5 complete:** all five scenarios pass + execute-once under double approval.
+
+## M5.5 — Calendar *(parallel after T26)*
+
+- [ ] **T39 [H]: Google Cloud project, OAuth consent, scopes, refresh-token storage as secret-class**
+- [ ] **T40: Calendar tools — deterministic event IDs from action_id, confirm-before tier, revalidation (slot still free)**
+- [ ] **T41: Round-trip gate — create/read on a test calendar; re-execute no-ops; manufactured conflict caught**
+
+## M6 — Wire-up and launch *(refined at milestone entry; requires W4, T17, M5 gate)*
+
+- [ ] **T42: Swap stub for soaked Baileys adapter; durable-enqueue-before-ack against the real socket**
+- [ ] **T43: Send classes live — at-least-once (reminders, nags, approval prompts; send-then-log) and at-most-once (echoes; log-then-send) against `sent_log`**
+- [ ] **T44: Recovery runbook (`docs/recovery-runbook.md`) + full restore drill incl. external-effect reconciliation**
+- [ ] **T45 [H]: Deploy hardened process to host; egress allowlist final**
+- [ ] **T46 [H]: Launch sweep — SPEC success-criteria checklist top to bottom; ramp per Stage C**
+
+## Sequencing notes
+
+- Start today: W1 (hand) + T1–T6 (code). W2's clock runs while M0/M1 land.
+- T7/T8/T9 are independent — good parallel batch after M0.
+- T11 needs W1 (a number to pair with) — schedule M2 right after the SIM exists, even if warming is mid-window.
+- M4 tasks stay coarse on purpose: T25's exact shape depends on T7's verdict, T29's threshold on real transcript sizes from T33's scripted days. Refine at milestone entry per the living-document rule.

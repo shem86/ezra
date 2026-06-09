@@ -1,6 +1,6 @@
 # Plan: Household AI Agent v1 (hh-assistant)
 
-> **Status: DRAFT — Phase 2 (Plan), awaiting human approval.**
+> **Status: APPROVED 2026-06-09 — Phase 3 (Tasks) in progress, see `TASKS.md`.**
 > Derived from `SPEC.md` (approved 2026-06-09) and `household-ai-agent-architecture-v3_5.md`. This is the implementation strategy: build order, dependencies, risks, verification gates. Phase 3 (Tasks) breaks the approved version of this into per-session tasks.
 
 ## Shape of the plan
