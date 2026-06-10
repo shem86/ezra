@@ -97,7 +97,7 @@
 
 ## M3 — Durable core (stubbed model, stubbed transport)
 
-- [ ] **T18: Structured store schema v0**
+- [x] **T18: Structured store schema v0** *(done 2026-06-09: 0001-structured-store-v0.sql + forward-only runner (`pnpm migrate`; CI applies via the integration suite); store accessors take a Queryable so T19 can run them inside datasource transactions)*
   - Acceptance: migrations for `lists`, `reminders`, `household_facts` (with secret-class flag), `pending_actions`, `sent_log`, `conversation_context`; migration runner wired into dev/CI setup.
   - Verify: migrations apply cleanly in CI; store round-trip tests.
   - Files: `migrations/*.sql`, `src/memory/store.ts`, `tests/integration/store.test.ts`.
