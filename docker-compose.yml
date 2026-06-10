@@ -1,0 +1,22 @@
+# Dev database: ONE Postgres holding DBOS journal + structured state + pgvector.
+# Co-location mirrors prod and is a correctness requirement (SPEC assumption 6).
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: hh-postgres
+    environment:
+      POSTGRES_USER: hh
+      POSTGRES_PASSWORD: hh
+      POSTGRES_DB: hh_assistant
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hh -d hh_assistant"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:

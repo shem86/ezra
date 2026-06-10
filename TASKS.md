@@ -20,7 +20,7 @@
   - Verify: `pnpm lint`.
   - Files: `eslint.config.js`, `package.json`.
 
-- [ ] **T4: Dev database (single Postgres + pgvector)**
+- [x] **T4: Dev database (single Postgres + pgvector)** *(done 2026-06-09)*
   - Acceptance: `docker compose up -d` starts one Postgres with pgvector; a connect-and-`CREATE EXTENSION vector` smoke check passes. Note in `infra/README.md`: local runtime is Colima on the dev Mac; CI (Linux) is the arbiter.
   - Verify: `pnpm test` integration smoke against the dev DB.
   - Files: `docker-compose.yml`, `infra/README.md`, `.env.example`, `tests/integration/db-smoke.test.ts`.
