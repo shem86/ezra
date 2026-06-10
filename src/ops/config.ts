@@ -27,6 +27,42 @@ export interface Config {
   readonly waSessionDir: string;
 }
 
+function formatIssues(issues: Array<{ path: PropertyKey[]; message: string }>): string {
+  return issues.map((issue) => `  ${issue.path.join('.')}: ${issue.message}`).join('\n');
+}
+
+// Narrow loader for the standalone transport runner (T13): connecting,
+// monitoring, and alerting need no LLM or DB keys — demanding them would be
+// a false coupling.
+export interface TransportOpsConfig {
+  readonly waSessionDir: string;
+  readonly alertChannelToken: string;
+  readonly alertChannelChatId: string;
+  readonly deadmanPingUrl: string;
+}
+
+export function loadTransportOpsConfig(
+  env: Record<string, string | undefined> = process.env,
+): TransportOpsConfig {
+  const parsed = envSchema
+    .pick({
+      WA_SESSION_DIR: true,
+      ALERT_CHANNEL_TOKEN: true,
+      ALERT_CHANNEL_CHAT_ID: true,
+      DEADMAN_PING_URL: true,
+    })
+    .safeParse(env);
+  if (!parsed.success) {
+    throw new Error(`Invalid environment configuration:\n${formatIssues(parsed.error.issues)}`);
+  }
+  return {
+    waSessionDir: parsed.data.WA_SESSION_DIR,
+    alertChannelToken: parsed.data.ALERT_CHANNEL_TOKEN,
+    alertChannelChatId: parsed.data.ALERT_CHANNEL_CHAT_ID,
+    deadmanPingUrl: parsed.data.DEADMAN_PING_URL,
+  };
+}
+
 // Narrow loader for the pairing CLI — pairing needs no API keys.
 export function loadWaSessionDir(env: Record<string, string | undefined> = process.env): string {
   const parsed = envSchema.pick({ WA_SESSION_DIR: true }).safeParse(env);
@@ -49,10 +85,7 @@ export function loadDatabaseUrl(env: Record<string, string | undefined> = proces
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
   const parsed = envSchema.safeParse(env);
   if (!parsed.success) {
-    const problems = parsed.error.issues
-      .map((issue) => `  ${issue.path.join('.')}: ${issue.message}`)
-      .join('\n');
-    throw new Error(`Invalid environment configuration:\n${problems}`);
+    throw new Error(`Invalid environment configuration:\n${formatIssues(parsed.error.issues)}`);
   }
   return {
     databaseUrl: parsed.data.DATABASE_URL,

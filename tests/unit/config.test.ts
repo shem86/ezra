@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { loadConfig, loadDatabaseUrl, loadWaSessionDir } from '../../src/ops/config.js';
+import {
+  loadConfig,
+  loadDatabaseUrl,
+  loadTransportOpsConfig,
+  loadWaSessionDir,
+} from '../../src/ops/config.js';
 
 const validEnv = {
   DATABASE_URL: 'postgres://hh:hh@localhost:5432/hh_assistant',
@@ -75,6 +80,29 @@ describe('loadWaSessionDir', () => {
 
   it('is exposed on the full config too', () => {
     expect(loadConfig(validEnv).waSessionDir).toBe('.wa-session');
+  });
+});
+
+describe('loadTransportOpsConfig', () => {
+  const transportEnv = {
+    ALERT_CHANNEL_TOKEN: validEnv.ALERT_CHANNEL_TOKEN,
+    ALERT_CHANNEL_CHAT_ID: validEnv.ALERT_CHANNEL_CHAT_ID,
+    DEADMAN_PING_URL: validEnv.DEADMAN_PING_URL,
+  };
+
+  it('returns the transport/ops slice without requiring LLM or DB keys', () => {
+    const config = loadTransportOpsConfig(transportEnv);
+
+    expect(config.waSessionDir).toBe('.wa-session');
+    expect(config.alertChannelToken).toBe(validEnv.ALERT_CHANNEL_TOKEN);
+    expect(config.alertChannelChatId).toBe(validEnv.ALERT_CHANNEL_CHAT_ID);
+    expect(config.deadmanPingUrl).toBe(validEnv.DEADMAN_PING_URL);
+  });
+
+  it('fails loudly naming the missing alert/dead-man variables', () => {
+    expect(() => loadTransportOpsConfig({})).toThrowError(/ALERT_CHANNEL_TOKEN/);
+    expect(() => loadTransportOpsConfig({})).toThrowError(/ALERT_CHANNEL_CHAT_ID/);
+    expect(() => loadTransportOpsConfig({})).toThrowError(/DEADMAN_PING_URL/);
   });
 });
 
