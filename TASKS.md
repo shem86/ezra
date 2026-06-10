@@ -72,7 +72,7 @@
   - Files: `src/transport/types.ts`, `src/transport/baileys.ts`, `src/transport/session-store.ts`, `docs/pairing.md`.
   - Depends on: T6; needs a paired WhatsApp number available.
 
-- [ ] **T12: Health monitoring + independent alerting + dead-man ping**
+- [ ] **T12: Health monitoring + independent alerting + dead-man ping** *(code complete 2026-06-09: Telegram chosen as alert channel (plain Bot API fetch, no new dep, token-redacted errors); health monitor 60s-grace down-alerts / immediate logged-out / recovery, one alert per outage; dead-man GET pinger with passive error handling; config adds ALERT_CHANNEL_CHAT_ID + DEADMAN_PING_URL (both required). Unit tests: 19 across alerts/health/deadman. REMAINING: manual verify (kill socket → Telegram alert; stop process → external check fires) needs a running transport — fold into T13 dry-run/T14 drill; builder must create the BotFather bot + healthchecks.io check and fill .env)*
   - Acceptance: socket-state monitor emitting down-alerts over a non-WhatsApp channel (Telegram bot unless builder objects at T10); scheduled dead-man ping to an external check service; both configurable via T6 config.
   - Verify: unit tests for state transitions; manual: kill socket → alert arrives; stop process → external dead-man fires.
   - Files: `src/ops/health.ts`, `src/ops/alerts.ts`, `src/ops/deadman.ts`, `tests/unit/health.test.ts`.
