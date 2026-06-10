@@ -7,6 +7,7 @@ import {
 import type { SessionStore } from './session-store.js';
 import type {
   InboundMessage,
+  MessageAck,
   OutboundMessage,
   SendReceipt,
   Transport,
@@ -137,7 +138,12 @@ export function createBaileysTransport(deps: BaileysTransportDeps): Transport {
   const random = deps.random ?? Math.random;
 
   const sentIds = new RecentIds(SENT_ID_CAPACITY);
-  const messageHandlers: Array<(m: InboundMessage) => void> = [];
+  const messageHandlers: Array<(m: InboundMessage, ack: MessageAck) => void> = [];
+  // Receive-ack deferral against the real socket is M6 work (PLAN: "durable-
+  // enqueue-before-ack against the real socket"); until then Baileys acks on
+  // receipt and this callback is a no-op, so the redelivery guarantee only
+  // holds for the stub transport.
+  const noopAck: MessageAck = async () => {};
   const stateHandlers: Array<(s: TransportState) => void> = [];
 
   let sock: WaSocketLike | null = null;
@@ -228,7 +234,7 @@ export function createBaileysTransport(deps: BaileysTransportDeps): Transport {
         quotedMessageId: extractQuotedMessageId(msg.message),
         timestamp: toEpochSeconds(msg.messageTimestamp),
       };
-      for (const handler of [...messageHandlers]) handler(inbound);
+      for (const handler of [...messageHandlers]) handler(inbound, noopAck);
     }
   }
 
@@ -286,7 +292,7 @@ export function createBaileysTransport(deps: BaileysTransportDeps): Transport {
       }
     },
 
-    onMessage(handler: (message: InboundMessage) => void): void {
+    onMessage(handler: (message: InboundMessage, ack: MessageAck) => void): void {
       messageHandlers.push(handler);
     },
 

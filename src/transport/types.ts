@@ -30,10 +30,18 @@ export interface SendReceipt {
   readonly messageId: string;
 }
 
+/**
+ * Acknowledges one inbound message back to the transport. Ingestion calls
+ * this only AFTER the message is durably enqueued: un-acked messages must be
+ * redelivered on reconnect (that redelivery is the crash-loss prevention —
+ * architecture "ingestion durability"). Idempotent.
+ */
+export type MessageAck = () => Promise<void>;
+
 export interface Transport {
   connect(): Promise<void>;
   send(message: OutboundMessage): Promise<SendReceipt>;
-  onMessage(handler: (message: InboundMessage) => void): void;
+  onMessage(handler: (message: InboundMessage, ack: MessageAck) => void): void;
   onStateChange(handler: (state: TransportState) => void): void;
   forceReconnect(): Promise<void>;
   disconnect(): Promise<void>;
