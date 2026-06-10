@@ -12,7 +12,8 @@
     "test": "vitest run",
     "lint": "eslint .",
     "migrate": "tsc && node --env-file=.env dist/memory/migrate-cli.js",
-    "pair": "tsc && node --env-file-if-exists=.env dist/transport/pair-cli.js"
+    "pair": "tsc && node --env-file-if-exists=.env dist/transport/pair-cli.js",
+    "transport": "tsc && node --env-file-if-exists=.env dist/transport/runner-cli.js"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

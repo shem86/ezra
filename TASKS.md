@@ -78,7 +78,7 @@
   - Files: `src/ops/health.ts`, `src/ops/alerts.ts`, `src/ops/deadman.ts`, `tests/unit/health.test.ts`.
   - Depends on: T11.
 
-- [ ] **T13: Standalone transport runner**
+- [ ] **T13: Standalone transport runner** *(code complete 2026-06-09: `pnpm transport` wires Baileys + T12 health/Telegram/dead-man + stdin commands (send <jid> <text> with 1.5–4.5s human jitter, reconnect, status, help, quit); refuses to start unpaired (pnpm pair first); command core unit-tested against a fake transport (tests/unit/runner.test.ts); entry split into runner-cli.ts following the pair-cli pattern; loadTransportOpsConfig added so the runner needs no LLM/DB keys. Smoke-tested: unpaired early exit + missing-env error paths. REMAINING: builder dry-run with the paired number — one manual test send arrives in the group; needs the T12 .env vars filled)*
   - Acceptance: standalone runnable (`pnpm transport`) that connects, monitors, supports a manual test send (human-like delay jitter) and a forced-reconnect command. No LLM, no DB writes.
   - Verify: dry-run locally; one manual test send arrives in the group.
   - Files: `src/transport/runner.ts`, `package.json`.
