@@ -1,0 +1,44 @@
+# Testing rules
+
+## Taxonomy (SPEC "Testing Strategy")
+
+1. **Unit** (`tests/unit/`, CI, no DB/network): pure logic — debounce
+   grouping, idempotency-key derivation, send-class selection, status-transition
+   guards, Zod schemas. Also `eslint-rules/*.test.ts` (RuleTester fixtures).
+2. **Integration** (`tests/integration/`, CI + local): DBOS workflows against
+   real Postgres — recovery replay, exactly-once writes, execute-once guards,
+   queue ordering. **Gated on `DATABASE_URL`**: the suite is excluded from the
+   vitest `include` list when the env var is absent, so unit tests run
+   anywhere. CI sets it via the pgvector service container.
+3. **Eval** (`evals/`, M5+, on-demand only): model-in-the-loop decision-9
+   scenarios. Never in CI.
+
+**Never in CI:** real WhatsApp traffic, real calendar writes, real model calls.
+
+## Discipline
+
+- TDD: failing test first (RED), minimal code to green, then refactor. Bug
+  fixes start with a reproduction test that fails (Prove-It), then the fix.
+- Test state/outcomes, not internals. Prefer real Postgres over mocks for
+  anything DBOS-touching — the integration suite exists precisely because
+  mocked durability proves nothing.
+- Don't re-run an already-green command unless code changed since.
+- Never skip/weaken a failing test to get CI green (SPEC "Never").
+
+## Recovery-test patterns (from the T8 spike — reuse, don't reinvent)
+
+- **Kill-mid-flight:** spawn the workflow in a child `node` process, poll the
+  DB for the first effect, `SIGKILL`, then `DBOS.launch()` in the test process
+  and await `DBOS.retrieveWorkflow(id).getResult()`. Assert output identical
+  to an uninterrupted run and each effect count == 1.
+- Pin `DBOS__APPVERSION` for any cross-process recovery test (vitest
+  `test.env`) — recovery only claims matching app versions, and the var is
+  read at SDK import time.
+- Make workflow IDs unique per test run (`Date.now()` suffix) so stale
+  PENDING workflows from aborted runs can't collide.
+- Tests within a spike/recovery file run sequentially and may share one
+  launched DBOS runtime; the test that must observe a *pending* workflow
+  before recovery goes first, since `DBOS.launch()` triggers recovery.
+- Integration tests assume `docker compose up -d` Postgres; remember the
+  dead-database failure mode reads as ECONNREFUSED, and Colima (not the code)
+  is the usual suspect locally — CI is the arbiter.
