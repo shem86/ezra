@@ -5,6 +5,7 @@
 // silently (architecture decision: ingestion durability).
 
 import { z } from 'zod';
+import type { MessageAck } from '../transport/types.js';
 
 /**
  * Wire contract for an inbound message (Zod at the boundary). Mirrors
@@ -35,4 +36,53 @@ export function ingestWorkflowId(messageId: string): string {
     throw new Error('ingestWorkflowId: message id must be non-empty');
   }
   return `ingest-${messageId}`;
+}
+
+export type IngestOutcome =
+  | { readonly outcome: 'enqueued' }
+  | { readonly outcome: 'self-echo' }
+  | { readonly outcome: 'invalid'; readonly detail: string }
+  | { readonly outcome: 'enqueue-failed'; readonly error: unknown };
+
+export interface IngestionDeps {
+  /** Must be durable (persisted, crash-survivable) before it resolves. */
+  readonly enqueueDurably: (message: ParsedInboundMessage) => Promise<void>;
+  /**
+   * Echo check keyed on sent message ids, NOT on `fromMe`: on the
+   * personal-number deployment the builder's own messages are `fromMe` and
+   * must be processed — only ids the bot itself sent are echoes.
+   */
+  readonly wasSentByBot: (messageId: string) => boolean;
+}
+
+/**
+ * The ingestion seam: validate → filter echoes → enqueue durably → ack.
+ * Ack-ordering rules, each load-bearing:
+ * - never ack before `enqueueDurably` resolves (crash here ⇒ un-acked ⇒
+ *   the transport redelivers — the message survives);
+ * - on enqueue failure, return without acking — redelivery IS the retry;
+ * - echoes and malformed payloads are acked immediately, else they
+ *   redeliver forever as poison messages.
+ */
+export function createIngestion(
+  deps: IngestionDeps,
+): (raw: unknown, ack: MessageAck) => Promise<IngestOutcome> {
+  return async (raw, ack) => {
+    const parsed = inboundMessageSchema.safeParse(raw);
+    if (!parsed.success) {
+      await ack();
+      return { outcome: 'invalid', detail: parsed.error.message };
+    }
+    if (deps.wasSentByBot(parsed.data.id)) {
+      await ack();
+      return { outcome: 'self-echo' };
+    }
+    try {
+      await deps.enqueueDurably(parsed.data);
+    } catch (error) {
+      return { outcome: 'enqueue-failed', error };
+    }
+    await ack();
+    return { outcome: 'enqueued' };
+  };
 }

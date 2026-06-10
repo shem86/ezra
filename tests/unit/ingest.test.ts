@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { ingestWorkflowId, inboundMessageSchema } from '../../src/orchestration/ingest.ts';
+import {
+  createIngestion,
+  ingestWorkflowId,
+  inboundMessageSchema,
+} from '../../src/orchestration/ingest.ts';
 
 const validMessage = {
   id: '3EB0A9C7D2F1',
@@ -55,6 +59,74 @@ describe('inboundMessageSchema', () => {
     expect(
       inboundMessageSchema.safeParse({ ...validMessage, mediaUrl: 'http://x' }).success,
     ).toBe(false);
+  });
+});
+
+describe('createIngestion', () => {
+  function harness(opts?: { sentByBot?: string[]; failEnqueue?: boolean }) {
+    const events: string[] = [];
+    const enqueued: { id: string }[] = [];
+    const sentByBot = new Set(opts?.sentByBot ?? []);
+    const ingest = createIngestion({
+      enqueueDurably: async (message) => {
+        if (opts?.failEnqueue) throw new Error('db down');
+        events.push('enqueue');
+        enqueued.push({ id: message.id });
+      },
+      wasSentByBot: (id) => sentByBot.has(id),
+    });
+    const ack = async () => {
+      events.push('ack');
+    };
+    return { ingest, ack, events, enqueued };
+  }
+
+  it('enqueues durably BEFORE acking and reports enqueued', async () => {
+    const { ingest, ack, events, enqueued } = harness();
+
+    const result = await ingest(validMessage, ack);
+
+    expect(result.outcome).toBe('enqueued');
+    expect(events).toEqual(['enqueue', 'ack']); // order is the whole point
+    expect(enqueued).toEqual([{ id: validMessage.id }]);
+  });
+
+  it("acks the bot's own echoed send without enqueuing it", async () => {
+    const { ingest, ack, events, enqueued } = harness({ sentByBot: [validMessage.id] });
+
+    const result = await ingest({ ...validMessage, fromMe: true }, ack);
+
+    expect(result.outcome).toBe('self-echo');
+    expect(enqueued).toEqual([]);
+    expect(events).toEqual(['ack']); // acked so the echo is not redelivered forever
+  });
+
+  it('enqueues a fromMe message that the bot did NOT send (builder on his personal number)', async () => {
+    const { ingest, ack, enqueued } = harness({ sentByBot: ['some-other-id'] });
+
+    const result = await ingest({ ...validMessage, fromMe: true }, ack);
+
+    expect(result.outcome).toBe('enqueued');
+    expect(enqueued).toEqual([{ id: validMessage.id }]);
+  });
+
+  it('acks a malformed payload without enqueuing (poison message must not redeliver forever)', async () => {
+    const { ingest, ack, events, enqueued } = harness();
+
+    const result = await ingest({ garbage: true }, ack);
+
+    expect(result.outcome).toBe('invalid');
+    expect(enqueued).toEqual([]);
+    expect(events).toEqual(['ack']);
+  });
+
+  it('does NOT ack when the durable enqueue fails — redelivery is the recovery path', async () => {
+    const { ingest, ack, events } = harness({ failEnqueue: true });
+
+    const result = await ingest(validMessage, ack);
+
+    expect(result.outcome).toBe('enqueue-failed');
+    expect(events).toEqual([]); // no enqueue recorded, and crucially no ack
   });
 });
 
