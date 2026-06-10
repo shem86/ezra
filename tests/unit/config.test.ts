@@ -7,6 +7,8 @@ const validEnv = {
   LANGFUSE_PUBLIC_KEY: 'pk-lf-test',
   LANGFUSE_SECRET_KEY: 'sk-lf-test',
   ALERT_CHANNEL_TOKEN: 'tg-bot-token',
+  ALERT_CHANNEL_CHAT_ID: '123456789',
+  DEADMAN_PING_URL: 'https://hc-ping.com/some-uuid',
 };
 
 describe('loadConfig', () => {
@@ -18,6 +20,21 @@ describe('loadConfig', () => {
     expect(config.langfusePublicKey).toBe(validEnv.LANGFUSE_PUBLIC_KEY);
     expect(config.langfuseSecretKey).toBe(validEnv.LANGFUSE_SECRET_KEY);
     expect(config.alertChannelToken).toBe(validEnv.ALERT_CHANNEL_TOKEN);
+    expect(config.alertChannelChatId).toBe(validEnv.ALERT_CHANNEL_CHAT_ID);
+    expect(config.deadmanPingUrl).toBe(validEnv.DEADMAN_PING_URL);
+  });
+
+  it('requires the alert chat id and dead-man ping URL (T12 ops are not optional)', () => {
+    const { ALERT_CHANNEL_CHAT_ID: _chat, DEADMAN_PING_URL: _ping, ...partial } = validEnv;
+
+    expect(() => loadConfig(partial)).toThrowError(/ALERT_CHANNEL_CHAT_ID/);
+    expect(() => loadConfig(partial)).toThrowError(/DEADMAN_PING_URL/);
+  });
+
+  it('rejects a malformed dead-man ping URL', () => {
+    expect(() => loadConfig({ ...validEnv, DEADMAN_PING_URL: 'not-a-url' })).toThrowError(
+      /DEADMAN_PING_URL/,
+    );
   });
 
   it('defaults the Langfuse base URL to the cloud endpoint', () => {

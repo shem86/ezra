@@ -10,6 +10,8 @@ const envSchema = z.object({
   LANGFUSE_SECRET_KEY: z.string().min(1, 'required — Langfuse project secret key'),
   LANGFUSE_BASE_URL: z.url('must be a URL').default('https://cloud.langfuse.com'),
   ALERT_CHANNEL_TOKEN: z.string().min(1, 'required — independent alert channel bot token'),
+  ALERT_CHANNEL_CHAT_ID: z.string().min(1, 'required — Telegram chat id the alerts go to'),
+  DEADMAN_PING_URL: z.url('must be a URL — external dead-man check endpoint'),
   WA_SESSION_DIR: z.string().min(1).default('.wa-session'),
 });
 
@@ -20,6 +22,8 @@ export interface Config {
   readonly langfuseSecretKey: string;
   readonly langfuseBaseUrl: string;
   readonly alertChannelToken: string;
+  readonly alertChannelChatId: string;
+  readonly deadmanPingUrl: string;
   readonly waSessionDir: string;
 }
 
@@ -57,6 +61,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     langfuseSecretKey: parsed.data.LANGFUSE_SECRET_KEY,
     langfuseBaseUrl: parsed.data.LANGFUSE_BASE_URL,
     alertChannelToken: parsed.data.ALERT_CHANNEL_TOKEN,
+    alertChannelChatId: parsed.data.ALERT_CHANNEL_CHAT_ID,
+    deadmanPingUrl: parsed.data.DEADMAN_PING_URL,
     waSessionDir: parsed.data.WA_SESSION_DIR,
   };
 }
