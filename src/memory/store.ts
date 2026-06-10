@@ -262,3 +262,70 @@ export async function saveContext(
     [conversationId, JSON.stringify(messages)],
   );
 }
+
+export type InboxKind = 'human' | 'proactive';
+
+export interface InboxItem {
+  readonly seq: number;
+  readonly conversationId: string;
+  readonly kind: InboxKind;
+  readonly senderId: string;
+  readonly messageId: string;
+  readonly payload: unknown;
+  readonly enqueuedAt: Date;
+  readonly processedAt: Date | null;
+}
+
+function mapInboxItem(row: Record<string, unknown>): InboxItem {
+  return {
+    // pg returns int8 as a string; Number() is safe — an inbox serial will
+    // never approach 2^53.
+    seq: Number(row.seq),
+    conversationId: row.conversation_id as string,
+    kind: row.kind as InboxKind,
+    senderId: row.sender_id as string,
+    messageId: row.message_id as string,
+    payload: row.payload,
+    enqueuedAt: row.enqueued_at as Date,
+    processedAt: (row.processed_at as Date | null) ?? null,
+  };
+}
+
+/**
+ * Insert-if-absent on the message id — same shape as `recordSend`. Returns
+ * false for a redelivered duplicate (crash after enqueue, before ack).
+ */
+export async function insertInboxItem(
+  db: Queryable,
+  input: {
+    conversationId: string;
+    kind: InboxKind;
+    senderId: string;
+    messageId: string;
+    payload: unknown;
+  },
+): Promise<boolean> {
+  const res = await db.query(
+    `INSERT INTO conversation_inbox (conversation_id, kind, sender_id, message_id, payload)
+     VALUES ($1, $2, $3, $4, $5::jsonb)
+     ON CONFLICT (message_id) DO NOTHING
+     RETURNING seq`,
+    [input.conversationId, input.kind, input.senderId, input.messageId, JSON.stringify(input.payload)],
+  );
+  return res.rows.length > 0;
+}
+
+export async function getPendingInbox(db: Queryable, conversationId: string): Promise<InboxItem[]> {
+  const res = await db.query(
+    `SELECT * FROM conversation_inbox
+     WHERE conversation_id = $1 AND processed_at IS NULL
+     ORDER BY seq`,
+    [conversationId],
+  );
+  return res.rows.map(mapInboxItem);
+}
+
+export async function markInboxProcessed(db: Queryable, seqs: number[]): Promise<void> {
+  if (seqs.length === 0) return;
+  await db.query('UPDATE conversation_inbox SET processed_at = now() WHERE seq = ANY($1)', [seqs]);
+}

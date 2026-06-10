@@ -9,8 +9,11 @@ import {
   getFact,
   getOpenItems,
   getPendingAction,
+  getPendingInbox,
   getSentEntry,
+  insertInboxItem,
   loadContext,
+  markInboxProcessed,
   markItemDone,
   recordSend,
   saveContext,
@@ -195,6 +198,77 @@ describe('sent log', () => {
     const logged = await getSentEntry(db, entry.idempotencyKey);
     expect(logged?.deliveryClass).toBe('at-least-once');
     expect(logged?.body).toEqual(entry.body);
+  });
+});
+
+describe('conversation inbox (T21)', () => {
+  const conversationId = `conv-inbox-${runId}`;
+
+  it('inserts items and reads pending ones back in enqueue (seq) order', async () => {
+    expect(
+      await insertInboxItem(db, {
+        conversationId,
+        kind: 'human',
+        senderId: 'wife@s.whatsapp.net',
+        messageId: `inbox-${runId}-1`,
+        payload: { text: 'תוסיף חלב' },
+      }),
+    ).toBe(true);
+    expect(
+      await insertInboxItem(db, {
+        conversationId,
+        kind: 'proactive',
+        senderId: 'system',
+        messageId: `inbox-${runId}-2`,
+        payload: { reminder: 'trash night' },
+      }),
+    ).toBe(true);
+
+    const pending = await getPendingInbox(db, conversationId);
+    expect(pending.map((i) => i.messageId)).toEqual([`inbox-${runId}-1`, `inbox-${runId}-2`]);
+    expect(pending[0]?.kind).toBe('human');
+    expect(pending[0]?.payload).toEqual({ text: 'תוסיף חלב' });
+    expect(pending[1]?.kind).toBe('proactive');
+    expect(pending[1]!.seq).toBeGreaterThan(pending[0]!.seq);
+    expect(pending[0]?.processedAt).toBeNull();
+  });
+
+  it('dedupes on message id — a redelivered duplicate inserts nothing', async () => {
+    const duplicate = {
+      conversationId,
+      kind: 'human' as const,
+      senderId: 'wife@s.whatsapp.net',
+      messageId: `inbox-${runId}-1`,
+      payload: { text: 'redelivered copy' },
+    };
+    expect(await insertInboxItem(db, duplicate)).toBe(false);
+
+    const pending = await getPendingInbox(db, conversationId);
+    // Original payload survives; the duplicate neither replaced nor appended.
+    expect(pending.filter((i) => i.messageId === `inbox-${runId}-1`)).toHaveLength(1);
+    expect(pending[0]?.payload).toEqual({ text: 'תוסיף חלב' });
+  });
+
+  it('marking processed removes items from the pending view', async () => {
+    const pending = await getPendingInbox(db, conversationId);
+    await markInboxProcessed(
+      db,
+      pending.map((i) => i.seq),
+    );
+
+    expect(await getPendingInbox(db, conversationId)).toEqual([]);
+  });
+
+  it('does not leak pending items across conversations', async () => {
+    await insertInboxItem(db, {
+      conversationId: `other-${conversationId}`,
+      kind: 'human',
+      senderId: 'shem@s.whatsapp.net',
+      messageId: `inbox-${runId}-other`,
+      payload: { text: 'unrelated' },
+    });
+
+    expect(await getPendingInbox(db, conversationId)).toEqual([]);
   });
 });
 
