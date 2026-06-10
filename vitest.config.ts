@@ -9,6 +9,7 @@ export default defineConfig({
     environment: 'node',
     include: [
       'tests/unit/**/*.test.ts',
+      'eslint-rules/**/*.test.ts',
       ...(hasDb ? ['tests/integration/**/*.test.ts'] : []),
     ],
   },

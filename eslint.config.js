@@ -1,5 +1,6 @@
 import eslint from '@eslint/js';
 import tseslint from 'typescript-eslint';
+import { noNondeterminismInWorkflow } from './eslint-rules/no-nondeterminism-in-workflow.ts';
 
 export default tseslint.config(
   { ignores: ['dist/', 'node_modules/'] },
@@ -13,7 +14,13 @@ export default tseslint.config(
       ],
     },
   },
-  // Slot reserved for the custom DBOS-determinism rule (T9):
-  // local plugin from eslint-rules/no-nondeterminism-in-workflow.ts,
-  // applied to files containing @DBOS.workflow bodies, severity 'error'.
+  {
+    files: ['src/**/*.ts'],
+    plugins: {
+      hh: { rules: { 'no-nondeterminism-in-workflow': noNondeterminismInWorkflow } },
+    },
+    rules: {
+      'hh/no-nondeterminism-in-workflow': 'error',
+    },
+  },
 );

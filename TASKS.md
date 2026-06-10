@@ -53,7 +53,7 @@
   - Files: `spikes/dbos/spike.ts`, `tests/integration/dbos-spike.test.ts`, `package.json`, `docs/spike-results.md`.
   - Depends on: T4.
 
-- [ ] **T9: Determinism ESLint rule**
+- [x] **T9: Determinism ESLint rule** *(done 2026-06-09)*
   - Acceptance: custom rule bans `Date.now`/`new Date`, `Math.random`, `process.env` reads, and direct I/O calls inside `@DBOS.workflow` function bodies; red on violation fixtures, green on clean fixtures; wired into `pnpm lint` as CI-failing.
   - Verify: rule's own fixture tests + `pnpm lint`.
   - Files: `eslint-rules/no-nondeterminism-in-workflow.ts`, `eslint-rules/no-nondeterminism-in-workflow.test.ts`, `eslint.config.js`.
