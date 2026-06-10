@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { loadConfig } from '../../src/ops/config.js';
+import { loadConfig, loadDatabaseUrl } from '../../src/ops/config.js';
 
 const validEnv = {
   DATABASE_URL: 'postgres://hh:hh@localhost:5432/hh_assistant',
@@ -42,5 +42,17 @@ describe('loadConfig', () => {
     expect(() =>
       loadConfig({ ...validEnv, LANGFUSE_BASE_URL: 'not-a-url' }),
     ).toThrowError(/LANGFUSE_BASE_URL/);
+  });
+});
+
+describe('loadDatabaseUrl', () => {
+  it('returns the database URL without requiring the rest of the environment', () => {
+    const url = loadDatabaseUrl({ DATABASE_URL: validEnv.DATABASE_URL });
+    expect(url).toBe(validEnv.DATABASE_URL);
+  });
+
+  it('fails loudly when DATABASE_URL is missing or empty', () => {
+    expect(() => loadDatabaseUrl({})).toThrowError(/DATABASE_URL/);
+    expect(() => loadDatabaseUrl({ DATABASE_URL: '' })).toThrowError(/DATABASE_URL/);
   });
 });

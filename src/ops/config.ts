@@ -21,6 +21,16 @@ export interface Config {
   readonly alertChannelToken: string;
 }
 
+// Narrow loader for tooling that only touches the database (e.g. the
+// migration CLI) — demanding API keys to run DDL would be a false coupling.
+export function loadDatabaseUrl(env: Record<string, string | undefined> = process.env): string {
+  const parsed = envSchema.pick({ DATABASE_URL: true }).safeParse(env);
+  if (!parsed.success) {
+    throw new Error('Invalid environment configuration:\n  DATABASE_URL: required');
+  }
+  return parsed.data.DATABASE_URL;
+}
+
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
   const parsed = envSchema.safeParse(env);
   if (!parsed.success) {

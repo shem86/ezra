@@ -10,14 +10,14 @@
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "migrate": "tsc && node --env-file=.env dist/memory/migrate-cli.js"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "@types/node": "25.9.2",
     "@types/pg": "8.20.0",
     "eslint": "10.4.1",
-    "pg": "8.21.0",
     "typescript": "6.0.3",
     "typescript-eslint": "8.61.0",
     "vitest": "4.1.8"
@@ -27,6 +27,7 @@
     "@dbos-inc/dbos-sdk": "4.19.8",
     "@dbos-inc/node-pg-datasource": "4.19.8",
     "ai": "6.0.199",
+    "pg": "8.21.0",
     "zod": "4.4.3"
   }
 }
