@@ -1,6 +1,6 @@
 # Tasks: Household AI Agent v1 (hh-assistant)
 
-> **Status: DRAFT — Phase 3 (Tasks), awaiting human approval.**
+> **Status: APPROVED 2026-06-09 — execution in progress.**
 > Breakdown of `PLAN.md` (approved 2026-06-09). Tasks are dependency-ordered within each milestone; each is sized for one focused session and touches ≤ ~5 files. M0–M3 are fully specified; M4–M6 tasks are named and gated but get their full acceptance criteria refined at milestone entry (their shape depends on what M1/M3 validate). `[H]` marks tasks the builder does by hand (drills, approvals, external accounts). Number acquisition, warming, and soak testing are out of scope; tasks assume a paired, usable WhatsApp number.
 
 ## M0 — Scaffold
