@@ -111,6 +111,46 @@ export function extractQuotedMessageId(raw: unknown): string | null {
   return null;
 }
 
+/** Boom-style status code off a Baileys disconnect error, if present. */
+export function getStatusCode(error: unknown): number | undefined {
+  const output = asContent(error)?.output;
+  const statusCode = asContent(output)?.statusCode;
+  return typeof statusCode === 'number' ? statusCode : undefined;
+}
+
+const MEDIA_KEYS = {
+  imageMessage: 'image',
+  videoMessage: 'video',
+  audioMessage: 'audio',
+  documentMessage: 'document',
+  stickerMessage: 'sticker',
+} as const;
+
+/** Media kind of a message ('image', 'audio', …), or null for non-media. */
+export function detectMediaType(raw: unknown): string | null {
+  const content = unwrapContent(raw);
+  if (!content) return null;
+  for (const [key, kind] of Object.entries(MEDIA_KEYS)) {
+    if (asContent(content[key])) return kind;
+  }
+  return null;
+}
+
+/** WhatsApp timestamps arrive as number, decimal string, or protobuf Long. */
+export function toEpochSeconds(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  const longLike = asContent(value);
+  if (longLike && typeof longLike.toNumber === 'function') {
+    const n = (longLike.toNumber as () => number)();
+    return Number.isFinite(n) ? n : 0;
+  }
+  return 0;
+}
+
 /** Strips the `:device` suffix WhatsApp appends to user JIDs. */
 export function normalizeJid(jid: string): string {
   return jid.replace(/:\d+(?=@)/, '');

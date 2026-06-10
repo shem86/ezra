@@ -3,10 +3,13 @@ import {
   classifyDisconnect,
   computeReconnectDelay,
   DEFAULT_RECONNECT_POLICY,
+  detectMediaType,
   extractMessageText,
   extractQuotedMessageId,
+  getStatusCode,
   normalizeJid,
   RecentIds,
+  toEpochSeconds,
 } from '../../src/transport/protocol.ts';
 
 describe('classifyDisconnect', () => {
@@ -115,6 +118,47 @@ describe('normalizeJid', () => {
     expect(normalizeJid('15551234567@s.whatsapp.net')).toBe('15551234567@s.whatsapp.net');
     expect(normalizeJid('120363001234567890@g.us')).toBe('120363001234567890@g.us');
     expect(normalizeJid('67427329167522@lid')).toBe('67427329167522@lid');
+  });
+});
+
+describe('getStatusCode', () => {
+  it('reads a Boom-style status code off a disconnect error', () => {
+    expect(getStatusCode({ output: { statusCode: 401 } })).toBe(401);
+    expect(getStatusCode({ output: { statusCode: 515 } })).toBe(515);
+  });
+
+  it('returns undefined for plain or missing errors', () => {
+    expect(getStatusCode(new Error('boom'))).toBeUndefined();
+    expect(getStatusCode(undefined)).toBeUndefined();
+  });
+});
+
+describe('detectMediaType', () => {
+  it('recognizes media content, including inside envelopes', () => {
+    expect(detectMediaType({ imageMessage: {} })).toBe('image');
+    expect(detectMediaType({ audioMessage: {} })).toBe('audio');
+    expect(
+      detectMediaType({ viewOnceMessageV2: { message: { videoMessage: {} } } }),
+    ).toBe('video');
+  });
+
+  it('returns null for text and protocol messages', () => {
+    expect(detectMediaType({ conversation: 'hi' })).toBeNull();
+    expect(detectMediaType({ protocolMessage: {} })).toBeNull();
+    expect(detectMediaType(null)).toBeNull();
+  });
+});
+
+describe('toEpochSeconds', () => {
+  it('coerces number, string, and Long-like timestamps', () => {
+    expect(toEpochSeconds(1760000000)).toBe(1760000000);
+    expect(toEpochSeconds('1760000000')).toBe(1760000000);
+    expect(toEpochSeconds({ toNumber: () => 1760000000 })).toBe(1760000000);
+  });
+
+  it('falls back to 0 for garbage', () => {
+    expect(toEpochSeconds(undefined)).toBe(0);
+    expect(toEpochSeconds({})).toBe(0);
   });
 });
 
