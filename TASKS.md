@@ -109,7 +109,7 @@
   - Files: `src/orchestration/steps.ts`, `tests/integration/steps.test.ts`.
   - Depends on: T18.
 
-- [ ] **T20: Ingestion seam — durable-enqueue-before-ack**
+- [x] **T20: Ingestion seam — durable-enqueue-before-ack** *(done 2026-06-10: Zod inbound contract + `createIngestion` (validate → echo-filter → durable enqueue → ack; no ack on failure — redelivery is the retry) + stub transport honoring redeliver-unacked-on-reconnect; `Transport.onMessage` gained the explicit ack callback (Baileys passes a documented no-op until M6 wires real socket acks). Deviation from acceptance as written: echo filter keys on sent-message ids, NOT `fromMe` — personal-number deployment makes builder messages fromMe (see types.ts note); `ingestWorkflowId(messageId)` is the dedupe anchor, proven in the crash-after-enqueue-before-ack integration test)*
   - Acceptance: inbound message contract (Zod); stub transport implementing the `Transport` interface with explicit ack callback; ingestion enqueues durably *then* acks; self-echo (`fromMe`) filtered; crash-between-receive-and-enqueue test shows redelivery path (un-acked message not lost).
   - Verify: integration tests including the crash window.
   - Files: `src/orchestration/ingest.ts`, `src/transport/stub.ts`, `tests/integration/ingest.test.ts`.
