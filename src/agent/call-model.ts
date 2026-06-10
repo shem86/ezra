@@ -4,8 +4,64 @@
 // object is what DBOS.runStep journals; splitting them across outputs would
 // let a crash persist a message without its tool ids (the atomicity T25 owns).
 
-import type { ModelMessage } from 'ai';
+import { generateText, type LanguageModel, type ModelMessage, type ToolSet } from 'ai';
+import type { HandleTurnDeps } from './handle-turn.js';
 import type { TurnMessage } from './context.js';
+
+/** Per-call token accounting — feeds T31 traces and the T33 cost gate. */
+export interface ModelUsage {
+  readonly inputTokens: number | undefined;
+  readonly outputTokens: number | undefined;
+  readonly cacheReadTokens: number | undefined;
+  readonly cacheWriteTokens: number | undefined;
+}
+
+export interface CallModelDeps {
+  /** Instantiated by the composing caller from Config — never module-level. */
+  readonly model: LanguageModel;
+  /** The stable cacheable prefix (T32 brings the real one). */
+  readonly systemPrompt: string;
+  /** Definitions only — no execute: DBOS owns the loop (decision 4). */
+  readonly tools?: ToolSet;
+  /** Observability tap; must not throw (a throw fails and retries the step). */
+  readonly onUsage?: (usage: ModelUsage) => void;
+}
+
+/**
+ * Build the callModel dep that T22's workflow wraps in DBOS.runStep. The
+ * returned AssistantMessage carries the text AND every tool_use id/name/args
+ * from the same response — one object, one journaled step output, so replay
+ * can never see a message without its tool ids.
+ */
+export function makeCallModel(deps: CallModelDeps): HandleTurnDeps['callModel'] {
+  return async function callModel(messages, options) {
+    const result = await generateText({
+      model: deps.model,
+      // The system prompt travels as a message so cacheControl attaches (T7).
+      allowSystemInMessages: true,
+      messages: toSdkMessages(deps.systemPrompt, messages),
+      ...(deps.tools === undefined ? {} : { tools: deps.tools }),
+      toolChoice: options.forceFinal ? 'none' : 'auto',
+    });
+
+    deps.onUsage?.({
+      inputTokens: result.usage.inputTokens,
+      outputTokens: result.usage.outputTokens,
+      cacheReadTokens: result.usage.inputTokenDetails.cacheReadTokens,
+      cacheWriteTokens: result.usage.inputTokenDetails.cacheWriteTokens,
+    });
+
+    return {
+      role: 'assistant',
+      content: result.text,
+      toolCalls: result.toolCalls.map((call) => ({
+        id: call.toolCallId,
+        name: call.toolName,
+        args: call.input,
+      })),
+    };
+  };
+}
 
 /**
  * Convert the persisted transcript to AI SDK messages. The system prompt is
