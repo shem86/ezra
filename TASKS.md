@@ -66,7 +66,7 @@
 
 ## M2 — Transport adapter + ops monitoring (agent-free)
 
-- [ ] **T11: Transport interface + Baileys connection** *(code complete 2026-06-09 — baileys 7.0.0-rc13 reviewed+pinned, adapter unit-tested via injected socket, `pnpm pair` ready; REMAINING: builder runs manual pairing + restart-reconnect verify per docs/pairing.md. Note: testing on builder's personal number — echo suppression is sent-id-based, not fromMe)*
+- [x] **T11: Transport interface + Baileys connection** *(done 2026-06-09 — baileys 7.0.0-rc13 reviewed+pinned (docs/dep-reviews/), adapter unit-tested via injected socket, session store with re-pair-only recovery; builder verified manual QR pairing AND restart-reconnect-without-re-pair via `pnpm pair` same day. Running on builder's personal number — echo suppression is sent-id-based, not fromMe (see docs/pairing.md))*
   - Acceptance: `Transport` interface (connect, send, onMessage, onStateChange, forceReconnect) that M3's stub and M6's real adapter both implement; Baileys connects with session state persisted to a configurable writable dir; QR pairing flow documented; session dir is gitignored and never backed up for restore (re-pair on loss).
   - Verify: manual pairing with the project's WhatsApp number (provisioning out of scope); reconnect after process restart without re-pairing.
   - Files: `src/transport/types.ts`, `src/transport/baileys.ts`, `src/transport/session-store.ts`, `docs/pairing.md`.
