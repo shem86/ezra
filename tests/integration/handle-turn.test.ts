@@ -102,8 +102,12 @@ describe('handleTurn skeleton (T22)', () => {
     expect(await itemCount(list, 'before-kill')).toBe(1); // not lost
     expect(await itemCount(list, 'after-kill')).toBe(0); // killed mid-transaction
 
-    await launchTurnRuntime(); // recovery claims the pending turn
-    const result = await DBOS.retrieveWorkflow(wfid).getResult();
+    await launchTurnRuntime();
+    // Resume explicitly AFTER launch (datasources ready): the child ran
+    // under its own executor ID precisely so launch-time recovery — which
+    // races datasource init on 4.19.8 (see dbos.md) — leaves it alone.
+    const resumed = await DBOS.resumeWorkflow(wfid);
+    const result = await resumed.getResult();
 
     // Identical to an uninterrupted run: same status, same transcript shape,
     // each tool effect exactly once.

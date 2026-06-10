@@ -35,3 +35,7 @@ jobs:
       - run: pnpm build
       - run: pnpm lint
       - run: pnpm test
+      # The M3 reliability gate (T24): the named recovery/exactly-once/
+      # debounce/FIFO/execute-once tests as one suite. Overlaps `pnpm test`
+      # by design — this is the gate's named, green-in-CI invocation.
+      - run: pnpm test:recovery

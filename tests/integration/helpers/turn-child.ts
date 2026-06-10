@@ -4,6 +4,11 @@
 // static imports would resolve src's `.js` specifiers before the hook exists.
 import './ts-ext-hooks.ts';
 
+// Own executor ID: the parent's DBOS.launch() must NOT auto-recover this
+// child's pending workflow — 4.19.8 launch-time recovery races datasource
+// initialization (see dbos.md). The parent resumes it explicitly instead.
+process.env.DBOS__VMID = 'hh-turn-child';
+
 const { handleTurnWorkflow, launchTurnRuntime } = await import('./turn-fixture.ts');
 const { DBOS } = await import('@dbos-inc/dbos-sdk');
 

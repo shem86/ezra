@@ -28,6 +28,18 @@
   transformed copies of identical source (vitest vs `node` type-stripping)
   hash differently; cross-process recovery tests must pin the version (see
   `vitest.config.ts` `test.env`).
+- **Launch-time recovery races datasource initialization.** `DBOS.launch()`
+  starts recovering pending workflows inside `executor.init()` BEFORE it
+  initializes registered datasources; under load a recovered workflow's
+  first un-journaled transaction throws `DataSource <name> is not
+  initialized` and the workflow errors **permanently**. Kill/recovery tests
+  therefore run children under their own executor ID (`DBOS__VMID`, read at
+  SDK import like `DBOS__APPVERSION`) and the parent resumes the workflow
+  explicitly post-launch via `DBOS.resumeWorkflow` (public; re-enqueues any
+  non-terminal workflow). ⚠ Production wiring (M6) must solve this too —
+  scope executor IDs per process generation or verify a fixed DBOS version —
+  or a crash-restart can permanently kill the in-flight turn it should have
+  recovered.
 - `DBOS.registerScheduled(fn, …)` requires `fn` to ALREADY be a registered
   workflow — pass the wrapper `DBOS.registerWorkflow` returned (same `name`
   in both calls). A raw function fails **silently-ish**: the scheduler loop

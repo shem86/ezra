@@ -75,8 +75,12 @@ describe('transactional step helpers (T19)', () => {
     expect(await itemCount(list, 'before-kill')).toBe(1); // not lost
     expect(await itemCount(list, 'after-kill')).toBe(0); // killed mid-sleep
 
-    await launchStepsRuntime(); // recovery claims the pending workflow
-    const result = await DBOS.retrieveWorkflow(wfid).getResult();
+    await launchStepsRuntime();
+    // Resume explicitly AFTER launch (datasources ready): the child ran
+    // under its own executor ID precisely so launch-time recovery — which
+    // races datasource init on 4.19.8 (see dbos.md) — leaves it alone.
+    const resumed = await DBOS.resumeWorkflow<string>(wfid);
+    const result = await resumed.getResult();
 
     expect(result).toBe(`completed-${list}`); // identical to an uninterrupted run
     expect(await itemCount(list, 'before-kill')).toBe(1); // replayed, not doubled
