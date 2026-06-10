@@ -28,6 +28,12 @@
   transformed copies of identical source (vitest vs `node` type-stripping)
   hash differently; cross-process recovery tests must pin the version (see
   `vitest.config.ts` `test.env`).
+- `DBOS.registerScheduled(fn, …)` requires `fn` to ALREADY be a registered
+  workflow — pass the wrapper `DBOS.registerWorkflow` returned (same `name`
+  in both calls). A raw function fails **silently-ish**: the scheduler loop
+  logs "`… is @scheduled but not a workflow`" every tick and never runs it.
+  Scheduled firings run with workflowID `sched-<name>-<ISO time>` on DBOS's
+  internal queue.
 - The old `@DBOS.transaction()` decorator is gone. Transactions go through
   `@dbos-inc/node-pg-datasource`; run
   `NodePostgresDataSource.initializeDBOSSchema()` once at setup (creates

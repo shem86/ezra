@@ -130,6 +130,18 @@ export async function createReminder(
   return mapReminder(res.rows[0]!);
 }
 
+/**
+ * Scheduled→fired transition guard: true only for the run that actually
+ * flipped it, so a sweep replay or a racing tick cannot double-fire.
+ */
+export async function markReminderFired(db: Queryable, id: string): Promise<boolean> {
+  const res = await db.query(
+    "UPDATE reminders SET status = 'fired' WHERE id = $1 AND status = 'scheduled' RETURNING id",
+    [id],
+  );
+  return res.rows.length > 0;
+}
+
 export async function getDueReminders(db: Queryable, asOf: Date): Promise<Reminder[]> {
   const res = await db.query(
     "SELECT * FROM reminders WHERE status = 'scheduled' AND due_at <= $1 ORDER BY due_at, id",

@@ -15,6 +15,7 @@ import {
   loadContext,
   markInboxProcessed,
   markItemDone,
+  markReminderFired,
   recordSend,
   saveContext,
   upsertFact,
@@ -118,6 +119,19 @@ describe('reminders store', () => {
 
     const due = await getDueReminders(db, new Date());
     expect(due.map((r) => r.id)).toContain(created.id);
+  });
+
+  it('marking a reminder fired removes it from the due view, idempotently', async () => {
+    const created = await createReminder(db, {
+      conversationId: `conv-fired-${runId}`,
+      body: 'one-shot',
+      dueAt: new Date(Date.now() - 60_000),
+      createdBy: 'shem',
+    });
+
+    expect(await markReminderFired(db, created.id)).toBe(true);
+    expect(await markReminderFired(db, created.id)).toBe(false); // already fired
+    expect((await getDueReminders(db, new Date())).map((r) => r.id)).not.toContain(created.id);
   });
 
   it('does not surface reminders that are not due yet', async () => {
