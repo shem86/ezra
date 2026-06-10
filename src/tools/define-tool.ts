@@ -36,10 +36,15 @@ export interface ToolDefinition<TDeps, TSchema extends z.ZodType = z.ZodType> {
   readonly riskTier: RiskTier;
   /** Deterministic external ID — makes re-executed effects no-ops (decision 10). */
   readonly externalId?: (ctx: ExternalIdContext) => string;
-  /** Re-checked at execute time, not propose time (T35) — approval windows are long. */
-  readonly revalidate?: (args: z.output<TSchema>, deps: TDeps) => Promise<boolean>;
+  /**
+   * Re-checked at execute time, not propose time (T35) — approval windows are
+   * long. Method syntax (here and on execute) is deliberate: it keeps a
+   * concretely-schemed definition assignable to AnyToolDefinition (bivariant
+   * parameter check), which arrow-property declarations would forbid.
+   */
+  revalidate?(args: z.output<TSchema>, deps: TDeps): Promise<boolean>;
   /** Returns the model-facing tool_result content. */
-  readonly execute: (args: z.output<TSchema>, deps: TDeps, ctx: ToolContext) => Promise<string>;
+  execute(args: z.output<TSchema>, deps: TDeps, ctx: ToolContext): Promise<string>;
 }
 
 export function defineTool<TDeps, TSchema extends z.ZodType>(
