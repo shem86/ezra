@@ -103,7 +103,7 @@
   - Files: `migrations/*.sql`, `src/memory/store.ts`, `tests/integration/store.test.ts`.
   - Depends on: T8 (validated DBOS/Postgres setup).
 
-- [ ] **T19: Step helpers — transactional writes + idempotency keys**
+- [x] **T19: Step helpers — transactional writes + idempotency keys** *(done 2026-06-10: `registerTransactionalStep` (wraps a store accessor in a datasource transaction — the sanctioned write path) + `deriveIdempotencyKey(workflowID, stepNumber)`; unit tests for both + integration gate: kill-mid-flight exactly-once write, same-wfid no-re-apply, derived-key send dedupe. Gotcha for future DBOS test files: each DBOS-launching test file must pin its own `DBOS__APPVERSION` (see `tests/integration/helpers/pin-appversion.ts`) — vitest runs files in parallel and recovery claims any matching-version pending workflow)*
   - Acceptance: helper enforcing every structured-state write goes through a DBOS transactional step (SPEC boundary); `(workflowID, stepNumber)` idempotency-key helper for external effects; both unit-tested.
   - Verify: `pnpm test`; exactly-once write test (kill around the step, state neither lost nor doubled).
   - Files: `src/orchestration/steps.ts`, `tests/integration/steps.test.ts`.
