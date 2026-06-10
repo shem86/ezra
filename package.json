@@ -27,7 +27,9 @@
     "@dbos-inc/dbos-sdk": "4.19.8",
     "@dbos-inc/node-pg-datasource": "4.19.8",
     "ai": "6.0.199",
+    "baileys": "7.0.0-rc13",
     "pg": "8.21.0",
+    "qrcode-terminal": "0.12.0",
     "zod": "4.4.3"
   }
 }
