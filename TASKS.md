@@ -10,7 +10,7 @@
   - Verify: `pnpm build`.
   - Files: `package.json`, `.npmrc`, `tsconfig.json`, `src/index.ts`.
 
-- [ ] **T2: Vitest wiring**
+- [x] **T2: Vitest wiring** *(done 2026-06-09)*
   - Acceptance: `pnpm test` runs a passing smoke test; unit/integration split configured (integration suite skipped when DB env is absent).
   - Verify: `pnpm test`.
   - Files: `vitest.config.ts`, `tests/unit/smoke.test.ts`, `package.json`.
