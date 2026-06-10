@@ -38,9 +38,13 @@
 - Use the **functional API** (`DBOS.registerWorkflow(fn)`) with *named*
   functions — registration names must be identical in every process that may
   recover the workflow.
-- ⚠ Open follow-up (pre-T22): the determinism lint rule currently detects the
-  `@DBOS.workflow()` decorator form only; extend it to functions passed to
-  `DBOS.registerWorkflow` before writing production workflows.
+- The determinism lint rule covers all three workflow forms: `@DBOS.workflow()`
+  members, functions passed to `DBOS.registerWorkflow` (inline or same-file
+  reference), and bodies returned from factories named `make*Workflow` — the
+  src DI pattern, where the body lives in src and registration happens in the
+  composing caller. **Name workflow factories `make*Workflow` or the rule
+  cannot see them.** Step-wrapper callbacks (`runStep`/`registerStep`/
+  `runTransaction`/`registerTransaction`) are exempt by design.
 
 ## Scheduling
 
