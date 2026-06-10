@@ -121,7 +121,7 @@
   - Files: `src/orchestration/queue.ts`, `src/orchestration/debounce.ts`, `tests/integration/queue.test.ts`.
   - Depends on: T20.
 
-- [ ] **T22: `handleTurn` skeleton + context persistence**
+- [x] **T22: `handleTurn` skeleton + context persistence** *(done 2026-06-10: `makeHandleTurnWorkflow` (factory naming matters — the extended determinism lint rule keys on `make*Workflow`) + `context.ts` Zod message schemas/`toModelMessages`. Loop invariants gated by integration tests: every `tool_use` answered (deny continues the loop, park breaks fire-and-fold + writes `pending_actions`), `MAX_ROUNDS` (default 8 per SPEC open Q2) forces a no-tools final and throws if the forced final still calls tools, transcript never journaled whole (asserted directly against `dbos.operation_outputs`; the load step's starting-transcript output is sanctioned by the architecture pseudocode), kill-mid-tool recovery replay completes with each effect exactly once. `callModel` is a plain-function dep wrapped in `DBOS.runStep` (transcript passes by closure); load/persist/runTool deps must be pre-registered steps/transactions. New conventions.md quirk: bare-node child entries value-importing src need `ts-ext-hooks.ts` + dynamic import)*
   - Acceptance: the SPEC loop shape with stubbed `callModel` (scripted tool calls); `loadContext`/`persistContext` steps; every `tool_use` answered incl. deny/park paths; `MAX_ROUNDS` cap with forced final message; msgs never journaled whole.
   - Verify: integration tests for loop invariants; recovery replay on the skeleton.
   - Files: `src/agent/handle-turn.ts`, `src/agent/context.ts`, `tests/integration/handle-turn.test.ts`.
