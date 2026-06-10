@@ -95,6 +95,26 @@ describe('createHealthMonitor', () => {
     expect(alerts.sent).toHaveLength(1);
   });
 
+  // T14 drill 2 regression: a network outage keeps the Baileys adapter in
+  // 'connecting' (retry loop) for up to ~4.3 min without ever reporting
+  // 'closed' — the monitor must treat sustained not-open as down.
+  it('alerts when the socket churns in connecting without reaching open (outage during retries)', async () => {
+    const alerts = makeAlertChannel();
+    const monitor = createHealthMonitor({ alertChannel: alerts, downGraceMs: GRACE_MS });
+
+    monitor.onStateChange('open');
+    monitor.onStateChange('connecting'); // adapter retrying — never says 'closed'
+    await vi.advanceTimersByTimeAsync(GRACE_MS);
+
+    expect(alerts.sent).toHaveLength(1);
+    expect(alerts.sent[0]).toMatch(/down/i);
+
+    monitor.onStateChange('open'); // network back, retry succeeded
+    await vi.advanceTimersByTimeAsync(0);
+    expect(alerts.sent).toHaveLength(2);
+    expect(alerts.sent[1]).toMatch(/reconnect|recover/i);
+  });
+
   it('treats connecting during an outage as still down, not as recovery', async () => {
     const alerts = makeAlertChannel();
     const monitor = createHealthMonitor({ alertChannel: alerts, downGraceMs: GRACE_MS });

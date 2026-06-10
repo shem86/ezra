@@ -57,14 +57,20 @@ export function createHealthMonitor(deps: HealthMonitorDeps): HealthMonitor {
           }
           return;
         case 'closed':
-          // One alert per outage: if the grace timer is running or the
-          // alert already went out, this is the same incident.
+        case 'connecting':
+          // Down means "not open past the grace", NOT "reported closed":
+          // during a network outage the Baileys adapter sits in
+          // 'connecting' for its whole retry loop (~4.3 min) without ever
+          // emitting 'closed' — keying on 'closed' alone misses sustained
+          // outages entirely (caught live in the T14 drill).
+          // One alert per outage: a running grace timer or an already-sent
+          // alert means this is the same incident.
           if (graceTimer !== null || downAlertSent) return;
           graceTimer = setTimeout(() => {
             graceTimer = null;
             downAlertSent = true;
             send(
-              `⚠️ hh-assistant: WhatsApp socket down — no reconnect for ${String(Math.round(downGraceMs / 1000))}s`,
+              `⚠️ hh-assistant: WhatsApp socket down — not open for ${String(Math.round(downGraceMs / 1000))}s`,
             );
           }, downGraceMs);
           return;
@@ -76,10 +82,6 @@ export function createHealthMonitor(deps: HealthMonitorDeps): HealthMonitor {
             downAlertSent = true;
             send('🚨 hh-assistant: WhatsApp LOGGED OUT — re-pair required (pnpm pair, docs/pairing.md)');
           }
-          return;
-        case 'connecting':
-          // Neither up nor down: an in-flight reconnect during an outage
-          // must not cancel the grace timer or count as recovery.
           return;
       }
     },
