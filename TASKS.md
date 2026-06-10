@@ -84,7 +84,7 @@
   - Files: `src/transport/runner.ts`, `package.json`.
   - Depends on: T11, T12.
 
-- [ ] **T14 [H]: M2 operational drill**
+- [x] **T14 [H]: M2 operational drill** *(done 2026-06-10: all 5 drills pass — forced reconnect, network kill (caught and fixed a real monitor bug: down-state keyed on 'closed' which the adapter never emits mid-retry; regression-tested), device-logout 🚨 (simulated ban → immediate alert), kill -9 → dead-man fired ~2 min, restart recovered. Results in docs/ops-drills.md. M2 complete)*
   - Acceptance: on the running transport runner — socket kill produces an alert on the independent channel; process kill trips the dead-man within 2× ping interval; forced reconnect recovers cleanly. Results logged.
   - Verify: manual drill; results in `docs/ops-drills.md`.
   - Depends on: T13.
