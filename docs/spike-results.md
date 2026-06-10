@@ -51,14 +51,32 @@
   passed to `DBOS.registerWorkflow` before T22** (tracked as part of T22's
   acceptance, or a small T9 follow-up at M3 entry).
 
-## T7 — Prompt-caching spike
+## T7 — Prompt-caching spike (2026-06-09)
 
-**Status: NOT RUN — blocked on `ANTHROPIC_API_KEY`** (no key in the local
-environment; the call also spends real money, which is ask-first per SPEC).
-Provide a key in `.env` and the spike script can be added/run; the M1 gate
-(T10) stays open until this records either `cache_read_input_tokens > 0` or
-the `@anthropic-ai/sdk` escape-hatch decision.
+**Verdict: PASS — `cache_control` works through AI SDK Core provider
+passthrough. No `@anthropic-ai/sdk` escape hatch needed.**
+
+`spikes/cache-control.ts` (`node --env-file=.env spikes/cache-control.ts`),
+pinned at `ai` 6.0.199 + `@ai-sdk/anthropic` 3.0.82, model `claude-haiku-4-5`,
+~6.1k-token stable system prefix with
+`providerOptions.anthropic.cacheControl: { type: 'ephemeral' }`:
+
+- Cold call: `cache_creation_input_tokens: 6135`, `cache_read_input_tokens: 0`
+- Every subsequent call (different user questions, two separate process runs):
+  `cache_read_input_tokens: 6135`, only 14 uncached input tokens per request
+
+Notes for M4 (`callModel`):
+- The AI SDK surfaces the numbers in `result.usage.inputTokenDetails`
+  (`cacheReadTokens`/`cacheWriteTokens`) and raw Anthropic usage under
+  `result.providerMetadata.anthropic.usage`.
+- `providerOptions` attach to a system *message* (requires
+  `allowSystemInMessages: true`), not to the plain `system:` string option.
+- Haiku-class minimum cacheable prefix is 2048 tokens — shorter prefixes
+  silently don't cache.
 
 ## T10 — M1 gate review
 
-**Status: OPEN** — awaiting T7 plus builder sign-off on the 4.19.8 pin above.
+**CLOSED 2026-06-09** — builder accepted the gate: caching confirmed via T7
+(no escape hatch), DBOS pin 4.19.8 accepted per T8 findings above. Follow-up
+carried into M3: extend the T9 determinism rule to the functional
+`DBOS.registerWorkflow` API before T22.

@@ -26,13 +26,13 @@
   - Files: `docker-compose.yml`, `infra/README.md`, `.env.example`, `tests/integration/db-smoke.test.ts`.
   - Depends on: T2.
 
-- [ ] **T5: CI pipeline** *(workflow authored 2026-06-09; verification blocked — no GitHub remote yet. Once the repo is pushed: confirm CI green, then enable branch protection so red CI blocks merge.)*
+- [x] **T5: CI pipeline** *(done 2026-06-09: repo pushed to github.com/shem86/hh-assistant, CI green on main. Caveat: branch protection requires GitHub Pro or a public repo — "red CI blocks merge" is unenforced until the builder upgrades or makes the repo public.)*
   - Acceptance: GitHub Actions running `pnpm build && pnpm lint && pnpm test` with a Postgres+pgvector service container; red CI blocks merge.
   - Verify: CI green on a pushed branch.
   - Files: `.github/workflows/ci.yml`.
   - Depends on: T1–T4.
 
-- [x] **T6: Config and secrets loading** *(done 2026-06-09; M0 gate "CI green" pending GitHub remote — see T5 note)*
+- [x] **T6: Config and secrets loading** *(done 2026-06-09)*
   - Acceptance: env-based config module, Zod-validated at startup with clear failure messages; placeholders for Anthropic key, Langfuse keys, DB URL, alert-channel token; no secret ever read outside this module.
   - Verify: unit tests (valid env passes, missing/invalid env fails loudly).
   - Files: `src/ops/config.ts`, `tests/unit/config.test.ts`, `.env.example`.
@@ -41,7 +41,7 @@
 
 ## M1 — De-risking spikes (T7–T9 parallelizable)
 
-- [ ] **T7: Prompt-caching spike (SPEC Phase-0 gate)** *(blocked 2026-06-09: needs ANTHROPIC_API_KEY in .env — see docs/spike-results.md)*
+- [x] **T7: Prompt-caching spike (SPEC Phase-0 gate)** *(done 2026-06-09: PASS, cache_read_input_tokens=6135 through AI SDK passthrough; no escape hatch — see docs/spike-results.md)*
   - Acceptance: script calls Claude twice via AI SDK Core with `cache_control` on a stable prefix through provider passthrough; usage fields captured; result (cache_read tokens > 0, or failure) written to `docs/spike-results.md`. On failure: stop, surface the `@anthropic-ai/sdk` escape-hatch decision to the builder before M4.
   - Verify: run `spikes/cache-control.ts` twice; read the recorded usage numbers.
   - Files: `spikes/cache-control.ts`, `docs/spike-results.md`, `package.json`.
@@ -59,7 +59,7 @@
   - Files: `eslint-rules/no-nondeterminism-in-workflow.ts`, `eslint-rules/no-nondeterminism-in-workflow.test.ts`, `eslint.config.js`.
   - Depends on: T3.
 
-- [ ] **T10 [H]: M1 gate review**
+- [x] **T10 [H]: M1 gate review** *(closed 2026-06-09: builder accepted — caching confirmed, DBOS 4.19.8 pin accepted; see docs/spike-results.md)*
   - Acceptance: builder reads `docs/spike-results.md`; caching confirmed or escape hatch decided; DBOS version pin accepted.
   - Verify: gate recorded in the doc with a date.
   - Depends on: T7, T8, T9.

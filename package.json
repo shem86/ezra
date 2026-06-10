@@ -23,8 +23,10 @@
     "vitest": "4.1.8"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "3.0.82",
     "@dbos-inc/dbos-sdk": "4.19.8",
     "@dbos-inc/node-pg-datasource": "4.19.8",
+    "ai": "6.0.199",
     "zod": "4.4.3"
   }
 }
