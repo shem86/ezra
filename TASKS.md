@@ -127,7 +127,7 @@
   - Files: `src/agent/handle-turn.ts`, `src/agent/context.ts`, `tests/integration/handle-turn.test.ts`.
   - Depends on: T19, T21.
 
-- [ ] **T23: Scheduled reminders → proactive turns**
+- [x] **T23: Scheduled reminders → proactive turns** *(done 2026-06-10: `tz.ts` (Intl two-pass, no deps; DST gap → pre-transition, ambiguity → first occurrence, both test-locked) + `makeReminderSweepWorkflow` enqueuing proactive items through T21's enqueue workflow — firing id = reminder id + due instant anchors child workflowID AND inbox message_id, so replays/racing ticks are exactly-once (gated: repeated sweeps, FIFO behind a slow in-flight turn, real every-second cron). Sweep boundary types are plain JSON (`dueAtIso`, `asOfMs`) because step outputs replay through the journal where Dates degrade to strings. New dbos.md gotcha: `registerScheduled` needs an already-registered workflow, raw functions never run. Production cron cadence + make-up mode decision deferred to M6 wiring)*
   - Acceptance: DBOS scheduled workflows that enqueue proactive turns into the same lane; reminder times anchored to household timezone (Eastern), never server time.
   - Verify: integration test — scheduled job waits behind an in-flight turn; tz conversion unit tests.
   - Files: `src/orchestration/scheduled.ts`, `tests/integration/scheduled.test.ts`, `tests/unit/tz.test.ts`.
