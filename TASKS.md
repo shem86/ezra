@@ -41,13 +41,13 @@
 
 ## M1 — De-risking spikes (T7–T9 parallelizable)
 
-- [ ] **T7: Prompt-caching spike (SPEC Phase-0 gate)**
+- [ ] **T7: Prompt-caching spike (SPEC Phase-0 gate)** *(blocked 2026-06-09: needs ANTHROPIC_API_KEY in .env — see docs/spike-results.md)*
   - Acceptance: script calls Claude twice via AI SDK Core with `cache_control` on a stable prefix through provider passthrough; usage fields captured; result (cache_read tokens > 0, or failure) written to `docs/spike-results.md`. On failure: stop, surface the `@anthropic-ai/sdk` escape-hatch decision to the builder before M4.
   - Verify: run `spikes/cache-control.ts` twice; read the recorded usage numbers.
   - Files: `spikes/cache-control.ts`, `docs/spike-results.md`, `package.json`.
   - Depends on: T6.
 
-- [ ] **T8: DBOS semantics spike (SPEC Phase-0 foundation)**
+- [x] **T8: DBOS semantics spike (SPEC Phase-0 foundation)** *(done 2026-06-09; pinned @dbos-inc/dbos-sdk 4.19.8 — see docs/spike-results.md)*
   - Acceptance: committed integration test proving, against the dev Postgres: (1) transactional step = state write + step record atomic; (2) kill-mid-flight then recover replays to identical output with no double effect; (3) queue concurrency-1 FIFO; (4) a scheduled workflow fires; (5) journal/state/pgvector co-reside in one Postgres. DBOS version pinned to what this validates.
   - Verify: `pnpm test` (spike suite); kill/replay test green.
   - Files: `spikes/dbos/spike.ts`, `tests/integration/dbos-spike.test.ts`, `package.json`, `docs/spike-results.md`.

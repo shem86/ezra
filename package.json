@@ -23,6 +23,8 @@
     "vitest": "4.1.8"
   },
   "dependencies": {
+    "@dbos-inc/dbos-sdk": "4.19.8",
+    "@dbos-inc/node-pg-datasource": "4.19.8",
     "zod": "4.4.3"
   }
 }
