@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { loadConfig, loadDatabaseUrl } from '../../src/ops/config.js';
+import { loadConfig, loadDatabaseUrl, loadWaSessionDir } from '../../src/ops/config.js';
 
 const validEnv = {
   DATABASE_URL: 'postgres://hh:hh@localhost:5432/hh_assistant',
@@ -42,6 +42,22 @@ describe('loadConfig', () => {
     expect(() =>
       loadConfig({ ...validEnv, LANGFUSE_BASE_URL: 'not-a-url' }),
     ).toThrowError(/LANGFUSE_BASE_URL/);
+  });
+});
+
+describe('loadWaSessionDir', () => {
+  it('defaults to .wa-session without requiring the rest of the environment', () => {
+    expect(loadWaSessionDir({})).toBe('.wa-session');
+  });
+
+  it('respects an explicit override', () => {
+    expect(loadWaSessionDir({ WA_SESSION_DIR: '/var/lib/hh/wa-session' })).toBe(
+      '/var/lib/hh/wa-session',
+    );
+  });
+
+  it('is exposed on the full config too', () => {
+    expect(loadConfig(validEnv).waSessionDir).toBe('.wa-session');
   });
 });
 

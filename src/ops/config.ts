@@ -10,6 +10,7 @@ const envSchema = z.object({
   LANGFUSE_SECRET_KEY: z.string().min(1, 'required — Langfuse project secret key'),
   LANGFUSE_BASE_URL: z.url('must be a URL').default('https://cloud.langfuse.com'),
   ALERT_CHANNEL_TOKEN: z.string().min(1, 'required — independent alert channel bot token'),
+  WA_SESSION_DIR: z.string().min(1).default('.wa-session'),
 });
 
 export interface Config {
@@ -19,6 +20,16 @@ export interface Config {
   readonly langfuseSecretKey: string;
   readonly langfuseBaseUrl: string;
   readonly alertChannelToken: string;
+  readonly waSessionDir: string;
+}
+
+// Narrow loader for the pairing CLI — pairing needs no API keys.
+export function loadWaSessionDir(env: Record<string, string | undefined> = process.env): string {
+  const parsed = envSchema.pick({ WA_SESSION_DIR: true }).safeParse(env);
+  if (!parsed.success) {
+    throw new Error('Invalid environment configuration:\n  WA_SESSION_DIR: must be a non-empty path');
+  }
+  return parsed.data.WA_SESSION_DIR;
 }
 
 // Narrow loader for tooling that only touches the database (e.g. the
@@ -46,5 +57,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     langfuseSecretKey: parsed.data.LANGFUSE_SECRET_KEY,
     langfuseBaseUrl: parsed.data.LANGFUSE_BASE_URL,
     alertChannelToken: parsed.data.ALERT_CHANNEL_TOKEN,
+    waSessionDir: parsed.data.WA_SESSION_DIR,
   };
 }

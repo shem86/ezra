@@ -11,12 +11,14 @@
     "build": "tsc",
     "test": "vitest run",
     "lint": "eslint .",
-    "migrate": "tsc && node --env-file=.env dist/memory/migrate-cli.js"
+    "migrate": "tsc && node --env-file=.env dist/memory/migrate-cli.js",
+    "pair": "tsc && node --env-file-if-exists=.env dist/transport/pair-cli.js"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "@types/node": "25.9.2",
     "@types/pg": "8.20.0",
+    "@types/qrcode-terminal": "0.12.2",
     "eslint": "10.4.1",
     "typescript": "6.0.3",
     "typescript-eslint": "8.61.0",
