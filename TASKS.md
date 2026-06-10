@@ -143,6 +143,10 @@
 ## M4 — Reasoning layer *(full acceptance criteria refined at milestone entry)*
 
 - [ ] **T25: `callModel` via AI SDK Core + prompt caching (per T7's verdict); model-call step records assistant msg + tool_use ids atomically**
+  - Acceptance *(refined 2026-06-10 at M4 entry)*: `makeCallModel(deps)` produces the `HandleTurnDeps['callModel']` function T22 wraps in `DBOS.runStep` — deps are `{ model, systemPrompt, tools?, onUsage? }` (DI; provider instantiation stays with the composing caller via Config, never module-level). Maps the persisted `TurnMessage[]` to AI SDK messages with the stable system prefix as a system message carrying `cacheControl: ephemeral` through provider passthrough (T7 verdict; `allowSystemInMessages`); tool-result messages resolve `toolName` from prior assistant tool calls and fail loud on an unresolvable id (corrupt transcript). `forceFinal` ⇒ `toolChoice: 'none'`. Returns ONE `AssistantMessage` carrying the response text + every tool_use id/name/args — that single object is the journaled step output, which *is* the atomicity requirement. Usage (incl. cache read/write) surfaces via `onUsage` for T31/T33, never into the transcript.
+  - Verify: unit tests with `MockLanguageModelV3` (`ai/test`) — no network; real model calls never run in CI.
+  - Files: `src/agent/call-model.ts`, `tests/unit/call-model.test.ts`.
+  - Depends on: T22 (seam), T7 (caching verdict).
 - [ ] **T26: Tool registry — `defineTool` (Zod schema, risk tier, idempotency, revalidation hooks)**
 - [ ] **T27: Tools — lists, reminders, household facts read/write**
 - [ ] **T28: Pull-only semantic recall tool (pgvector) + embedding write path**
