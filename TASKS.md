@@ -5,7 +5,7 @@
 
 ## M0 — Scaffold
 
-- [ ] **T1: Repo + TypeScript scaffold**
+- [x] **T1: Repo + TypeScript scaffold** *(done 2026-06-09)*
   - Acceptance: pnpm project with `save-exact` enforced via `.npmrc`; strict `tsconfig.json`; `src/index.ts` placeholder; `pnpm build` compiles.
   - Verify: `pnpm build`.
   - Files: `package.json`, `.npmrc`, `tsconfig.json`, `src/index.ts`.
