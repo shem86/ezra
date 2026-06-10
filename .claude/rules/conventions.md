@@ -40,6 +40,12 @@ Tests mirror `src/` under `tests/unit` and `tests/integration`.
 - Node 22.18+ strips types by default: `.ts` files run directly with `node`
   (used by spikes and by `eslint.config.js` importing the custom rule).
   Erasable-syntax only (no enums/namespaces) in files run this way.
+- src uses `.js` import specifiers (NodeNext). vitest remaps them; bare
+  `node` does NOT — so a child-process entry that transitively VALUE-imports
+  src dies with ERR_MODULE_NOT_FOUND (type-only imports are stripped and
+  don't trigger it). Child entries import
+  `tests/integration/helpers/ts-ext-hooks.ts` first and load the rest via
+  dynamic `import()` (static imports resolve before the hook registers).
 - `eslint.config.js` is flat config; the custom determinism rule is wired for
   `src/**` as `hh/no-nondeterminism-in-workflow`, severity error.
 - `.gitignore` ignores `.env.*` but excepts `.env.example` — keep the
