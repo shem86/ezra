@@ -1,0 +1,46 @@
+import { describe, expect, it } from 'vitest';
+import { loadConfig } from '../../src/ops/config.js';
+
+const validEnv = {
+  DATABASE_URL: 'postgres://hh:hh@localhost:5432/hh_assistant',
+  ANTHROPIC_API_KEY: 'sk-ant-test',
+  LANGFUSE_PUBLIC_KEY: 'pk-lf-test',
+  LANGFUSE_SECRET_KEY: 'sk-lf-test',
+  ALERT_CHANNEL_TOKEN: 'tg-bot-token',
+};
+
+describe('loadConfig', () => {
+  it('returns a typed config from a valid environment', () => {
+    const config = loadConfig(validEnv);
+
+    expect(config.databaseUrl).toBe(validEnv.DATABASE_URL);
+    expect(config.anthropicApiKey).toBe(validEnv.ANTHROPIC_API_KEY);
+    expect(config.langfusePublicKey).toBe(validEnv.LANGFUSE_PUBLIC_KEY);
+    expect(config.langfuseSecretKey).toBe(validEnv.LANGFUSE_SECRET_KEY);
+    expect(config.alertChannelToken).toBe(validEnv.ALERT_CHANNEL_TOKEN);
+  });
+
+  it('defaults the Langfuse base URL to the cloud endpoint', () => {
+    const config = loadConfig(validEnv);
+    expect(config.langfuseBaseUrl).toBe('https://cloud.langfuse.com');
+  });
+
+  it('fails loudly naming every missing variable', () => {
+    const { DATABASE_URL: _db, ANTHROPIC_API_KEY: _key, ...partial } = validEnv;
+
+    expect(() => loadConfig(partial)).toThrowError(/DATABASE_URL/);
+    expect(() => loadConfig(partial)).toThrowError(/ANTHROPIC_API_KEY/);
+  });
+
+  it('rejects an empty value, not just an absent one', () => {
+    expect(() => loadConfig({ ...validEnv, ANTHROPIC_API_KEY: '' })).toThrowError(
+      /ANTHROPIC_API_KEY/,
+    );
+  });
+
+  it('rejects a malformed Langfuse base URL', () => {
+    expect(() =>
+      loadConfig({ ...validEnv, LANGFUSE_BASE_URL: 'not-a-url' }),
+    ).toThrowError(/LANGFUSE_BASE_URL/);
+  });
+});

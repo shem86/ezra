@@ -32,7 +32,7 @@
   - Files: `.github/workflows/ci.yml`.
   - Depends on: T1–T4.
 
-- [ ] **T6: Config and secrets loading**
+- [x] **T6: Config and secrets loading** *(done 2026-06-09; M0 gate "CI green" pending GitHub remote — see T5 note)*
   - Acceptance: env-based config module, Zod-validated at startup with clear failure messages; placeholders for Anthropic key, Langfuse keys, DB URL, alert-channel token; no secret ever read outside this module.
   - Verify: unit tests (valid env passes, missing/invalid env fails loudly).
   - Files: `src/ops/config.ts`, `tests/unit/config.test.ts`, `.env.example`.
