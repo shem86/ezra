@@ -57,3 +57,10 @@ The session dir holds pairing credentials **plus Signal ratchet keys**: a live
 - T13 adds the standalone runner (manual test send with human-like jitter,
   forced reconnect command); T12 hangs health/alerting off
   `onStateChange`.
+- **LID addressing delivers (verified 2026-06-10, T13 dry-run).** WhatsApp now
+  masks some 1:1 conversation ids as `…@lid` instead of `…@s.whatsapp.net`;
+  inbound messages arrive with the LID as `conversationId`. A runner `send` to
+  a bare `@lid` JID was accepted AND delivered (a send-to-self lands in the
+  "Message yourself" chat — look there, not in a normal thread). So replying
+  to LID-addressed conversations is not a silent-failure path for M6/T42.
+  Group JIDs (`…@g.us`) are unaffected.
