@@ -15,7 +15,7 @@
   - Verify: `pnpm test`.
   - Files: `vitest.config.ts`, `tests/unit/smoke.test.ts`, `package.json`.
 
-- [ ] **T3: ESLint baseline**
+- [x] **T3: ESLint baseline** *(done 2026-06-09)*
   - Acceptance: flat-config ESLint with TS support; `pnpm lint` clean on scaffold; rule slot reserved for the custom determinism rule (T9).
   - Verify: `pnpm lint`.
   - Files: `eslint.config.js`, `package.json`.
