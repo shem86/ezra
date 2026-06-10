@@ -5,7 +5,14 @@
 import { makeToolRegistry, type ToolRegistry } from './registry.js';
 import type { HouseholdToolDeps } from './deps.js';
 import { addListItemTool, getListTool, markItemDoneTool } from './lists.js';
+import { getFactTool, setFactTool } from './facts.js';
 
 export function makeHouseholdToolRegistry(): ToolRegistry<HouseholdToolDeps> {
-  return makeToolRegistry<HouseholdToolDeps>([addListItemTool, getListTool, markItemDoneTool]);
+  return makeToolRegistry<HouseholdToolDeps>([
+    addListItemTool,
+    getListTool,
+    markItemDoneTool,
+    setFactTool,
+    getFactTool,
+  ]);
 }

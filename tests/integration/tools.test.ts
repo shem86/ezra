@@ -101,3 +101,50 @@ describe('lists tools', () => {
     expect(result.content).toContain('invalid arguments');
   });
 });
+
+describe('household-fact tools', () => {
+  it('set_fact then get_fact round-trips a code-switched value', async () => {
+    await runTool(db, call('set_fact', { key: `wifi-${runId}`, value: 'הסיסמא היא fios-guest' }), conv);
+
+    const result = await runTool(db, call('get_fact', { key: `wifi-${runId}` }), conv);
+
+    expect(result.content).toContain('הסיסמא היא fios-guest');
+  });
+
+  it('set_fact updates an existing key in place', async () => {
+    await runTool(db, call('set_fact', { key: `car-${runId}`, value: 'parked on Elm' }), conv);
+    await runTool(db, call('set_fact', { key: `car-${runId}`, value: 'parked on Main' }), conv);
+
+    const rows = await db.query('SELECT value FROM household_facts WHERE key = $1', [`car-${runId}`]);
+    expect(rows.rows).toEqual([{ value: 'parked on Main' }]);
+  });
+
+  it('get_fact on a missing key says so', async () => {
+    const result = await runTool(db, call('get_fact', { key: `nope-${runId}` }), conv);
+
+    expect(result.content).toMatch(/no fact/i);
+  });
+
+  it('secret-class enforcement: get_fact acknowledges a secret fact but withholds the value', async () => {
+    const key = `alarm-code-${runId}`;
+    await runTool(db, call('set_fact', { key, value: 'SECRET-9471', isSecret: true }), conv);
+
+    const result = await runTool(db, call('get_fact', { key }), conv);
+
+    // The value must never enter the transcript (SPEC "Never"; the schema
+    // comment's "enforcement lives in the read paths" lands exactly here).
+    expect(result.content).not.toContain('SECRET-9471');
+    expect(result.content).toContain(key);
+    expect(result.content).toMatch(/secret/i);
+  });
+
+  it('secret-class enforcement: set_fact confirmation never echoes a secret value', async () => {
+    const result = await runTool(
+      db,
+      call('set_fact', { key: `safe-${runId}`, value: 'SECRET-1136', isSecret: true }),
+      conv,
+    );
+
+    expect(result.content).not.toContain('SECRET-1136');
+  });
+});
