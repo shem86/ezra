@@ -26,7 +26,7 @@
   - Files: `docker-compose.yml`, `infra/README.md`, `.env.example`, `tests/integration/db-smoke.test.ts`.
   - Depends on: T2.
 
-- [ ] **T5: CI pipeline**
+- [ ] **T5: CI pipeline** *(workflow authored 2026-06-09; verification blocked — no GitHub remote yet. Once the repo is pushed: confirm CI green, then enable branch protection so red CI blocks merge.)*
   - Acceptance: GitHub Actions running `pnpm build && pnpm lint && pnpm test` with a Postgres+pgvector service container; red CI blocks merge.
   - Verify: CI green on a pushed branch.
   - Files: `.github/workflows/ci.yml`.
