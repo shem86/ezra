@@ -133,7 +133,7 @@
   - Files: `src/orchestration/scheduled.ts`, `tests/integration/scheduled.test.ts`, `tests/unit/tz.test.ts`.
   - Depends on: T21.
 
-- [ ] **T24: M3 reliability suite (`pnpm test:recovery`)**
+- [x] **T24: M3 reliability suite (`pnpm test:recovery`)** *(done 2026-06-10: the script runs the named gate files as one suite — steps (kill mid-flight exactly-once write, derived-key dedupe), queue (debounce grouping, FIFO), handle-turn (recovery replay diff, no double effect), scheduled (proactive FIFO behind in-flight turn), recovery (NEW: `src/hitl/pending-actions.ts` guarded transitions; approved→executed single-winner claim co-commits with the effect — duplicate approvals gated sequential + concurrent + deny-blocks). CI runs `pnpm test:recovery` explicitly after `pnpm test`. Suite-shakeout found and fixed a 4.19.8 launch-ordering bug (launch-time recovery vs datasource init — permanently errors recovered workflows; see dbos.md, incl. ⚠ production note for M6): kill-drill children isolate under `DBOS__VMID`, parents resume post-launch via `DBOS.resumeWorkflow`)*
   - Acceptance: the named gate tests in one suite — recovery replay (kill mid-flight, diff vs uninterrupted, no double effect), exactly-once state write, execute-once pending-action guard under duplicate approvals (table + guard land here even though full HITL is M5), debounce grouping, FIFO ordering.
   - Verify: `pnpm test:recovery` green in CI.
   - Files: `tests/integration/recovery.test.ts`, `src/hitl/pending-actions.ts`, `package.json`.
