@@ -148,3 +148,93 @@ describe('household-fact tools', () => {
     expect(result.content).not.toContain('SECRET-1136');
   });
 });
+
+describe('reminder tools', () => {
+  async function dueAtOf(content: string): Promise<{ id: string; dueAt: Date }> {
+    const idMatch = /reminder ([0-9a-f-]{36})/.exec(content);
+    expect(idMatch).not.toBeNull();
+    const rows = await db.query('SELECT due_at FROM reminders WHERE id = $1', [idMatch![1]!]);
+    return { id: idMatch![1]!, dueAt: rows.rows[0]?.due_at as Date };
+  }
+
+  it('create_reminder anchors a summer (EDT) wall time: 07:00 Eastern = 11:00Z', async () => {
+    const result = await runTool(
+      db,
+      call('create_reminder', {
+        body: 'take out the recycling',
+        year: 2026, month: 6, day: 15, hour: 7, minute: 0,
+        createdBy: 'shem',
+      }),
+      conv,
+    );
+
+    const { dueAt } = await dueAtOf(result.content);
+    expect(dueAt.toISOString()).toBe('2026-06-15T11:00:00.000Z');
+    expect(result.content).toContain('2026-06-15 07:00');
+    expect(result.content).toContain('take out the recycling');
+  });
+
+  it('create_reminder anchors a winter (EST) wall time: 07:00 Eastern = 12:00Z', async () => {
+    const result = await runTool(
+      db,
+      call('create_reminder', {
+        body: 'shovel before school run',
+        year: 2027, month: 1, day: 15, hour: 7, minute: 0,
+        createdBy: 'רעות',
+      }),
+      conv,
+    );
+
+    const { dueAt } = await dueAtOf(result.content);
+    expect(dueAt.toISOString()).toBe('2027-01-15T12:00:00.000Z');
+  });
+
+  it('list_reminders shows this conversation’s scheduled reminders as Eastern wall time, with ids', async () => {
+    const result = await runTool(db, call('list_reminders', {}), conv);
+
+    expect(result.content).toContain('take out the recycling');
+    expect(result.content).toContain('2026-06-15 07:00');
+    expect(result.content).toMatch(/[0-9a-f-]{36}/);
+  });
+
+  it('list_reminders is conversation-scoped', async () => {
+    const result = await runTool(db, call('list_reminders', {}), `other-${runId}`);
+
+    expect(result.content).not.toContain('take out the recycling');
+    expect(result.content).toMatch(/no scheduled reminders/i);
+  });
+
+  it('cancel_reminder flips scheduled→cancelled exactly once', async () => {
+    const created = await runTool(
+      db,
+      call('create_reminder', {
+        body: 'cancel me',
+        year: 2026, month: 7, day: 1, hour: 9, minute: 30,
+        createdBy: 'shem',
+      }),
+      conv,
+    );
+    const { id } = await dueAtOf(created.content);
+
+    const first = await runTool(db, call('cancel_reminder', { id }), conv);
+    expect(first.content).toMatch(/cancelled/);
+    const rows = await db.query('SELECT status FROM reminders WHERE id = $1', [id]);
+    expect(rows.rows).toEqual([{ status: 'cancelled' }]);
+
+    const second = await runTool(db, call('cancel_reminder', { id }), conv);
+    expect(second.parked).toBe(false);
+    expect(second.content).toMatch(/not|already/i);
+  });
+
+  it('rejects an impossible wall time as invalid args', async () => {
+    const result = await runTool(
+      db,
+      call('create_reminder', {
+        body: 'bad', year: 2026, month: 13, day: 1, hour: 7, minute: 0, createdBy: 'shem',
+      }),
+      conv,
+    );
+
+    expect(result.content).toContain('invalid arguments');
+  });
+});

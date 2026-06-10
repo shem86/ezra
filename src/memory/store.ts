@@ -142,6 +142,30 @@ export async function markReminderFired(db: Queryable, id: string): Promise<bool
   return res.rows.length > 0;
 }
 
+/**
+ * Scheduled→cancelled transition guard, same shape as `markReminderFired`:
+ * true only for the call that flipped it — a fired or already-cancelled
+ * reminder cannot be cancelled again.
+ */
+export async function cancelReminder(db: Queryable, id: string): Promise<Reminder | null> {
+  const res = await db.query(
+    "UPDATE reminders SET status = 'cancelled' WHERE id = $1 AND status = 'scheduled' RETURNING *",
+    [id],
+  );
+  return res.rows[0] ? mapReminder(res.rows[0]) : null;
+}
+
+export async function getScheduledReminders(
+  db: Queryable,
+  conversationId: string,
+): Promise<Reminder[]> {
+  const res = await db.query(
+    "SELECT * FROM reminders WHERE conversation_id = $1 AND status = 'scheduled' ORDER BY due_at, id",
+    [conversationId],
+  );
+  return res.rows.map(mapReminder);
+}
+
 export async function getDueReminders(db: Queryable, asOf: Date): Promise<Reminder[]> {
   const res = await db.query(
     "SELECT * FROM reminders WHERE status = 'scheduled' AND due_at <= $1 ORDER BY due_at, id",
