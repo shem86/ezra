@@ -188,6 +188,6 @@ Never in CI: real WhatsApp traffic, real calendar writes, real model calls. Real
 
 1. **Soft TTL default for approvals** — proposing 12h (architecture says "hours to a day; exact value barely matters").
 2. **`MAX_ROUNDS` default** — proposing 8.
-3. **Compaction threshold and summary shape** — at what transcript size to compact, and what the summary keeps verbatim (e.g., open commitments) vs folds into semantic memory.
+3. **Compaction threshold and summary shape** — ~~at what transcript size to compact, and what the summary keeps verbatim (e.g., open commitments) vs folds into semantic memory.~~ *Resolved 2026-06-11 (T29): compact above 60 messages keeping ≥ 20 (`defaultCompactionConfig`); the summary keeps open commitments verbatim and preserves languages as written, travels as a `system:compaction` user message, and the full text folds into the semantic store keyed `compact-<workflowID>`.*
 4. **Bot persona name** for the group.
 5. Oracle vs Hetzner — deliberately resolved at provisioning per decision 7, not here.

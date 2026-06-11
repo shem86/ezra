@@ -13,6 +13,19 @@ export function vec(...lead: number[]): number[] {
   return v;
 }
 
+/**
+ * Content-derived deterministic vector for tests that can't enumerate
+ * fixtures up front (e.g. compaction summaries): identical text ⇒ identical
+ * vector, across processes and replays.
+ */
+export function hashEmbed(text: string): number[] {
+  const v = new Array<number>(EMBEDDING_DIMENSION).fill(0);
+  for (let i = 0; i < text.length; i++) {
+    v[(i * 31 + text.charCodeAt(i)) % EMBEDDING_DIMENSION] += 1;
+  }
+  return v;
+}
+
 export function makeFakeEmbedder(fixtures: ReadonlyMap<string, number[]>): Embedder {
   const lookup = (text: string): number[] => {
     const v = fixtures.get(text);

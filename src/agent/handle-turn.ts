@@ -20,6 +20,12 @@ import {
   type ToolResult,
   type TurnMessage,
 } from './context.js';
+import {
+  buildCompactedTranscript,
+  findCompactionCut,
+  shouldCompact,
+  type CompactionConfig,
+} from './compaction.js';
 
 export interface ModelCallOptions {
   /** Cap-hit recovery: the model must answer with a user-facing message, no tools. */
@@ -46,6 +52,25 @@ export interface HandleTurnDeps {
   ) => Promise<AssistantMessage>;
   /** Tool-round hard cap (SPEC open question 2 proposes 8). */
   readonly maxRounds?: number;
+  /** Absent ⇒ no compaction (the T22 skeleton behavior, unchanged). */
+  readonly compaction?: CompactionDeps;
+}
+
+export interface CompactionDeps extends CompactionConfig {
+  /** Plain async — the workflow wraps it in DBOS.runStep (summary journaled). */
+  readonly summarize: (head: readonly TurnMessage[]) => Promise<string>;
+  /** Plain async — wrapped in DBOS.runStep (external I/O, outside any transaction). */
+  readonly embedSummary: (summary: string) => Promise<number[]>;
+  /**
+   * Must already be a registered datasource transaction (like persistContext)
+   * and idempotent on sourceKey — recovery replay re-calls it.
+   */
+  readonly writeMemory: (input: {
+    readonly conversationId: string;
+    readonly content: string;
+    readonly embedding: number[];
+    readonly sourceKey: string;
+  }) => Promise<boolean>;
 }
 
 export type TurnStatus = 'completed' | 'parked' | 'cap-hit';
@@ -110,7 +135,42 @@ export function makeHandleTurnWorkflow(
       msgs.push(finalMessage);
     }
 
+    // The full transcript persists BEFORE compaction: a failing summarize/embed
+    // must never hold the turn's substance hostage (the chat would brick on a
+    // side feature). Failure mode is a long transcript + loud workflow error;
+    // the next over-threshold turn simply retries.
     await deps.persistContext(conversationId, msgs);
+
+    const compaction = deps.compaction;
+    if (compaction !== undefined && shouldCompact(msgs, compaction)) {
+      const cut = findCompactionCut(msgs, compaction);
+      if (cut !== null) {
+        const workflowId = DBOS.workflowID;
+        if (workflowId === undefined) {
+          throw new Error('handleTurn: no workflowID — compaction needs it for the idempotency key');
+        }
+        const head = msgs.slice(0, cut);
+        const summary = await DBOS.runStep(() => compaction.summarize(head), {
+          name: 'summarizeContext',
+        });
+        const embedding = await DBOS.runStep(() => compaction.embedSummary(summary), {
+          name: 'embedSummary',
+        });
+        // Keyed on the workflowID (≤ one compaction per turn): a crash-replay
+        // re-derives the same key and the write is a no-op, never a duplicate.
+        await compaction.writeMemory({
+          conversationId,
+          content: summary,
+          embedding,
+          sourceKey: `compact-${workflowId}`,
+        });
+        await deps.persistContext(
+          conversationId,
+          buildCompactedTranscript(summary, msgs.slice(cut)),
+        );
+      }
+    }
+
     return { status, rounds };
   };
 }

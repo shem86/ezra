@@ -62,6 +62,10 @@ beforeAll(async () => {
   await runMigrations({ databaseUrl: connectionString });
   db = new Client({ connectionString });
   await db.connect();
+  // Stale rows from earlier runs of THIS suite carry the same crafted
+  // vectors at identical distance and win ties arbitrarily — clear only our
+  // namespace (other suites run in parallel against the same dev DB).
+  await db.query("DELETE FROM semantic_memories WHERE conversation_id LIKE 'semantic-run-%'");
   await seedMemories();
 }, 30_000);
 
