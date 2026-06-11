@@ -10,6 +10,7 @@ import { runMigrations } from '../../src/memory/migrate.ts';
 import { makeRunTool } from '../../src/tools/registry.ts';
 import { makeHouseholdToolRegistry } from '../../src/tools/index.ts';
 import type { ToolCall } from '../../src/agent/context.ts';
+import { makeFakeEmbedder } from './helpers/fake-embedder.ts';
 
 const connectionString = process.env.DATABASE_URL ?? '';
 const runId = `run-${Date.now()}`;
@@ -17,7 +18,8 @@ const conv = `tools-${runId}`;
 let db: Client;
 
 const runTool = makeRunTool(makeHouseholdToolRegistry(), {
-  toolDeps: {},
+  // No fixtures: this suite never recalls; semantic.test.ts owns that path.
+  toolDeps: { embedder: makeFakeEmbedder(new Map()) },
   park: async () => {
     throw new Error('no household tool is confirm-before; park must be unreachable');
   },

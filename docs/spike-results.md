@@ -1,4 +1,23 @@
-# M1 spike results
+# Spike results
+
+## T28 — Voyage embeddings wire smoke (2026-06-11)
+
+**Verdict: PASS — real-API contract matches the client; Hebrew code-switched
+ranking correct. One-time check; CI stays on the fake embedder.**
+
+`spikes/voyage-embed.ts` (`node --env-file=.env spikes/voyage-embed.ts`),
+model `voyage-4-lite` with explicit `output_dimension: 1024`:
+
+- Both calls returned 1024-dim vectors; the usage tap reported tokens
+  (40 for two documents, 7 for the query) — the T33 cost hook works.
+- The Hebrew query `מתי נגמר הצהרון?` ranked the code-switched afterschool
+  document at cosine similarity **0.4505** vs **0.1419** for the plumber
+  document — a clean margin, not a coin flip, easing ADR-0002's accepted
+  unknown on Hebrew quality (single fixture, not a benchmark; M5 evals
+  remain the real test).
+- Asymmetric `input_type` (document/query) accepted as documented.
+
+
 
 ## T8 — DBOS semantics spike (2026-06-09)
 

@@ -1,5 +1,10 @@
-// Household tools v1 need nothing beyond the transaction-scoped ctx.db; the
-// deps object exists so M5.5's calendar client (and later external clients)
-// land by widening this type instead of re-shaping the registry.
+// Cross-tool dependencies beyond the transaction-scoped ctx.db. Widened per
+// the original plan: T28 lands the embedder; M5.5's calendar client lands the
+// same way instead of re-shaping the registry.
 
-export type HouseholdToolDeps = Record<string, never>;
+import type { Embedder } from '../memory/embedder.js';
+
+export interface HouseholdToolDeps {
+  /** Query-side embeddings for the pull-only recall tool (T28). */
+  readonly embedder: Embedder;
+}

@@ -13,7 +13,7 @@ in every v1 trade-off.**
 | `SPEC.md` | *Building* — scope, conventions, boundaries | APPROVED 2026-06-09 |
 | `PLAN.md` | Milestones M0–M6 + verification gates | APPROVED 2026-06-09 |
 | `TASKS.md` | Per-session tasks + live progress checkboxes | APPROVED; M0+M1 done |
-| `docs/spike-results.md` | M1 spike verdicts, pinned versions, gotchas | T7/T8 PASS, T10 closed |
+| `docs/spike-results.md` | Spike verdicts, pinned versions, gotchas | T7/T8/T28-wire PASS, T10 closed |
 
 Where docs overlap: architecture wins on rationale, SPEC wins on
 implementation detail. Update `TASKS.md` checkboxes as tasks complete.
@@ -38,7 +38,8 @@ Spikes run directly: `node --env-file=.env spikes/<name>.ts` (Node 22 strips typ
 Node 22 / TypeScript strict / pnpm exact pins · DBOS 4.19.8 (durable
 execution) · single Postgres + pgvector · Vercel AI SDK Core + Claude
 (Haiku-class routing, Sonnet-class reasoning; prompt caching verified through
-passthrough) · Baileys (M2+) · Langfuse tracing · Vitest · ESLint flat config.
+passthrough) · Voyage embeddings (voyage-4-lite, zero-dep fetch client —
+ADR-0002) · Baileys (M2+) · Langfuse tracing · Vitest · ESLint flat config.
 
 ## Hard boundaries (full list in SPEC.md)
 

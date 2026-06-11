@@ -92,7 +92,7 @@
 ## M2.5 — Host + backups (parallel to M3–M5; all required before M6)
 
 - [ ] **T15 [H]: Provision host** — Oracle PAYG with reclamation policy re-verified that week, else Hetzner; decision + evidence in `infra/host.md`.
-- [ ] **T16: Production runtime hardening** — non-root service user, read-only rootfs, writable volumes only for Baileys session + Postgres data, egress allowlist v0 (Anthropic, Google, B2/R2, alert channel, WhatsApp iterated), secrets injected at runtime. Files: `infra/` (compose/systemd + allowlist). Verify: process runs hardened; blocked egress to a non-listed host confirmed.
+- [ ] **T16: Production runtime hardening** — non-root service user, read-only rootfs, writable volumes only for Baileys session + Postgres data, egress allowlist v0 (Anthropic, Voyage (api.voyageai.com), Google, B2/R2, alert channel, WhatsApp iterated), secrets injected at runtime. Files: `infra/` (compose/systemd + allowlist). Verify: process runs hardened; blocked egress to a non-listed host confirmed.
 - [ ] **T17: Backup pipeline + restore drill (SPEC Phase-0 gate)** — WAL archiving + base backups, client-side encrypted, to B2/R2; restore into a scratch DB and diff. Files: `infra/backup/`. Verify: documented successful restore. Depends on: T15.
 
 ## M3 — Durable core (stubbed model, stubbed transport)
@@ -158,7 +158,9 @@
   - Verify: `DATABASE_URL=… pnpm test` — `tests/integration/tools.test.ts` green in CI; unit tests for pure formatting/validation.
   - Files: `src/tools/lists.ts`, `src/tools/reminders.ts`, `src/tools/facts.ts`, `src/tools/index.ts` (registry assembly), `src/memory/store.ts` (cancel + list-scheduled accessors), `tests/integration/tools.test.ts`.
   - Depends on: T26, T23 (tz), T18 (store).
-- [ ] **T28: Pull-only semantic recall tool (pgvector) + embedding write path**
+- [x] **T28: Pull-only semantic recall tool (pgvector) + embedding write path** *(done 2026-06-11: provider = voyage-4-lite via zero-dependency fetch client per docs/adr-0002 (criteria + cost math there); migration 0004 `semantic_memories` with `vector(1024)` + unique `source_key`; `src/memory/embedder.ts` (Embedder seam + Voyage client, dimension drift rejected client-side), `src/memory/semantic.ts` (writeSemanticMemory idempotent on source_key — the compaction-replay guarantee; searchSemanticMemories nearest-first cosine), `src/tools/recall.ts` `recall_history` (autonomous, top-k no threshold, household-local dates) — first real entry through the HouseholdToolDeps seam. Two primitives deliberately not fused: embedding is external I/O and must not run inside the insert transaction; T29 sequences them as separate steps. 7 unit tests on the wire contract (stubbed fetch), 9 integration tests incl. Hebrew code-switched recall through makeRunTool against real pgvector)*
+  - Acceptance *(refined 2026-06-11 at task start)*: semantic store write idempotent on a caller-supplied source key (replay = no-op, test-locked); recall is pull-only through a registered autonomous tool returning dated, nearest-first content; query/document asymmetric embedding (`input_type`); fake embedder in CI — the real wire is exercised once by `spikes/voyage-embed.ts`; Hebrew/English code-switched fixtures throughout.
+  - [x] **Real-wire smoke** *(done 2026-06-11: key added, spike PASS — 1024-dim confirmed, Hebrew query ranked the code-switched doc 0.4505 vs 0.1419; verdict recorded in docs/spike-results.md)*
 - [ ] **T29: Compaction step (threshold per Open Q3 proposal: ~30 turns; idempotency-keyed; open commitments kept verbatim)**
 - [ ] **T30: Haiku router (cheap-vs-reasoning model selection)**
 - [ ] **T31: Langfuse tracing on every step; verify no operational credentials (API keys, tokens) reach traces** *(rescoped 2026-06-11: the user-facing secret-fact class was removed — docs/adr-0001 — so there is no fact-value redaction to do; what remains is verifying the by-construction credential boundary holds in emitted traces)*

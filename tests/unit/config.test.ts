@@ -9,6 +9,7 @@ import {
 const validEnv = {
   DATABASE_URL: 'postgres://hh:hh@localhost:5432/hh_assistant',
   ANTHROPIC_API_KEY: 'sk-ant-test',
+  VOYAGE_API_KEY: 'vk-test',
   LANGFUSE_PUBLIC_KEY: 'pk-lf-test',
   LANGFUSE_SECRET_KEY: 'sk-lf-test',
   ALERT_CHANNEL_TOKEN: 'tg-bot-token',
@@ -22,6 +23,7 @@ describe('loadConfig', () => {
 
     expect(config.databaseUrl).toBe(validEnv.DATABASE_URL);
     expect(config.anthropicApiKey).toBe(validEnv.ANTHROPIC_API_KEY);
+    expect(config.voyageApiKey).toBe(validEnv.VOYAGE_API_KEY);
     expect(config.langfusePublicKey).toBe(validEnv.LANGFUSE_PUBLIC_KEY);
     expect(config.langfuseSecretKey).toBe(validEnv.LANGFUSE_SECRET_KEY);
     expect(config.alertChannelToken).toBe(validEnv.ALERT_CHANNEL_TOKEN);
