@@ -39,7 +39,6 @@ export interface Reminder {
 export interface HouseholdFact {
   readonly key: string;
   readonly value: string;
-  readonly isSecret: boolean;
   readonly updatedAt: Date;
 }
 
@@ -178,21 +177,20 @@ function mapFact(row: Record<string, unknown>): HouseholdFact {
   return {
     key: row.key as string,
     value: row.value as string,
-    isSecret: row.is_secret as boolean,
     updatedAt: row.updated_at as Date,
   };
 }
 
 export async function upsertFact(
   db: Queryable,
-  input: { key: string; value: string; isSecret?: boolean },
+  input: { key: string; value: string },
 ): Promise<HouseholdFact> {
   const res = await db.query(
-    `INSERT INTO household_facts (key, value, is_secret) VALUES ($1, $2, $3)
+    `INSERT INTO household_facts (key, value) VALUES ($1, $2)
      ON CONFLICT (key) DO UPDATE
-       SET value = excluded.value, is_secret = excluded.is_secret, updated_at = now()
+       SET value = excluded.value, updated_at = now()
      RETURNING *`,
-    [input.key, input.value, input.isSecret ?? false],
+    [input.key, input.value],
   );
   return mapFact(res.rows[0]!);
 }

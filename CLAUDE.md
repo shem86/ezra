@@ -50,9 +50,9 @@ passthrough) · Baileys (M2+) · Langfuse tracing · Vitest · ESLint flat confi
   review) · DB schema changes · risk-tier/delivery-class changes · real
   WhatsApp traffic · spending money.
 - **Never:** commit secrets or Baileys session state · auto-execute a
-  confirm-before tool · let secret-class data into prompts/traces/semantic
-  store · restore Baileys session from backup · weaken a failing test or lint
-  rule to pass CI.
+  confirm-before tool · let operational credentials (API keys, OAuth tokens,
+  Baileys state) into prompts/traces/semantic store · restore Baileys session
+  from backup · weaken a failing test or lint rule to pass CI.
 
 ## Detailed rules (`.claude/rules/`)
 

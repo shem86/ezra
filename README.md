@@ -49,8 +49,10 @@ Design properties worth knowing:
 - **Classified sends.** Every outbound message is at-least-once (reminders,
   approval prompts) or at-most-once (echoes), tracked against a sent-log —
   no unclassified side effects.
-- **Secrets stay out of the model.** Secret-class data never enters prompts,
-  traces, or the semantic store.
+- **Credentials stay out of the model.** API keys, OAuth tokens, and the
+  Baileys session never enter prompts, traces, or the semantic store — by
+  construction: tools receive authenticated clients via `deps`, never raw
+  credentials.
 
 ## Project status
 

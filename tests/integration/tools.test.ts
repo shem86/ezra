@@ -1,8 +1,8 @@
 // T27 gate: the v1 tool surface exercised through makeToolRegistry +
 // makeRunTool against real Postgres, state asserted in the DB — the
 // transactional-step boundary is the composer's job (T19), so no DBOS launch
-// is needed here; what this suite proves is the SQL, the tz conversion, the
-// secret-class read enforcement, and the code-switched round-trips.
+// is needed here; what this suite proves is the SQL, the tz conversion, and
+// the code-switched round-trips.
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Client } from 'pg';
@@ -123,29 +123,6 @@ describe('household-fact tools', () => {
     const result = await runTool(db, call('get_fact', { key: `nope-${runId}` }), conv);
 
     expect(result.content).toMatch(/no fact/i);
-  });
-
-  it('secret-class enforcement: get_fact acknowledges a secret fact but withholds the value', async () => {
-    const key = `alarm-code-${runId}`;
-    await runTool(db, call('set_fact', { key, value: 'SECRET-9471', isSecret: true }), conv);
-
-    const result = await runTool(db, call('get_fact', { key }), conv);
-
-    // The value must never enter the transcript (SPEC "Never"; the schema
-    // comment's "enforcement lives in the read paths" lands exactly here).
-    expect(result.content).not.toContain('SECRET-9471');
-    expect(result.content).toContain(key);
-    expect(result.content).toMatch(/secret/i);
-  });
-
-  it('secret-class enforcement: set_fact confirmation never echoes a secret value', async () => {
-    const result = await runTool(
-      db,
-      call('set_fact', { key: `safe-${runId}`, value: 'SECRET-1136', isSecret: true }),
-      conv,
-    );
-
-    expect(result.content).not.toContain('SECRET-1136');
   });
 });
 

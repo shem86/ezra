@@ -148,23 +148,21 @@ describe('reminders store', () => {
 });
 
 describe('household facts store', () => {
-  it('round-trips a fact, defaulting to non-secret', async () => {
+  it('round-trips a fact', async () => {
     const key = `wifi-network-${runId}`;
     await upsertFact(db, { key, value: 'HHNet' });
 
     const fact = await getFact(db, key);
     expect(fact?.value).toBe('HHNet');
-    expect(fact?.isSecret).toBe(false);
   });
 
-  it('upsert overwrites the value and can flag a fact secret-class', async () => {
+  it('upsert overwrites the value in place', async () => {
     const key = `wifi-password-${runId}`;
     await upsertFact(db, { key, value: 'first' });
-    await upsertFact(db, { key, value: 'hunter2', isSecret: true });
+    await upsertFact(db, { key, value: 'hunter2' });
 
     const fact = await getFact(db, key);
     expect(fact?.value).toBe('hunter2');
-    expect(fact?.isSecret).toBe(true);
   });
 
   it('returns null for an unknown fact', async () => {

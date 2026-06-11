@@ -72,7 +72,7 @@ src/agent/          handleTurn loop, model calls, prompt assembly, compaction,
 src/tools/          typed tool definitions (Zod), risk tiers, idempotency keys,
                     revalidation checks
 src/memory/         structured store (source of truth), semantic store (pgvector,
-                    pull-only recall tool), routing rule, secret class
+                    pull-only recall tool), routing rule
 src/hitl/           pending_actions store + status transitions, approval binding
                     (quoted-reply), TTL GC
 src/ops/            socket-health monitor, independent alert channel, dead-man ping,
@@ -97,7 +97,7 @@ How the single agent serves two users and many co-living tasks (grounded in arch
 - Within a turn, `msgs` is workflow-local; each step records only its delta (assistant message, tool result), and replay rebuilds the transcript deterministically. The full transcript is never journaled per step.
 - The live window is bounded by two mechanisms: `cache_control` on the stable prefix (system + tool defs + older turns; gated on the Phase-0 passthrough spike) and compaction (threshold-crossing summarize-and-truncate that folds older turns into the semantic store, idempotency-keyed).
 
-**Truth vs continuity.** Exact facts (lists, reminders, schedules, household facts) are never trusted to the transcript — they are read through typed tools at the moment of use. The transcript records that a read/write happened; the database is the truth. Secret-class data never enters context, traces, or the semantic store.
+**Truth vs continuity.** Exact facts (lists, reminders, schedules, household facts) are never trusted to the transcript — they are read through typed tools at the moment of use. The transcript records that a read/write happened; the database is the truth. Operational credentials (API keys, OAuth tokens, Baileys session state) never enter context, traces, or the semantic store — enforced by construction: tools receive authenticated clients via `deps`, never raw credentials, and prompt assembly never touches `Config`. (A user-facing secret-fact class existed through T27 and was removed — see `docs/adr-0001-remove-secret-fact-class.md`.)
 
 **Cross-turn task state is injected, not remembered:**
 - A parked action's real outcome enters the resuming turn as a *new* context message — never a second `tool_result` for the already-answered `tool_use` (architecture decision 10's transcript note).
@@ -158,7 +158,7 @@ Never in CI: real WhatsApp traffic, real calendar writes, real model calls. Real
 **Never:**
 - Commit secrets, tokens, or Baileys session state.
 - Auto-execute a confirm-before tool, or block the consumer slot on a human.
-- Let secret-class data into prompts, semantic store, or Langfuse traces.
+- Let operational credentials (API keys, OAuth tokens, Baileys session state) into prompts, the semantic store, or Langfuse traces.
 - Restore Baileys session state from backup (re-pair via QR is the only recovery).
 - Remove or weaken a failing test/lint rule to make CI pass.
 
