@@ -4,6 +4,7 @@
 // loads (see T19's note in TASKS.md).
 import {
   cappedTurnWorkflow,
+  classifyLog,
   handleTurnWorkflow,
   launchTurnRuntime,
   toolListFor,
@@ -355,4 +356,171 @@ describe('handleTurn skeleton (T22)', () => {
       expect(holdsWholeTranscript).toBe(false);
     }
   }, 30_000);
+});
+
+describe('relatedness routing (T36)', () => {
+  async function parkDirect(
+    key: string,
+    item = 'milk',
+  ): Promise<{ conversationId: string; actionId: string }> {
+    const conversationId = `conv-${runId}-${key}`;
+    const actionId = `act-${runId}-${key}`;
+    await createPendingAction(db, {
+      actionId,
+      conversationId,
+      toolCall: { id: `tu-${key}`, name: 'park_me', args: { item } },
+      expiresAt: new Date(Date.now() + 12 * 3_600_000),
+    });
+    return { conversationId, actionId };
+  }
+
+  async function actionRow(actionId: string) {
+    const res = await db.query('SELECT * FROM pending_actions WHERE action_id = $1', [actionId]);
+    return res.rows[0] as { status: string; prompt_message_id: string | null; tool_call: unknown };
+  }
+
+  function hitlMessages(messages: TurnMessage[]): TurnMessage[] {
+    return messages.filter((m) => m.role === 'user' && m.senderId === 'system:hitl');
+  }
+
+  it('non-quoted approve with exactly one pending: settles through the full T35 path', async () => {
+    const { conversationId, actionId } = await parkDirect('t36-approve');
+
+    const result = await runTurn(conversationId, humanBatch('classify:approve — yes do it'));
+
+    expect(result.status).toBe('completed');
+    expect((await actionRow(actionId)).status).toBe('executed');
+    expect(await itemCount(toolListFor(conversationId), 'approved-milk')).toBe(1);
+    const messages = await transcript(conversationId);
+    const updates = hitlMessages(messages);
+    expect(updates).toHaveLength(1);
+    expect(updates[0]?.content).toContain(actionId);
+    expect(updates[0]?.content).toContain('approved by wife');
+    assertEveryToolUseAnswered(messages);
+  });
+
+  it('non-quoted deny: flips to denied, nothing executes, the model is told', async () => {
+    const { conversationId, actionId } = await parkDirect('t36-deny');
+
+    const result = await runTurn(conversationId, humanBatch('classify:deny — no, cancel'));
+
+    expect(result.status).toBe('completed');
+    expect((await actionRow(actionId)).status).toBe('denied');
+    expect(await itemCount(toolListFor(conversationId), 'approved-milk')).toBe(0);
+    const updates = hitlMessages(await transcript(conversationId));
+    expect(updates).toHaveLength(1);
+    expect(updates[0]?.content).toContain('declined by wife');
+  });
+
+  it('refine: args swap while pending, prompt stamp cleared, turn closes with the re-prompt and no model call', async () => {
+    const { conversationId, actionId } = await parkDirect('t36-refine');
+    await setPromptMessageId(db, actionId, `wa-prompt-${runId}-t36-refine`);
+
+    const result = await runTurn(conversationId, humanBatch('classify:refine make it later'));
+
+    expect(result).toEqual({ status: 'parked', rounds: 0 });
+    const row = await actionRow(actionId);
+    expect(row.status).toBe('pending');
+    expect(row.prompt_message_id).toBeNull();
+    expect(row.tool_call).toMatchObject({ name: 'park_me', args: { item: 'refined-item' } });
+    const messages = await transcript(conversationId);
+    const closing = messages.at(-1);
+    expect(closing?.role).toBe('assistant');
+    expect(closing && 'content' in closing ? closing.content : '').toContain('Approval needed');
+    expect(closing && 'content' in closing ? closing.content : '').toContain(actionId);
+    expect(closing && 'content' in closing ? closing.content : '').toContain('refined-item');
+  });
+
+  it('refine with schema-invalid args: action untouched, normal turn — never auto-deny', async () => {
+    const { conversationId, actionId } = await parkDirect('t36-badrefine');
+    await setPromptMessageId(db, actionId, `wa-prompt-${runId}-t36-badrefine`);
+
+    const result = await runTurn(conversationId, humanBatch('classify:badrefine make it 42'));
+
+    expect(result.status).toBe('completed');
+    const row = await actionRow(actionId);
+    expect(row.status).toBe('pending');
+    expect(row.prompt_message_id).toBe(`wa-prompt-${runId}-t36-badrefine`);
+    expect(row.tool_call).toMatchObject({ args: { item: 'milk' } });
+    expect(hitlMessages(await transcript(conversationId))).toHaveLength(0);
+  });
+
+  it('unrelated message: action untouched, normal turn', async () => {
+    const { conversationId, actionId } = await parkDirect('t36-unrelated');
+
+    const result = await runTurn(conversationId, humanBatch('מה קורה עם ארוחת ערב?'));
+
+    expect(result.status).toBe('completed');
+    expect((await actionRow(actionId)).status).toBe('pending');
+    expect(hitlMessages(await transcript(conversationId))).toHaveLength(0);
+  });
+
+  it('no pending actions: the classifier is never invoked — no cost', async () => {
+    const conversationId = `conv-${runId}-t36-nopending`;
+    const before = classifyLog.length;
+
+    const result = await runTurn(conversationId, humanBatch('classify:approve — yes'));
+
+    expect(result.status).toBe('completed');
+    expect(classifyLog.length).toBe(before);
+  });
+
+  it('two pending and no quote: never guess — classifier skipped, both stay pending', async () => {
+    const { conversationId, actionId } = await parkDirect('t36-multi');
+    const secondId = `act-${runId}-t36-multi-b`;
+    await createPendingAction(db, {
+      actionId: secondId,
+      conversationId,
+      toolCall: { id: 'tu-t36-multi-b', name: 'park_me', args: { item: 'bread' } },
+      expiresAt: new Date(Date.now() + 12 * 3_600_000),
+    });
+    const before = classifyLog.length;
+
+    const result = await runTurn(conversationId, humanBatch('classify:approve — yes'));
+
+    expect(result.status).toBe('completed');
+    expect(classifyLog.length).toBe(before);
+    expect((await actionRow(actionId)).status).toBe('pending');
+    expect((await actionRow(secondId)).status).toBe('pending');
+  });
+
+  it('a bound quoted approve takes precedence — the classifier is never consulted', async () => {
+    const { conversationId, actionId } = await parkDirect('t36-quoted');
+    const promptMessageId = `wa-prompt-${runId}-t36-quoted`;
+    await setPromptMessageId(db, actionId, promptMessageId);
+    const before = classifyLog.length;
+
+    const result = await runTurn(conversationId, [
+      { senderId: 'wife', payload: { text: 'yes', quotedMessageId: promptMessageId } },
+    ]);
+
+    expect(result.status).toBe('completed');
+    expect(classifyLog.length).toBe(before);
+    expect((await actionRow(actionId)).status).toBe('executed');
+  });
+
+  it('a quoted-but-unclear reply classifies against its BOUND action, even with several pending', async () => {
+    const { conversationId, actionId } = await parkDirect('t36-quoted-refine');
+    const secondId = `act-${runId}-t36-quoted-refine-b`;
+    await createPendingAction(db, {
+      actionId: secondId,
+      conversationId,
+      toolCall: { id: 'tu-t36-qr-b', name: 'park_me', args: { item: 'bread' } },
+      expiresAt: new Date(Date.now() + 12 * 3_600_000),
+    });
+    const promptMessageId = `wa-prompt-${runId}-t36-quoted-refine`;
+    await setPromptMessageId(db, actionId, promptMessageId);
+
+    const result = await runTurn(conversationId, [
+      { senderId: 'wife', payload: { text: 'classify:refine תזיז את זה', quotedMessageId: promptMessageId } },
+    ]);
+
+    expect(result).toEqual({ status: 'parked', rounds: 0 });
+    const refined = await actionRow(actionId);
+    expect(refined.status).toBe('pending');
+    expect(refined.prompt_message_id).toBeNull();
+    expect(refined.tool_call).toMatchObject({ args: { item: 'refined-item' } });
+    expect((await actionRow(secondId)).status).toBe('pending');
+    expect((await actionRow(secondId)).tool_call).toMatchObject({ args: { item: 'bread' } });
+  });
 });

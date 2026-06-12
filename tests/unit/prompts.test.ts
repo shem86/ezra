@@ -159,3 +159,10 @@ describe('renderApprovalOutcome (T35)', () => {
     expect(renderApprovalOutcome(outcome, 'wife')).toBe(renderApprovalOutcome(outcome, 'wife'));
   });
 });
+
+describe('stableSystemPrompt approval guidance (T36)', () => {
+  it('teaches the multi-pending rule: never pick an action yourself, ask for a quoted reply', () => {
+    expect(stableSystemPrompt).toMatch(/more than one/i);
+    expect(stableSystemPrompt).toMatch(/quot/i);
+  });
+});

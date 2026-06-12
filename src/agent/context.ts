@@ -63,6 +63,16 @@ export function extractQuotedReply(item: BatchItem): QuotedReply | null {
 }
 
 /**
+ * The plain text of a human payload, quoted or not — what the relatedness
+ * classifier reads (T36). Null for proactive/malformed payloads: only a
+ * person's utterance can approve, deny, or refine a pending action.
+ */
+export function extractMessageText(item: BatchItem): string | null {
+  const human = humanPayloadSchema.safeParse(item.payload);
+  return human.success ? human.data.text : null;
+}
+
+/**
  * Convert a debounced inbox batch into user messages, in batch (seq) order.
  * Unrecognized payloads degrade to their JSON — a malformed producer must
  * surface in the conversation, never silently drop a message.

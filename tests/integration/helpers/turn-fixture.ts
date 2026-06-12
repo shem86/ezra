@@ -22,10 +22,15 @@ import {
   saveContext,
 } from '../../../src/memory/store.ts';
 import { toDigestEntries } from '../../../src/hitl/digest.ts';
-import { makeResolveApprovalReply } from '../../../src/hitl/resolve-approval.ts';
+import {
+  makeResolveApprovalReply,
+  makeResolveClassifiedDecision,
+} from '../../../src/hitl/resolve-approval.ts';
+import { makeRefineAction } from '../../../src/hitl/refine-action.ts';
 import { defineTool } from '../../../src/tools/define-tool.ts';
 import { makeToolRegistry } from '../../../src/tools/registry.ts';
 import type { PendingActionDigestEntry } from '../../../src/agent/prompts.ts';
+import type { ClassifyInput, RelatednessVerdict } from '../../../src/agent/relatedness.ts';
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
@@ -78,11 +83,39 @@ const parkMeTool = defineTool<NoDeps, typeof toolArgsSchema>({
   },
 });
 
+const turnRegistry = makeToolRegistry<NoDeps>([parkMeTool]);
+
 const resolveApprovalStep = registerTransactionalStep(
   dataSource,
   'resolveApproval',
-  makeResolveApprovalReply(makeToolRegistry<NoDeps>([parkMeTool]), { toolDeps: {} }),
+  makeResolveApprovalReply(turnRegistry, { toolDeps: {} }),
 );
+
+const resolveClassifiedStep = registerTransactionalStep(
+  dataSource,
+  'resolveClassified',
+  makeResolveClassifiedDecision(turnRegistry, { toolDeps: {} }),
+);
+
+const refineActionStep = registerTransactionalStep(
+  dataSource,
+  'refineAction',
+  makeRefineAction(turnRegistry),
+);
+
+/** Every message the scripted classifier saw — tests assert the T36 gating on it. */
+export const classifyLog: string[] = [];
+
+/** Scripted classifier: verdict keyed on a message prefix, deterministic. */
+async function scriptedClassify(input: ClassifyInput): Promise<RelatednessVerdict> {
+  classifyLog.push(input.message);
+  const m = input.message;
+  if (m.startsWith('classify:approve')) return { kind: 'approve' };
+  if (m.startsWith('classify:deny')) return { kind: 'deny' };
+  if (m.startsWith('classify:badrefine')) return { kind: 'refine', updatedArgs: { item: 42 } };
+  if (m.startsWith('classify:refine')) return { kind: 'refine', updatedArgs: { item: 'refined-item' } };
+  return { kind: 'unrelated' };
+}
 
 /** Tool writes land in the per-conversation list `turn-<conversationId>`. */
 export function toolListFor(conversationId: string): string {
@@ -242,6 +275,11 @@ const baseDeps = {
   callModel: scriptedCallModel,
   loadPendingDigest: loadPendingDigestStep,
   resolveApproval: resolveApprovalStep,
+  relatedness: {
+    classify: scriptedClassify,
+    resolveDecision: resolveClassifiedStep,
+    refine: refineActionStep,
+  },
 };
 
 export const handleTurnWorkflow = DBOS.registerWorkflow(makeHandleTurnWorkflow(baseDeps), {

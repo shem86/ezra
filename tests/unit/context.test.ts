@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  extractMessageText,
   extractQuotedReply,
   parseTurnMessages,
   toModelMessages,
@@ -77,5 +78,27 @@ describe('extractQuotedReply (T35)', () => {
   it('proactive and malformed payloads are never quoted replies', () => {
     expect(extractQuotedReply({ senderId: 'system', payload: { reminder: 'pills' } })).toBeNull();
     expect(extractQuotedReply({ senderId: 'wife', payload: 'just a string' })).toBeNull();
+  });
+});
+
+describe('extractMessageText (T36)', () => {
+  it('returns the text of a human payload, quoted or not', () => {
+    expect(extractMessageText({ senderId: 'wife', payload: { text: 'make it 4pm' } })).toBe(
+      'make it 4pm',
+    );
+    expect(
+      extractMessageText({
+        senderId: 'wife',
+        payload: { text: 'yes', quotedMessageId: 'wa-123' },
+      }),
+    ).toBe('yes');
+  });
+
+  it('returns null for proactive and malformed payloads — only utterances classify', () => {
+    expect(extractMessageText({ senderId: 'system', payload: { reminder: 'take out trash' } })).toBe(
+      null,
+    );
+    expect(extractMessageText({ senderId: 'wife', payload: 42 })).toBe(null);
+    expect(extractMessageText({ senderId: 'wife', payload: null })).toBe(null);
   });
 });
