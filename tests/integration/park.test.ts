@@ -115,3 +115,42 @@ describe('production park (T34)', () => {
     expect(await getPendingAction(db, deriveActionId(conv, badCall.id))).toBeNull();
   });
 });
+
+// T40: prompts sent with a registry render the tool's summarize() one-liner
+// (the human proposal line), not the raw-args JSON.
+describe('sendApprovalPrompts with a registry', () => {
+  it('renders the per-tool summary in the sent prompt text', async () => {
+    const summarized = defineTool<Record<string, never>, z.ZodType<{ title: string }>>({
+      name: 'fake_confirm_before',
+      description: 'summarizing confirm-before tool',
+      schema: z.object({ title: z.string() }),
+      riskTier: 'confirm-before',
+      revalidate: async () => true,
+      summarize: (args) => `human summary: ${args.title}`,
+      execute: async () => {
+        throw new Error('never at propose time');
+      },
+    });
+    const registry = makeToolRegistry<Record<string, never>>([summarized]);
+    const summarizedRunTool = makeRunTool(registry, {
+      toolDeps: {},
+      park: makePark({ ttlHours: 12 }),
+    });
+
+    const conv3 = `park-summarize-${runId}`;
+    const parkedCall: ToolCall = {
+      id: `tu-sum-${runId}`,
+      name: 'fake_confirm_before',
+      args: { title: 'תור לרופא' },
+    };
+    await summarizedRunTool(db, parkedCall, conv3);
+
+    const transport = createStubTransport();
+    await transport.connect();
+    await sendApprovalPrompts(db, transport, conv3, registry);
+
+    expect(transport.sent).toHaveLength(1);
+    expect(transport.sent[0]?.text).toContain('human summary: תור לרופא');
+    expect(transport.sent[0]?.text).not.toContain('{');
+  });
+});

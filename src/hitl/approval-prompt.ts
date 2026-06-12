@@ -10,20 +10,26 @@
 import { renderApprovalPrompt } from '../agent/prompts.js';
 import { getPendingActionsForConversation, setPromptMessageId, type Queryable } from '../memory/store.js';
 import type { Transport } from '../transport/types.js';
+import type { ToolRegistry } from '../tools/registry.js';
 import { toDigestEntries } from './digest.js';
 
-/** Returns the action ids prompted this call, in row (created_at) order. */
-export async function sendApprovalPrompts(
+/**
+ * Returns the action ids prompted this call, in row (created_at) order.
+ * With a registry, the prompt line uses the tool's summarize() rendering
+ * (T40); without one it stays the raw-args JSON.
+ */
+export async function sendApprovalPrompts<TDeps>(
   db: Queryable,
   transport: Pick<Transport, 'send'>,
   conversationId: string,
+  registry?: ToolRegistry<TDeps>,
 ): Promise<string[]> {
   const pending = await getPendingActionsForConversation(db, conversationId);
   const unstamped = pending.filter((action) => action.promptMessageId === null);
 
   const prompted: string[] = [];
   for (const action of unstamped) {
-    const [entry] = toDigestEntries([action]);
+    const [entry] = toDigestEntries([action], registry);
     const receipt = await transport.send({ conversationId, text: renderApprovalPrompt(entry!) });
     await setPromptMessageId(db, action.actionId, receipt.messageId);
     prompted.push(action.actionId);

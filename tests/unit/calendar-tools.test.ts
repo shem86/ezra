@@ -289,3 +289,17 @@ describe('list_calendar_events', () => {
     expect(result.toLowerCase()).toContain('failed');
   });
 });
+
+describe('makeV1ToolRegistry', () => {
+  it('composes the household surface plus both calendar tools, nothing else', async () => {
+    const { makeV1ToolRegistry, makeHouseholdToolRegistry } = await import(
+      '../../src/tools/index.ts'
+    );
+    const v1 = makeV1ToolRegistry();
+    const household = makeHouseholdToolRegistry();
+    expect(v1.size).toBe(household.size + 2);
+    for (const name of household.keys()) expect(v1.has(name)).toBe(true);
+    expect(v1.get('create_calendar_event')?.riskTier).toBe('confirm-before');
+    expect(v1.get('list_calendar_events')?.riskTier).toBe('autonomous');
+  });
+});

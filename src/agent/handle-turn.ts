@@ -92,6 +92,14 @@ export interface HandleTurnDeps {
   ) => Promise<AssistantMessage>;
   /** Tool-round hard cap (SPEC open question 2 proposes 8). */
   readonly maxRounds?: number;
+  /**
+   * Proposal-line renderer for the closing approval prompt (T40): the
+   * composer passes summarizeToolCall bound to its registry, so the closing
+   * transcript message and the prompt sendApprovalPrompts sends stay
+   * byte-identical. Must be a PURE function of the call (replay renders it
+   * again from journaled values). Absent ⇒ raw-args JSON, the T34 rendering.
+   */
+  readonly summarizeProposal?: (call: ToolCall) => string;
   /** Absent ⇒ no compaction (the T22 skeleton behavior, unchanged). */
   readonly compaction?: CompactionDeps;
 }
@@ -306,7 +314,10 @@ export function makeHandleTurnWorkflow(
             content: renderApprovalPrompt({
               actionId,
               toolName: call.name,
-              summary: JSON.stringify(call.args),
+              summary:
+                deps.summarizeProposal === undefined
+                  ? JSON.stringify(call.args)
+                  : deps.summarizeProposal(call),
             }),
             toolCalls: [],
           });

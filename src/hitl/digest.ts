@@ -9,34 +9,45 @@ import type { PendingAction } from '../memory/store.js';
 import type { ToolRegistry } from '../tools/registry.js';
 
 /**
- * With a registry, a tool's `summarize` hook renders the proposal line
- * humanly (T40, deferred from T34). Every degradation — no registry, unknown
- * tool, no hook, stored args drifted off the schema, a throwing hook — falls
- * back to the raw-args JSON: the digest renders something for every row,
- * never throws. Summaries stay deterministic (pure hook, journaled args).
+ * The ONE proposal-line renderer (T40, deferred from T34): a tool's
+ * `summarize` hook when the registry carries it, raw-args JSON otherwise.
+ * Used by the digest, by sendApprovalPrompts, AND by handleTurn's closing
+ * message — one renderer is what keeps the sent prompt byte-identical to
+ * the journaled transcript. Pure function of journaled values (replay-safe);
+ * every degradation — no registry, unknown tool, no hook, args drifted off
+ * the schema, a throwing hook — falls back to the JSON, never throws.
  */
+export function summarizeToolCall<TDeps>(
+  registry: ToolRegistry<TDeps> | undefined,
+  name: string,
+  args: unknown,
+): string {
+  const def = registry?.get(name);
+  if (def?.summarize !== undefined) {
+    const parsed = def.schema.safeParse(args);
+    if (parsed.success) {
+      try {
+        return def.summarize(parsed.data);
+      } catch {
+        // fall through to the JSON fallback
+      }
+    }
+  }
+  return JSON.stringify(args);
+}
+
 export function toDigestEntries<TDeps>(
   actions: readonly PendingAction[],
   registry?: ToolRegistry<TDeps>,
 ): PendingActionDigestEntry[] {
   return actions.map((action) => {
     const parsed = toolCallSchema.safeParse(action.toolCall);
-    let summary = JSON.stringify(parsed.success ? parsed.data.args : action.toolCall);
-    if (parsed.success && registry !== undefined) {
-      const def = registry.get(parsed.data.name);
-      const args = def?.summarize === undefined ? undefined : def.schema.safeParse(parsed.data.args);
-      if (def?.summarize !== undefined && args?.success === true) {
-        try {
-          summary = def.summarize(args.data);
-        } catch {
-          // keep the JSON fallback
-        }
-      }
-    }
     return {
       actionId: action.actionId,
       toolName: parsed.success ? parsed.data.name : 'unknown',
-      summary,
+      summary: parsed.success
+        ? summarizeToolCall(registry, parsed.data.name, parsed.data.args)
+        : JSON.stringify(action.toolCall),
       expiresAt: action.expiresAt,
     };
   });

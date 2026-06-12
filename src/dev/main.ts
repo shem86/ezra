@@ -19,7 +19,7 @@ import { makeHandleTurnWorkflow } from '../agent/handle-turn.js';
 import { makeCallModel } from '../agent/call-model.js';
 import { stableSystemPrompt, type PendingActionDigestEntry } from '../agent/prompts.js';
 import { makePark } from '../hitl/park.js';
-import { toDigestEntries } from '../hitl/digest.js';
+import { summarizeToolCall, toDigestEntries } from '../hitl/digest.js';
 import { sendApprovalPrompts } from '../hitl/approval-prompt.js';
 import {
   makeResolveApprovalReply,
@@ -33,7 +33,8 @@ import { runMigrations } from '../memory/migrate.js';
 import { getPendingActionsForConversation, loadContext, saveContext } from '../memory/store.js';
 import { writeSemanticMemory, type SemanticMemoryInput } from '../memory/semantic.js';
 import { makeVoyageEmbedder } from '../memory/embedder.js';
-import { makeHouseholdToolRegistry } from '../tools/index.js';
+import { makeV1ToolRegistry } from '../tools/index.js';
+import { makeGoogleCalendarClient } from '../tools/calendar-client.js';
 import { makeRunTool, toToolSet } from '../tools/registry.js';
 import { createStubTransport } from '../transport/stub.js';
 import { scriptedDay } from './scripted-day.js';
@@ -52,7 +53,16 @@ async function main(): Promise<void> {
 
   // --- Model (T25; Sonnet-only per ADR-0003 — Haiku stays for summarize) ----
   const anthropic = createAnthropic({ apiKey: config.anthropicApiKey });
-  const registry = makeHouseholdToolRegistry();
+  // Full v1 surface (T40): household + calendar. The calendar client is the
+  // ONLY holder of the service-account credential — tools see an
+  // authenticated client through deps, never the key. Real calendar I/O on
+  // approval/read paths: dev only, never CI.
+  const registry = makeV1ToolRegistry();
+  const calendarClient = makeGoogleCalendarClient({
+    clientEmail: config.googleServiceAccount.clientEmail,
+    privateKey: config.googleServiceAccount.privateKey,
+    calendarIds: config.calendarIds,
+  });
   const embedder = makeVoyageEmbedder({ apiKey: config.voyageApiKey });
   const callModel = makeCallModel({
     // Stable prefix only — the pending-actions digest rides per call as the
@@ -84,7 +94,7 @@ async function main(): Promise<void> {
     'runTool',
     tracer.traceRunTool(
       makeRunTool(registry, {
-        toolDeps: { embedder },
+        toolDeps: { embedder, calendarClient },
         // Production park (T34). All v1 tools are autonomous, so this fires
         // only when a confirm-before tool lands (T40) — but the wiring is live.
         park: makePark({ ttlHours: config.approvalTtlHours }),
@@ -96,7 +106,7 @@ async function main(): Promise<void> {
     dataSource,
     'loadPendingDigest',
     async (db, conversationId: string): Promise<PendingActionDigestEntry[]> =>
-      toDigestEntries(await getPendingActionsForConversation(db, conversationId)),
+      toDigestEntries(await getPendingActionsForConversation(db, conversationId), registry),
   );
   const resolveApprovalStep = registerTransactionalStep(
     dataSource,
@@ -104,14 +114,14 @@ async function main(): Promise<void> {
     // T35: quoted-reply approvals — guard flip, revalidation, and the tool
     // effect co-commit in this one transaction. Live wiring; nothing parks
     // until a confirm-before tool lands (T40), same as the park seam above.
-    makeResolveApprovalReply(registry, { toolDeps: { embedder } }),
+    makeResolveApprovalReply(registry, { toolDeps: { embedder, calendarClient } }),
   );
   const resolveClassifiedStep = registerTransactionalStep(
     dataSource,
     'resolveClassified',
     // T36: a classified non-quoted approve/deny runs the same settle core as
     // a quoted reply — guard flip, revalidation, claim+effect in one commit.
-    makeResolveClassifiedDecision(registry, { toolDeps: { embedder } }),
+    makeResolveClassifiedDecision(registry, { toolDeps: { embedder, calendarClient } }),
   );
   const refineActionStep = registerTransactionalStep(
     dataSource,
@@ -142,6 +152,10 @@ async function main(): Promise<void> {
         refine: refineActionStep,
       },
       callModel,
+      // One renderer (summarizeToolCall) for the closing prompt, the digest
+      // step above, and sendApprovalPrompts below — byte-identical text in
+      // the transcript and on the wire (T34 invariant, T40 human rendering).
+      summarizeProposal: (call) => summarizeToolCall(registry, call.name, call.args),
       compaction: {
         ...defaultCompactionConfig,
         summarize: tracer.traceStep(
@@ -191,7 +205,7 @@ async function main(): Promise<void> {
           // The closing transcript message IS the approval prompt; send it
           // through the stamping path so prompt_message_id is persisted
           // (the quoted-reply anchor), never as a plain reply.
-          const prompted = await sendApprovalPrompts(db, transport, conversationId);
+          const prompted = await sendApprovalPrompts(db, transport, conversationId, registry);
           console.log(
             `  assistant [parked, ${result.rounds} round(s)]: approval prompt(s) sent for ${prompted.join(', ')}`,
           );
