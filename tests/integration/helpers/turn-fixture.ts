@@ -22,6 +22,9 @@ import {
   saveContext,
 } from '../../../src/memory/store.ts';
 import { toDigestEntries } from '../../../src/hitl/digest.ts';
+import { makeResolveApprovalReply } from '../../../src/hitl/resolve-approval.ts';
+import { defineTool } from '../../../src/tools/define-tool.ts';
+import { makeToolRegistry } from '../../../src/tools/registry.ts';
 import type { PendingActionDigestEntry } from '../../../src/agent/prompts.ts';
 
 const connectionString = process.env.DATABASE_URL;
@@ -54,6 +57,32 @@ const loadPendingDigestStep = registerTransactionalStep(
 );
 
 const toolArgsSchema = z.looseObject({ item: z.string().optional() });
+
+type NoDeps = Record<string, never>;
+
+// The approval resolver needs a registry entry for what park_me parked so
+// the approved execution has an execute body to run (the real tool is T40).
+const parkMeTool = defineTool<NoDeps, typeof toolArgsSchema>({
+  name: 'park_me',
+  description: 'fixture confirm-before tool — executes only via T35 approval',
+  schema: toolArgsSchema,
+  riskTier: 'confirm-before',
+  revalidate: async () => true,
+  execute: async (args, _deps, ctx) => {
+    await addListItem(ctx.db, {
+      list: toolListFor(ctx.conversationId),
+      item: `approved-${args.item ?? 'item'}`,
+      addedBy: ctx.actionId,
+    });
+    return `did ${args.item ?? 'it'}`;
+  },
+});
+
+const resolveApprovalStep = registerTransactionalStep(
+  dataSource,
+  'resolveApproval',
+  makeResolveApprovalReply(makeToolRegistry<NoDeps>([parkMeTool]), { toolDeps: {} }),
+);
 
 /** Tool writes land in the per-conversation list `turn-<conversationId>`. */
 export function toolListFor(conversationId: string): string {
@@ -169,23 +198,32 @@ async function scriptedCallModel(
     return { role: 'assistant', content: options.digest ?? '(no digest)', toolCalls: [] };
   }
   if (script.startsWith('script:park')) {
-    return {
-      role: 'assistant',
-      content: 'this needs approval',
-      toolCalls: [{ id: 'tu-park-1', name: 'park_me', args: {} }],
-    };
+    // Round 0 only: a later turn in the same conversation (e.g. T35's
+    // approval reply) re-reads this script off the first transcript message
+    // and must NOT park again.
+    if (round === 0) {
+      return {
+        role: 'assistant',
+        content: 'this needs approval',
+        toolCalls: [{ id: 'tu-park-1', name: 'park_me', args: {} }],
+      };
+    }
+    return { role: 'assistant', content: 'ok.', toolCalls: [] };
   }
   if (script.startsWith('script:mixed-park')) {
     // One round mixing an autonomous write with a confirm-before park —
     // T34's "every tool_use still answered, turn ends after the round folds".
-    return {
-      role: 'assistant',
-      content: 'adding and proposing',
-      toolCalls: [
-        { id: 'tu-mixed-1', name: 'add_item', args: { item: 'mixed-milk' } },
-        { id: 'tu-mixed-2', name: 'park_me', args: { title: 'dentist' } },
-      ],
-    };
+    if (round === 0) {
+      return {
+        role: 'assistant',
+        content: 'adding and proposing',
+        toolCalls: [
+          { id: 'tu-mixed-1', name: 'add_item', args: { item: 'mixed-milk' } },
+          { id: 'tu-mixed-2', name: 'park_me', args: { title: 'dentist' } },
+        ],
+      };
+    }
+    return { role: 'assistant', content: 'ok.', toolCalls: [] };
   }
   if (script.startsWith('script:loop-forever')) {
     return {
@@ -203,6 +241,7 @@ const baseDeps = {
   runTool: runToolStep,
   callModel: scriptedCallModel,
   loadPendingDigest: loadPendingDigestStep,
+  resolveApproval: resolveApprovalStep,
 };
 
 export const handleTurnWorkflow = DBOS.registerWorkflow(makeHandleTurnWorkflow(baseDeps), {

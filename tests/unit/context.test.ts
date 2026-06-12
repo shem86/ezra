@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  extractQuotedReply,
   parseTurnMessages,
   toModelMessages,
   turnMessageSchema,
@@ -57,5 +58,24 @@ describe('toModelMessages (T22)', () => {
   it('falls back to JSON for unrecognized payloads instead of dropping them', () => {
     const msgs = toModelMessages([{ senderId: 'system', payload: { weird: true } }]);
     expect(msgs[0]?.content).toBe(JSON.stringify({ weird: true }));
+  });
+});
+
+describe('extractQuotedReply (T35)', () => {
+  it('extracts text + quotedMessageId from a quoting human payload', () => {
+    const item = { senderId: 'wife', payload: { text: 'yes', quotedMessageId: 'wa-7' } };
+    expect(extractQuotedReply(item)).toEqual({ text: 'yes', quotedMessageId: 'wa-7' });
+  });
+
+  it('a non-quoting message (null or absent quotedMessageId) is not a quoted reply', () => {
+    expect(
+      extractQuotedReply({ senderId: 'wife', payload: { text: 'hi', quotedMessageId: null } }),
+    ).toBeNull();
+    expect(extractQuotedReply({ senderId: 'wife', payload: { text: 'hi' } })).toBeNull();
+  });
+
+  it('proactive and malformed payloads are never quoted replies', () => {
+    expect(extractQuotedReply({ senderId: 'system', payload: { reminder: 'pills' } })).toBeNull();
+    expect(extractQuotedReply({ senderId: 'wife', payload: 'just a string' })).toBeNull();
   });
 });

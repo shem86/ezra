@@ -15,7 +15,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Client } from 'pg';
 import { DBOS } from '@dbos-inc/dbos-sdk';
 import { runMigrations } from '../../src/memory/migrate.ts';
-import { createPendingAction, loadContext } from '../../src/memory/store.ts';
+import { createPendingAction, loadContext, setPromptMessageId } from '../../src/memory/store.ts';
 import { parseTurnMessages, type TurnMessage } from '../../src/agent/context.ts';
 import type { BatchItem } from '../../src/agent/context.ts';
 
@@ -246,6 +246,72 @@ describe('handleTurn skeleton (T22)', () => {
     const messages = await transcript(conversationId);
     const reply = messages.at(-1);
     expect(reply && 'content' in reply ? reply.content : '').toBe('(no digest)');
+  }, 30_000);
+
+  it('quoted approval (T35): the parked action executes in a fresh turn, outcome as NEW context message', async () => {
+    const conversationId = `conv-${runId}-approve`;
+    await runTurn(conversationId, humanBatch('script:park'));
+    const actionId = `act-tu-park-1-${conversationId}`;
+    // Stamping is the composer's post-send job (T34) — done directly here.
+    await setPromptMessageId(db, actionId, `wa-prompt-${runId}-approve`);
+
+    const result = await runTurn(conversationId, [
+      { senderId: 'wife', payload: { text: 'yes', quotedMessageId: `wa-prompt-${runId}-approve` } },
+    ]);
+
+    expect(result.status).toBe('completed');
+    const status = await db.query('SELECT status FROM pending_actions WHERE action_id = $1', [actionId]);
+    expect(status.rows).toEqual([{ status: 'executed' }]);
+    expect(await itemCount(toolListFor(conversationId), 'approved-item')).toBe(1);
+
+    const messages = await transcript(conversationId);
+    // The original tu-park-1 keeps its single synthetic answer — the real
+    // outcome must never become a second tool_result (decision 10).
+    assertEveryToolUseAnswered(messages);
+    const updates = messages.filter((m) => m.role === 'user' && m.senderId === 'system:hitl');
+    expect(updates).toHaveLength(1);
+    expect(updates[0]?.content).toContain(actionId);
+    expect(updates[0]?.content).toContain('approved by wife');
+    const replyIdx = messages.findIndex((m) => m.role === 'user' && m.content === 'yes');
+    expect(messages.indexOf(updates[0]!)).toBeGreaterThan(replyIdx);
+  }, 30_000);
+
+  it('quoted deny (T35): action flips to denied, nothing executes, the model is told', async () => {
+    const conversationId = `conv-${runId}-qdeny`;
+    await runTurn(conversationId, humanBatch('script:park'));
+    const actionId = `act-tu-park-1-${conversationId}`;
+    await setPromptMessageId(db, actionId, `wa-prompt-${runId}-qdeny`);
+
+    const result = await runTurn(conversationId, [
+      { senderId: 'wife', payload: { text: 'לא', quotedMessageId: `wa-prompt-${runId}-qdeny` } },
+    ]);
+
+    expect(result.status).toBe('completed');
+    const status = await db.query('SELECT status FROM pending_actions WHERE action_id = $1', [actionId]);
+    expect(status.rows).toEqual([{ status: 'denied' }]);
+    expect(await itemCount(toolListFor(conversationId), 'approved-item')).toBe(0);
+
+    const messages = await transcript(conversationId);
+    const updates = messages.filter((m) => m.role === 'user' && m.senderId === 'system:hitl');
+    expect(updates).toHaveLength(1);
+    expect(updates[0]?.content).toContain('declined by wife');
+  }, 30_000);
+
+  it('unclear quoted reply (T35): degrades to a normal turn, action untouched', async () => {
+    const conversationId = `conv-${runId}-qunclear`;
+    await runTurn(conversationId, humanBatch('script:park'));
+    const actionId = `act-tu-park-1-${conversationId}`;
+    await setPromptMessageId(db, actionId, `wa-prompt-${runId}-qunclear`);
+
+    const result = await runTurn(conversationId, [
+      { senderId: 'wife', payload: { text: 'make it 4pm', quotedMessageId: `wa-prompt-${runId}-qunclear` } },
+    ]);
+
+    expect(result.status).toBe('completed');
+    const status = await db.query('SELECT status FROM pending_actions WHERE action_id = $1', [actionId]);
+    expect(status.rows).toEqual([{ status: 'pending' }]);
+    const messages = await transcript(conversationId);
+    expect(messages.filter((m) => m.role === 'user' && m.senderId === 'system:hitl')).toHaveLength(0);
   }, 30_000);
 
   it('MAX_ROUNDS cap: forced no-tools final message instead of a silent stall', async () => {

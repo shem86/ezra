@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   composeSystemPrompt,
+  renderApprovalOutcome,
   renderApprovalPrompt,
   renderPendingActionsDigest,
   stableSystemPrompt,
@@ -101,5 +102,60 @@ describe('renderPendingActionsDigest', () => {
       entry({ expiresAt: new Date('2026-06-15T16:00:00.000Z') }),
     ]);
     expect(digest).toContain('12:00');
+  });
+});
+
+describe('renderApprovalOutcome (T35)', () => {
+  it('executed: names the action, the tool, the approver, and the real result', () => {
+    const text = renderApprovalOutcome(
+      { kind: 'executed', actionId: 'act-1', toolName: 'create_event', result: 'event created' },
+      'wife',
+    );
+    expect(text).toContain('act-1');
+    expect(text).toContain('create_event');
+    expect(text).toContain('approved by wife');
+    expect(text).toContain('event created');
+  });
+
+  it('denied: says who declined and that nothing ran', () => {
+    const text = renderApprovalOutcome(
+      { kind: 'denied', actionId: 'act-1', toolName: 'create_event' },
+      'wife',
+    );
+    expect(text).toContain('declined by wife');
+    expect(text).toContain('act-1');
+  });
+
+  it('stale: reports the failed revalidation and that nothing executed', () => {
+    const text = renderApprovalOutcome(
+      { kind: 'stale', actionId: 'act-1', toolName: 'create_event' },
+      'wife',
+    );
+    expect(text).toMatch(/no longer valid|revalidation/i);
+    expect(text).toMatch(/not executed/i);
+  });
+
+  it('already-resolved: reports the settled status without pretending anything changed', () => {
+    const text = renderApprovalOutcome(
+      { kind: 'already-resolved', actionId: 'act-1', status: 'executed' },
+      'wife',
+    );
+    expect(text).toContain('act-1');
+    expect(text).toContain('executed');
+  });
+
+  it('unbound and unclear produce no context message — the normal turn handles them', () => {
+    expect(renderApprovalOutcome({ kind: 'unbound' }, 'wife')).toBeNull();
+    expect(renderApprovalOutcome({ kind: 'unclear', actionId: 'act-1' }, 'wife')).toBeNull();
+  });
+
+  it('is deterministic — same outcome, same bytes (rendered during workflow replay)', () => {
+    const outcome = {
+      kind: 'executed',
+      actionId: 'act-1',
+      toolName: 'create_event',
+      result: 'done',
+    } as const;
+    expect(renderApprovalOutcome(outcome, 'wife')).toBe(renderApprovalOutcome(outcome, 'wife'));
   });
 });

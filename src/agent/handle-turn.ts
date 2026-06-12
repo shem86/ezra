@@ -13,6 +13,7 @@
 
 import { DBOS } from '@dbos-inc/dbos-sdk';
 import {
+  extractQuotedReply,
   toModelMessages,
   type AssistantMessage,
   type BatchItem,
@@ -20,6 +21,7 @@ import {
   type ToolResult,
   type TurnMessage,
 } from './context.js';
+import type { ApprovalOutcome, ApprovalReplyInput } from '../hitl/resolve-approval.js';
 import {
   buildCompactedTranscript,
   findCompactionCut,
@@ -27,6 +29,7 @@ import {
   type CompactionConfig,
 } from './compaction.js';
 import {
+  renderApprovalOutcome,
   renderApprovalPrompt,
   renderPendingActionsDigest,
   type PendingActionDigestEntry,
@@ -58,6 +61,12 @@ export interface HandleTurnDeps {
    * workflow determinism). Absent ⇒ no digest, the pre-T34 behavior.
    */
   readonly loadPendingDigest?: (conversationId: string) => Promise<PendingActionDigestEntry[]>;
+  /**
+   * T35 approval resolution for quoted replies — must be a registered
+   * datasource transaction (the guard flip, revalidation verdict, and tool
+   * effect co-commit inside it). Absent ⇒ quoted replies are normal turns.
+   */
+  readonly resolveApproval?: (input: ApprovalReplyInput) => Promise<ApprovalOutcome>;
   /**
    * Plain async function — the workflow wraps each call in DBOS.runStep, so
    * the journaled output is one assistant message (the per-round delta) and
@@ -109,6 +118,28 @@ export function makeHandleTurnWorkflow(
   ): Promise<TurnResult> {
     const msgs = await deps.loadContext(conversationId);
     msgs.push(...toModelMessages(batch));
+
+    // Quoted approval replies resolve BEFORE the digest read, so the digest
+    // the model sees this turn already reflects what just settled. The real
+    // outcome enters as a NEW context message — the parked tool_use was
+    // answered once in the parking turn and stays answered (decision 10).
+    if (deps.resolveApproval !== undefined) {
+      for (const item of batch) {
+        const quoted = extractQuotedReply(item);
+        if (quoted === null) continue;
+        const outcome = await deps.resolveApproval({
+          conversationId,
+          quotedMessageId: quoted.quotedMessageId,
+          text: quoted.text,
+        });
+        // Rendered from the journaled step output + workflow input only —
+        // replay regenerates the identical message.
+        const update = renderApprovalOutcome(outcome, item.senderId);
+        if (update !== null) {
+          msgs.push({ role: 'user', senderId: 'system:hitl', content: update });
+        }
+      }
+    }
 
     // Read once per turn: a park created mid-turn ends the turn anyway, so
     // the digest can't go stale within one. Rendering is pure given the rows.

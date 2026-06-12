@@ -43,6 +43,24 @@ export interface BatchItem {
 
 const humanPayloadSchema = z.looseObject({ text: z.string() });
 const proactivePayloadSchema = z.looseObject({ reminder: z.string() });
+const quotedReplySchema = z.looseObject({ text: z.string(), quotedMessageId: z.string().min(1) });
+
+export interface QuotedReply {
+  readonly text: string;
+  readonly quotedMessageId: string;
+}
+
+/**
+ * A human payload that quotes another message (T35 approval binding). The
+ * T20 inbound contract carries `quotedMessageId: string | null`, and
+ * `ParsedInboundMessage` enqueued whole structurally satisfies this parse —
+ * null/absent means "not a quote", never an error.
+ */
+export function extractQuotedReply(item: BatchItem): QuotedReply | null {
+  const parsed = quotedReplySchema.safeParse(item.payload);
+  if (!parsed.success) return null;
+  return { text: parsed.data.text, quotedMessageId: parsed.data.quotedMessageId };
+}
 
 /**
  * Convert a debounced inbox batch into user messages, in batch (seq) order.
