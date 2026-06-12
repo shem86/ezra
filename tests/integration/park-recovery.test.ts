@@ -14,7 +14,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Client } from 'pg';
 import { DBOS } from '@dbos-inc/dbos-sdk';
 import { runMigrations } from '../../src/memory/migrate.ts';
-import { loadContext } from '../../src/memory/store.ts';
+import { loadContext, setPromptMessageId } from '../../src/memory/store.ts';
 import { parseTurnMessages } from '../../src/agent/context.ts';
 import { deriveActionId } from '../../src/tools/registry.ts';
 
@@ -28,6 +28,14 @@ async function itemCount(list: string, item: string): Promise<number> {
     item,
   ]);
   return (res.rows[0] as { n: number }).n;
+}
+
+async function actionStatusByConversation(conversationId: string): Promise<string[]> {
+  const res = await db.query(
+    'SELECT status FROM pending_actions WHERE conversation_id = $1 ORDER BY action_id',
+    [conversationId],
+  );
+  return res.rows.map((r) => (r as { status: string }).status);
 }
 
 async function waitFor(probe: () => Promise<boolean>, timeoutMs: number): Promise<void> {
@@ -133,4 +141,67 @@ describe('kill-mid-park recovery (T34)', () => {
     );
     expect((rows.rows[0] as { n: number }).n).toBe(1);
   }, 60_000);
+});
+
+describe('kill-mid-approval-execution recovery (T35)', () => {
+  it('replays to exactly one executed effect and one outcome message', async () => {
+    // Park in THIS process (the runtime is already launched by the suite),
+    // stamp the prompt id the composer would, then run the approval turn in
+    // a child and SIGKILL it inside the resolver's execute sleep.
+    const conversationId = `conv-${runId}-approvekill`;
+    const list = parkToolListFor(conversationId);
+    const actionId = deriveActionId(conversationId, 'tu-park-1');
+    const promptMessageId = `wa-prompt-${runId}-approvekill`;
+    const parkHandle = await DBOS.startWorkflow(parkTurnWorkflow, {
+      workflowID: `approvekill-park-${runId}`,
+    })(conversationId, [{ senderId: 'wife', payload: { text: 'propose the dentist event' } }]);
+    expect(await parkHandle.getResult()).toEqual({ status: 'parked', rounds: 2 });
+    await setPromptMessageId(db, actionId, promptMessageId);
+
+    const wfid = `approvekill-${runId}`;
+    const child = spawn(
+      process.execPath,
+      [childEntry, wfid, conversationId, promptMessageId],
+      { env: process.env, stdio: 'ignore' },
+    );
+
+    // The approval workflow journals loadContext as its first operation; the
+    // next one is the resolver, whose execute sleeps 3s — a wide kill window.
+    await waitFor(async () => {
+      const res = await db.query(
+        'SELECT count(*)::int AS n FROM dbos.operation_outputs WHERE workflow_uuid = $1',
+        [wfid],
+      );
+      return (res.rows[0] as { n: number }).n >= 1;
+    }, 30_000);
+    child.kill('SIGKILL');
+    await waitForExit(child);
+
+    // Killed inside the resolver transaction: nothing committed — the flip,
+    // the claim, and the effect all rolled back together.
+    expect(await actionStatusByConversation(conversationId)).toEqual(['pending']);
+    expect(await itemCount(list, 'event-created')).toBe(0);
+
+    const resumed = await DBOS.resumeWorkflow(wfid);
+    const result = await resumed.getResult();
+
+    expect(result).toEqual({ status: 'completed', rounds: 1 });
+    expect(await actionStatusByConversation(conversationId)).toEqual(['executed']);
+    expect(await itemCount(list, 'event-created')).toBe(1); // exactly once
+
+    const messages = parseTurnMessages(await loadContext(db, conversationId));
+    const updates = messages.filter((m) => m.role === 'user' && m.senderId === 'system:hitl');
+    expect(updates).toHaveLength(1);
+    expect(updates[0]?.content).toContain(actionId);
+    expect(updates[0]?.content).toContain('approved by wife');
+    // The parked tool_use keeps its single synthetic answer — the real
+    // outcome rode in as the context message above, never a second result.
+    const useIds = messages
+      .filter((m) => m.role === 'assistant')
+      .flatMap((m) => (m.role === 'assistant' ? m.toolCalls.map((c) => c.id) : []));
+    const resultIds = messages
+      .filter((m) => m.role === 'tool')
+      .map((m) => (m.role === 'tool' ? m.toolUseId : ''));
+    expect(resultIds.sort()).toEqual([...useIds].sort());
+  }, 90_000);
 });

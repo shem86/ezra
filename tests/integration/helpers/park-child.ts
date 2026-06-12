@@ -13,14 +13,22 @@ process.env.DBOS__VMID = 'hh-park-child';
 const { parkTurnWorkflow, launchParkRuntime } = await import('./park-fixture.ts');
 const { DBOS } = await import('@dbos-inc/dbos-sdk');
 
-const [, , workflowId, conversationId] = process.argv;
+const [, , workflowId, conversationId, promptMessageId] = process.argv;
 if (!workflowId || !conversationId) {
-  throw new Error('usage: park-child.ts <workflowId> <conversationId>');
+  throw new Error('usage: park-child.ts <workflowId> <conversationId> [promptMessageId]');
 }
+
+// With a promptMessageId the child runs T35's approval turn (a quoted "yes")
+// and the parent kills us inside the resolver's execute; without one it runs
+// the original parking turn and the kill lands in slowPark.
+const batch =
+  promptMessageId === undefined
+    ? [{ senderId: 'wife', payload: { text: 'propose the dentist event' } }]
+    : [{ senderId: 'wife', payload: { text: 'yes', quotedMessageId: promptMessageId } }];
 
 await launchParkRuntime();
 const handle = await DBOS.startWorkflow(parkTurnWorkflow, { workflowID: workflowId })(
   conversationId,
-  [{ senderId: 'wife', payload: { text: 'propose the dentist event' } }],
+  batch,
 );
-await handle.getResult(); // never reached — parent kills us mid-park
+await handle.getResult(); // never reached — parent kills us mid-flight

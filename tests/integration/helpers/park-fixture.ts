@@ -19,6 +19,7 @@ import {
 import { defineTool } from '../../../src/tools/define-tool.ts';
 import { makeRunTool, makeToolRegistry, type RunToolDeps } from '../../../src/tools/registry.ts';
 import { makePark } from '../../../src/hitl/park.ts';
+import { makeResolveApprovalReply } from '../../../src/hitl/resolve-approval.ts';
 import { addListItem, loadContext, saveContext } from '../../../src/memory/store.ts';
 
 const connectionString = process.env.DATABASE_URL;
@@ -57,8 +58,18 @@ const proposeEvent = defineTool<NoDeps, z.ZodType<{ title: string }>>({
   schema: z.object({ title: z.string() }),
   riskTier: 'confirm-before',
   revalidate: async () => true,
-  execute: async () => {
-    throw new Error('confirm-before tools must never execute at propose time');
+  // Reached only through T35 approval — makeRunTool never executes a
+  // confirm-before tool at propose time. The sleep BEFORE the write is the
+  // T35 drill's kill window, inside the resolver transaction: a SIGKILL
+  // mid-sleep rolls back the approve flip, the claim, and this write as one.
+  execute: async (_args, _deps, ctx) => {
+    await new Promise((r) => setTimeout(r, 3000));
+    await addListItem(ctx.db, {
+      list: parkToolListFor(ctx.conversationId),
+      item: 'event-created',
+      addedBy: ctx.actionId,
+    });
+    return 'event created';
   },
 });
 
@@ -70,7 +81,9 @@ const slowPark: RunToolDeps<NoDeps>['park'] = async (db, request) => {
   return realPark(db, request);
 };
 
-const runTool = makeRunTool(makeToolRegistry<NoDeps>([addItem, proposeEvent]), {
+const parkRegistry = makeToolRegistry<NoDeps>([addItem, proposeEvent]);
+
+const runTool = makeRunTool(parkRegistry, {
   toolDeps: {},
   park: slowPark,
 });
@@ -96,6 +109,12 @@ const runToolStep = registerTransactionalStep(
     runTool(db, call, conversationId),
 );
 
+const resolveApprovalStep = registerTransactionalStep(
+  dataSource,
+  'resolveParkApproval',
+  makeResolveApprovalReply(parkRegistry, { toolDeps: {} }),
+);
+
 /**
  * Scripted model, pure function of the transcript (replay-deterministic):
  * round 0 writes the observable pre-kill item, round 1 calls the
@@ -116,11 +135,16 @@ async function scriptedCallModel(
       toolCalls: [{ id: 'tu-prekill-1', name: 'add_item', args: { item: 'before-kill' } }],
     };
   }
-  return {
-    role: 'assistant',
-    content: 'proposing the event',
-    toolCalls: [{ id: 'tu-park-1', name: 'propose_event', args: { title: 'dentist Tuesday' } }],
-  };
+  if (round === 1) {
+    return {
+      role: 'assistant',
+      content: 'proposing the event',
+      toolCalls: [{ id: 'tu-park-1', name: 'propose_event', args: { title: 'dentist Tuesday' } }],
+    };
+  }
+  // The T35 approval turn re-enters with the parking turn's transcript
+  // (2 rounds + the closing prompt): plain final, no more tools.
+  return { role: 'assistant', content: 'noted.', toolCalls: [] };
 }
 
 export const parkTurnWorkflow = DBOS.registerWorkflow(
@@ -128,6 +152,7 @@ export const parkTurnWorkflow = DBOS.registerWorkflow(
     loadContext: loadContextStep,
     persistContext: persistContextStep,
     runTool: runToolStep,
+    resolveApproval: resolveApprovalStep,
     callModel: scriptedCallModel,
   }),
   { name: 'handleTurnParkRecovery' },
