@@ -7,6 +7,9 @@ const envSchema = z.object({
   DATABASE_URL: z.string().min(1, 'required — postgres connection string, see .env.example'),
   ANTHROPIC_API_KEY: z.string().min(1, 'required — Claude Console API key'),
   VOYAGE_API_KEY: z.string().min(1, 'required — Voyage AI embeddings key (semantic recall, T28)'),
+  // T30 tiers — overridable so T33 cost retuning needs no code change.
+  CHEAP_MODEL_ID: z.string().min(1).default('claude-haiku-4-5-20251001'),
+  REASONING_MODEL_ID: z.string().min(1).default('claude-sonnet-4-6'),
   LANGFUSE_PUBLIC_KEY: z.string().min(1, 'required — Langfuse project public key'),
   LANGFUSE_SECRET_KEY: z.string().min(1, 'required — Langfuse project secret key'),
   LANGFUSE_BASE_URL: z.url('must be a URL').default('https://cloud.langfuse.com'),
@@ -20,6 +23,8 @@ export interface Config {
   readonly databaseUrl: string;
   readonly anthropicApiKey: string;
   readonly voyageApiKey: string;
+  readonly cheapModelId: string;
+  readonly reasoningModelId: string;
   readonly langfusePublicKey: string;
   readonly langfuseSecretKey: string;
   readonly langfuseBaseUrl: string;
@@ -93,6 +98,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     databaseUrl: parsed.data.DATABASE_URL,
     anthropicApiKey: parsed.data.ANTHROPIC_API_KEY,
     voyageApiKey: parsed.data.VOYAGE_API_KEY,
+    cheapModelId: parsed.data.CHEAP_MODEL_ID,
+    reasoningModelId: parsed.data.REASONING_MODEL_ID,
     langfusePublicKey: parsed.data.LANGFUSE_PUBLIC_KEY,
     langfuseSecretKey: parsed.data.LANGFUSE_SECRET_KEY,
     langfuseBaseUrl: parsed.data.LANGFUSE_BASE_URL,
