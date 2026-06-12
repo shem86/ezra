@@ -2,8 +2,8 @@
 
 ## T39 — calendar service-account round trip (2026-06-12)
 
-**Verdict: PASS on the auth path and idempotency contract; one calendar
-pending an ACL click (wife's share not yet granted — rerun then).**
+**Verdict: PASS — full create / idempotent-409 / read / delete drill on
+BOTH calendars (two-calendar PASS 2026-06-12; T39 closed).**
 
 `spikes/calendar-sa.ts` (`node --env-file=.env spikes/calendar-sa.ts`),
 service account `hh-agent@shem86.iam.gserviceaccount.com` per ADR-0004:
@@ -15,10 +15,15 @@ service account `hh-agent@shem86.iam.gserviceaccount.com` per ADR-0004:
   re-create is the deterministic-event-id idempotency T40's `execute`
   builds on (event ids are base32hex, `a-v0-9` — `toString(32)` emits
   exactly that alphabet).
-- Wife's calendar returned **404 on create** — the Calendar API's "no
-  access" answer; her share to the SA email hadn't been granted yet.
-  Expected failure mode confirmed loud and first-call, not silent.
-- Rerun the spike after she shares; T39 closes on a two-calendar PASS.
+- Wife's calendar, same full drill: **PASS** after her share landed.
+  Two access-failure modes observed on the way, both loud and
+  first-call (never silent): no share at all reads as **404 on
+  create** (the Calendar API's "no access" answer); a share at a
+  read-only level ("See all event details") reads as **403
+  `requiredAccessLevel`**. The fix was flipping her share for the SA
+  to "Make changes to events" — ACL changes applied within a minute
+  once set correctly (a 5×60s retry loop at the wrong level never
+  healed, so 403 here means wrong level, not propagation).
 
 ## T28 — Voyage embeddings wire smoke (2026-06-11)
 
