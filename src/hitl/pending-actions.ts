@@ -39,6 +39,20 @@ export async function markStale(db: Queryable, actionId: string): Promise<boolea
   return res.rows.length > 0;
 }
 
+/**
+ * pending → expired: nobody answered before the TTL (T37's sweep). Terminal,
+ * never executed — and pending-only, so expiry can never overwrite a settled
+ * action and a racing approval beats the sweep cleanly. Distinct from
+ * 'stale' (approved but failed revalidation). True only for the flipping call.
+ */
+export async function markExpired(db: Queryable, actionId: string): Promise<boolean> {
+  const res = await db.query(
+    "UPDATE pending_actions SET status = 'expired' WHERE action_id = $1 AND status = 'pending' RETURNING action_id",
+    [actionId],
+  );
+  return res.rows.length > 0;
+}
+
 /** What the winning executor gets back: enough to run the parked tool call. */
 export interface ClaimedAction {
   readonly actionId: string;

@@ -10,7 +10,7 @@ import { Client } from 'pg';
 import { z } from 'zod';
 import { runMigrations } from '../../src/memory/migrate.ts';
 import { createPendingAction, setPromptMessageId } from '../../src/memory/store.ts';
-import { markDenied } from '../../src/hitl/pending-actions.ts';
+import { markDenied, markExpired } from '../../src/hitl/pending-actions.ts';
 import { defineTool } from '../../src/tools/define-tool.ts';
 import { makeToolRegistry } from '../../src/tools/registry.ts';
 import {
@@ -268,6 +268,25 @@ describe('resolveApprovalReply (T35)', () => {
     expect(outcome).toMatchObject({ kind: 'stale', actionId, toolName: 'propose_event' });
     expect(await actionStatus(actionId)).toBe('stale');
     expect(await effectCount(conversationId)).toBe(0);
+  });
+
+  it('an expired action can never execute — quoted AND classified approvals both refuse (T37)', async () => {
+    const { conversationId, actionId, promptMessageId } = await parkAndStamp('expired');
+    expect(await markExpired(db, actionId)).toBe(true);
+
+    const quoted = await makeResolver(true)(db, {
+      conversationId,
+      quotedMessageId: promptMessageId,
+      text: 'yes',
+    });
+    const classified = await makeResolveClassifiedDecision(registry, {
+      toolDeps: { revalidateOk: true },
+    })(db, { conversationId, actionId, decision: 'approve' });
+
+    expect(quoted).toMatchObject({ kind: 'already-resolved', actionId, status: 'expired' });
+    expect(classified).toMatchObject({ kind: 'already-resolved', actionId, status: 'expired' });
+    expect(await effectCount(conversationId)).toBe(0);
+    expect(await actionStatus(actionId)).toBe('expired');
   });
 
   it('concurrent double approval: row guards alone make execution single-winner', async () => {

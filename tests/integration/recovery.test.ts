@@ -24,6 +24,7 @@ import {
   claimForExecution,
   markApproved,
   markDenied,
+  markExpired,
   markStale,
 } from '../../src/hitl/pending-actions.ts';
 
@@ -130,6 +131,30 @@ describe('pending-action execute-once guard (T24)', () => {
     expect(claimed?.actionId).toBe(actionId);
     expect(claimed?.toolCall).toEqual({ name: 'create_calendar_event', args: { title: 'תור לרופא' } });
     expect(await claimForExecution(db, actionId)).toBeNull(); // claim is once
+  }, 30_000);
+
+  it('expired is terminal and reachable only from pending (T37 TTL sweep)', async () => {
+    const actionId = `act-${runId}-expired`;
+    const list = `hitl-${runId}-expired`;
+    await park(actionId);
+
+    expect(await markExpired(db, actionId)).toBe(true);
+    expect(await markExpired(db, actionId)).toBe(false); // already expired
+    expect(await markApproved(db, actionId)).toBe(false); // approve only from pending
+    expect(await claimForExecution(db, actionId)).toBeNull(); // an expired action can never execute
+    const result = await approve(actionId, list, `${runId}-expired-1`);
+    expect(result).toBe(false);
+    expect(await executionCount(list)).toBe(0);
+    expect(await actionStatus(actionId)).toBe('expired');
+  }, 30_000);
+
+  it('expiry cannot overwrite a settled action — pending only', async () => {
+    const actionId = `act-${runId}-expire-settled`;
+    await park(actionId);
+
+    expect(await markApproved(db, actionId)).toBe(true);
+    expect(await markExpired(db, actionId)).toBe(false); // never from approved
+    expect(await actionStatus(actionId)).toBe('approved');
   }, 30_000);
 
   it('stale is terminal and reachable only from approved (T35 revalidation failure)', async () => {
