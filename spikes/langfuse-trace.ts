@@ -8,8 +8,12 @@
 // Cache-read tokens from REAL model calls are verified later through
 // pnpm dev (T32/T33) — this spike proves the ingestion contract only.
 
-import { makeLangfuseSink } from '../src/ops/langfuse-sink.ts';
-import { makeTracer } from '../src/ops/tracing.ts';
+// tracing.ts VALUE-imports src with `.js` specifiers, which bare node does
+// not remap (conventions.md) — register the resolve hook before loading it.
+import '../tests/integration/helpers/ts-ext-hooks.ts';
+
+const { makeLangfuseSink } = await import('../src/ops/langfuse-sink.ts');
+const { makeTracer } = await import('../src/ops/tracing.ts');
 
 const publicKey = process.env.LANGFUSE_PUBLIC_KEY;
 const secretKey = process.env.LANGFUSE_SECRET_KEY;
