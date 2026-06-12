@@ -26,10 +26,17 @@ import {
   shouldCompact,
   type CompactionConfig,
 } from './compaction.js';
+import { renderPendingActionsDigest, type PendingActionDigestEntry } from './prompts.js';
 
 export interface ModelCallOptions {
   /** Cap-hit recovery: the model must answer with a user-facing message, no tools. */
   readonly forceFinal: boolean;
+  /**
+   * Rendered pending-actions digest for this turn, or null/absent for none.
+   * Travels as a post-prefix system block so the stable prompt's cache
+   * breakpoint survives digest changes (T32 discipline, live since T34).
+   */
+  readonly digest?: string | null;
 }
 
 export interface HandleTurnDeps {
@@ -41,6 +48,12 @@ export interface HandleTurnDeps {
   readonly loadContext: (conversationId: string) => Promise<TurnMessage[]>;
   readonly persistContext: (conversationId: string, messages: TurnMessage[]) => Promise<void>;
   readonly runTool: (call: ToolCall, conversationId: string) => Promise<ToolResult>;
+  /**
+   * Journaled read of the conversation's still-pending confirm-before
+   * actions (must be a registered step/transaction like loadContext —
+   * workflow determinism). Absent ⇒ no digest, the pre-T34 behavior.
+   */
+  readonly loadPendingDigest?: (conversationId: string) => Promise<PendingActionDigestEntry[]>;
   /**
    * Plain async function — the workflow wraps each call in DBOS.runStep, so
    * the journaled output is one assistant message (the per-round delta) and
@@ -93,12 +106,19 @@ export function makeHandleTurnWorkflow(
     const msgs = await deps.loadContext(conversationId);
     msgs.push(...toModelMessages(batch));
 
+    // Read once per turn: a park created mid-turn ends the turn anyway, so
+    // the digest can't go stale within one. Rendering is pure given the rows.
+    const pendingEntries =
+      deps.loadPendingDigest === undefined ? [] : await deps.loadPendingDigest(conversationId);
+    const digest = renderPendingActionsDigest(pendingEntries);
+
     let status: TurnStatus = 'cap-hit';
     let rounds = 0;
     for (let i = 0; i < maxRounds; i++) {
-      const assistant = await DBOS.runStep(() => deps.callModel(msgs, { forceFinal: false }), {
-        name: 'callModel',
-      });
+      const assistant = await DBOS.runStep(
+        () => deps.callModel(msgs, { forceFinal: false, digest }),
+        { name: 'callModel' },
+      );
       rounds += 1;
       msgs.push(assistant);
       if (assistant.toolCalls.length === 0) {
@@ -124,7 +144,7 @@ export function makeHandleTurnWorkflow(
 
     if (status === 'cap-hit') {
       const finalMessage = await DBOS.runStep(
-        () => deps.callModel(msgs, { forceFinal: true }),
+        () => deps.callModel(msgs, { forceFinal: true, digest }),
         { name: 'callModelForcedFinal' },
       );
       if (finalMessage.toolCalls.length > 0) {

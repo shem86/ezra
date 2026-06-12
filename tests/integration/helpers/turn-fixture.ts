@@ -14,7 +14,15 @@ import {
   type ToolResult,
   type TurnMessage,
 } from '../../../src/agent/context.ts';
-import { addListItem, createPendingAction, loadContext, saveContext } from '../../../src/memory/store.ts';
+import {
+  addListItem,
+  createPendingAction,
+  getPendingActionsForConversation,
+  loadContext,
+  saveContext,
+} from '../../../src/memory/store.ts';
+import { toDigestEntries } from '../../../src/hitl/digest.ts';
+import type { PendingActionDigestEntry } from '../../../src/agent/prompts.ts';
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
@@ -36,6 +44,13 @@ const persistContextStep = registerTransactionalStep(
   'persistTurnContext',
   async (db, conversationId: string, messages: TurnMessage[]): Promise<void> =>
     saveContext(db, conversationId, messages),
+);
+
+const loadPendingDigestStep = registerTransactionalStep(
+  dataSource,
+  'loadPendingDigest',
+  async (db, conversationId: string): Promise<PendingActionDigestEntry[]> =>
+    toDigestEntries(await getPendingActionsForConversation(db, conversationId)),
 );
 
 const toolArgsSchema = z.looseObject({ item: z.string().optional() });
@@ -143,6 +158,11 @@ async function scriptedCallModel(
     }
     return { role: 'assistant', content: 'understood, not doing that.', toolCalls: [] };
   }
+  if (script.startsWith('script:digest-echo')) {
+    // Echo the digest the workflow handed this call — proves the journaled
+    // pending-actions read reaches the model.
+    return { role: 'assistant', content: options.digest ?? '(no digest)', toolCalls: [] };
+  }
   if (script.startsWith('script:park')) {
     return {
       role: 'assistant',
@@ -165,6 +185,7 @@ const baseDeps = {
   persistContext: persistContextStep,
   runTool: runToolStep,
   callModel: scriptedCallModel,
+  loadPendingDigest: loadPendingDigestStep,
 };
 
 export const handleTurnWorkflow = DBOS.registerWorkflow(makeHandleTurnWorkflow(baseDeps), {

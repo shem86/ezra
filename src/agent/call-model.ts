@@ -39,7 +39,7 @@ export function makeCallModel(deps: CallModelDeps): HandleTurnDeps['callModel'] 
       model: deps.model,
       // The system prompt travels as a message so cacheControl attaches (T7).
       allowSystemInMessages: true,
-      messages: toSdkMessages(deps.systemPrompt, messages),
+      messages: toSdkMessages(deps.systemPrompt, messages, options.digest),
       ...(deps.tools === undefined ? {} : { tools: deps.tools }),
       toolChoice: options.forceFinal ? 'none' : 'auto',
     });
@@ -68,8 +68,17 @@ export function makeCallModel(deps: CallModelDeps): HandleTurnDeps['callModel'] 
  * the stable cacheable prefix, so it travels as a system *message* with
  * anthropic cacheControl passthrough (T7: providerOptions cannot attach to
  * the plain `system:` option) — callers must pass `allowSystemInMessages`.
+ *
+ * The digest rides as a SECOND system message with no cacheControl: the
+ * pinned provider folds consecutive system messages into one system array
+ * where each keeps its own cache_control, so the stable block's breakpoint
+ * — and its cache — survives every digest change.
  */
-export function toSdkMessages(systemPrompt: string, msgs: readonly TurnMessage[]): ModelMessage[] {
+export function toSdkMessages(
+  systemPrompt: string,
+  msgs: readonly TurnMessage[],
+  digest?: string | null,
+): ModelMessage[] {
   // Tool-result parts require the tool's name, which the transcript only
   // carries on the originating assistant call — collect ids up front so an
   // orphaned result fails here, not as an opaque provider 400.
@@ -87,6 +96,9 @@ export function toSdkMessages(systemPrompt: string, msgs: readonly TurnMessage[]
       providerOptions: { anthropic: { cacheControl: { type: 'ephemeral' } } },
     },
   ];
+  if (digest != null) {
+    sdk.push({ role: 'system', content: digest });
+  }
 
   for (const msg of msgs) {
     switch (msg.role) {

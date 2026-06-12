@@ -15,7 +15,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Client } from 'pg';
 import { DBOS } from '@dbos-inc/dbos-sdk';
 import { runMigrations } from '../../src/memory/migrate.ts';
-import { loadContext } from '../../src/memory/store.ts';
+import { createPendingAction, loadContext } from '../../src/memory/store.ts';
 import { parseTurnMessages, type TurnMessage } from '../../src/agent/context.ts';
 import type { BatchItem } from '../../src/agent/context.ts';
 
@@ -193,6 +193,34 @@ describe('handleTurn skeleton (T22)', () => {
 
     const parked = await db.query('SELECT status FROM pending_actions WHERE action_id = $1', [actionId]);
     expect(parked.rows).toEqual([{ status: 'pending' }]);
+  }, 30_000);
+
+  it('digest slot live (T34): a pending action reaches the model call, rendered post-prefix', async () => {
+    const conversationId = `conv-${runId}-digest`;
+    await createPendingAction(db, {
+      actionId: `act-digest-${runId}`,
+      conversationId,
+      toolCall: { id: 'tu_x', name: 'fake_confirm_before', args: { title: 'dentist' } },
+      expiresAt: new Date(Date.now() + 12 * 3_600_000),
+    });
+
+    const result = await runTurn(conversationId, humanBatch('script:digest-echo'));
+
+    expect(result.status).toBe('completed');
+    const messages = await transcript(conversationId);
+    const reply = messages.at(-1);
+    expect(reply?.role).toBe('assistant');
+    expect(reply && 'content' in reply ? reply.content : '').toContain(`act-digest-${runId}`);
+  }, 30_000);
+
+  it('digest slot stays empty with no pending actions — the model call carries none', async () => {
+    const conversationId = `conv-${runId}-nodigest`;
+    const result = await runTurn(conversationId, humanBatch('script:digest-echo'));
+
+    expect(result.status).toBe('completed');
+    const messages = await transcript(conversationId);
+    const reply = messages.at(-1);
+    expect(reply && 'content' in reply ? reply.content : '').toBe('(no digest)');
   }, 30_000);
 
   it('MAX_ROUNDS cap: forced no-tools final message instead of a silent stall', async () => {

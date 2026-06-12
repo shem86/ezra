@@ -106,6 +106,24 @@ describe('toSdkMessages', () => {
 
     expect(() => toSdkMessages(SYSTEM, msgs)).toThrow(/tu_ghost/);
   });
+
+  it('a digest becomes a second system message WITHOUT cacheControl — the stable block is untouched', () => {
+    const msgs: TurnMessage[] = [{ role: 'user', senderId: 'wife@wa', content: 'yes' }];
+    const sdk = toSdkMessages(SYSTEM, msgs, '## Awaiting approval\n- [act-1] create_event: dentist');
+
+    // Block 1 byte-identical to the no-digest call: its cache breakpoint
+    // survives digest changes (the T32 prefix discipline, now live).
+    expect(sdk[0]).toEqual(toSdkMessages(SYSTEM, [])[0]);
+    expect(sdk[1]).toEqual({
+      role: 'system',
+      content: '## Awaiting approval\n- [act-1] create_event: dentist',
+    });
+    expect(sdk[2]).toEqual({ role: 'user', content: 'wife@wa: yes' });
+  });
+
+  it('a null digest adds no second system message', () => {
+    expect(toSdkMessages(SYSTEM, [], null)).toEqual(toSdkMessages(SYSTEM, []));
+  });
 });
 
 type DoGenerateOptions = Parameters<
@@ -204,6 +222,28 @@ describe('makeCallModel', () => {
     expect(seen?.prompt[1]).toMatchObject({
       role: 'user',
       content: [{ type: 'text', text: 'wife@wa: add milk' }],
+    });
+  });
+
+  it('passes the per-turn digest through as the post-prefix system block', async () => {
+    let seen: DoGenerateOptions | undefined;
+    const callModel = makeCallModel({
+      model: mockModel([{ type: 'text', text: 'ok' }], (o) => {
+        seen = o;
+      }),
+      systemPrompt: SYSTEM,
+    });
+
+    await callModel(userMsg, { forceFinal: false, digest: '- [act-1] create_event: dentist' });
+
+    expect(seen?.prompt[0]).toMatchObject({
+      role: 'system',
+      content: SYSTEM,
+      providerOptions: { anthropic: { cacheControl: { type: 'ephemeral' } } },
+    });
+    expect(seen?.prompt[1]).toEqual({
+      role: 'system',
+      content: '- [act-1] create_event: dentist',
     });
   });
 
