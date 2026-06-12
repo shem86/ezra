@@ -98,6 +98,8 @@ export function renderApprovalOutcome(
       return `[action update] ${outcome.actionId} (${outcome.toolName}) declined by ${approverId} — nothing was executed.`;
     case 'stale':
       return `[action update] ${outcome.actionId} (${outcome.toolName}) was approved by ${approverId} but failed its revalidation check — it is no longer valid and was NOT executed.`;
+    case 'failed':
+      return `[action update] ${outcome.actionId} (${outcome.toolName}) was approved by ${approverId} but the action could not be completed (${outcome.message}) — it is STILL PENDING and was not executed; approving it again will retry.`;
     case 'already-resolved':
       return `[action update] ${approverId} answered the prompt for ${outcome.actionId}, but it was already ${outcome.status} — nothing changed.`;
   }

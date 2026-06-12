@@ -136,6 +136,22 @@ describe('renderApprovalOutcome (T35)', () => {
     expect(text).toMatch(/not executed/i);
   });
 
+  it('failed: reports the transient failure and that the action is still pending (T40)', () => {
+    const text = renderApprovalOutcome(
+      {
+        kind: 'failed',
+        actionId: 'act-1',
+        toolName: 'create_calendar_event',
+        message: 'calendar create: HTTP 503',
+      },
+      'wife',
+    );
+    expect(text).toContain('act-1');
+    expect(text).toContain('503');
+    expect(text).toMatch(/still pending/i);
+    expect(text).toMatch(/approv/i); // tells the household a re-approval retries
+  });
+
   it('already-resolved: reports the settled status without pretending anything changed', () => {
     const text = renderApprovalOutcome(
       { kind: 'already-resolved', actionId: 'act-1', status: 'executed' },

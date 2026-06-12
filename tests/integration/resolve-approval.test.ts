@@ -360,3 +360,112 @@ describe('revalidate id context (T40)', () => {
     expect(seen).toEqual([{ actionId, externalId: `evt-${actionId}` }]);
   });
 });
+
+// T40 ledger #5: execute-error folding for fallible EXTERNAL tools. A
+// transient calendar failure at approval time is not 'stale' (the proposal
+// is still valid) and must not brick the reply turn: the settle core folds
+// the throw into a 'failed' outcome and the row RETURNS TO PENDING in the
+// same transaction — re-approving retries, the TTL still bounds it, and the
+// deterministic external id keeps the retry safe.
+describe('execute-failure folding (T40)', () => {
+  interface FallibleDeps {
+    failuresLeft: { count: number };
+  }
+
+  const fallibleTool = defineTool<FallibleDeps, z.ZodType<{ title: string }>>({
+    name: 'propose_event',
+    description: 'confirm-before tool whose execute fails like an external API',
+    schema: z.object({ title: z.string() }),
+    riskTier: 'confirm-before',
+    revalidate: async () => true,
+    execute: async (args, deps, ctx) => {
+      if (deps.failuresLeft.count > 0) {
+        deps.failuresLeft.count -= 1;
+        throw new Error('calendar create: HTTP 503 — backend unavailable');
+      }
+      await ctx.db.query('INSERT INTO lists (list, item, added_by) VALUES ($1, $2, $3)', [
+        `approvals-${ctx.conversationId}`,
+        args.title,
+        ctx.actionId,
+      ]);
+      return `event created: ${args.title}`;
+    },
+  });
+
+  function fallibleResolver(failuresLeft: { count: number }) {
+    return makeResolveApprovalReply(makeToolRegistry<FallibleDeps>([fallibleTool]), {
+      toolDeps: { failuresLeft },
+    });
+  }
+
+  it('folds an execute throw into a failed outcome and returns the row to pending', async () => {
+    const { conversationId, actionId, promptMessageId } = await parkAndStamp('fold-fail');
+    const resolve = fallibleResolver({ count: 99 });
+
+    const outcome = await resolve(db, {
+      conversationId,
+      quotedMessageId: promptMessageId,
+      text: 'yes',
+    });
+
+    expect(outcome).toMatchObject({ kind: 'failed', actionId, toolName: 'propose_event' });
+    expect(outcome.kind === 'failed' && outcome.message).toContain('503');
+    expect(await actionStatus(actionId)).toBe('pending');
+    expect(await effectCount(conversationId)).toBe(0);
+    // The stamped prompt survives, so the same quoted message can retry.
+    const row = await db.query(
+      'SELECT prompt_message_id FROM pending_actions WHERE action_id = $1',
+      [actionId],
+    );
+    expect((row.rows[0] as { prompt_message_id: string }).prompt_message_id).toBe(promptMessageId);
+  });
+
+  it('a re-approval after a transient failure executes exactly once', async () => {
+    const { conversationId, actionId, promptMessageId } = await parkAndStamp('fold-retry');
+    const failuresLeft = { count: 1 };
+    const resolve = fallibleResolver(failuresLeft);
+
+    const first = await resolve(db, {
+      conversationId,
+      quotedMessageId: promptMessageId,
+      text: 'yes',
+    });
+    expect(first.kind).toBe('failed');
+
+    const second = await resolve(db, {
+      conversationId,
+      quotedMessageId: promptMessageId,
+      text: 'כן',
+    });
+    expect(second.kind).toBe('executed');
+    expect(await actionStatus(actionId)).toBe('executed');
+    expect(await effectCount(conversationId)).toBe(1);
+  });
+
+  it('folds a revalidate throw the same way — pending, not stale', async () => {
+    const throwingRevalidate = defineTool<Record<string, never>, z.ZodType<{ title: string }>>({
+      name: 'propose_event',
+      description: 'revalidation itself needs the external API',
+      schema: z.object({ title: z.string() }),
+      riskTier: 'confirm-before',
+      revalidate: async () => {
+        throw new Error('calendar list: HTTP 503');
+      },
+      execute: async () => 'unreachable',
+    });
+    const resolve = makeResolveApprovalReply(
+      makeToolRegistry<Record<string, never>>([throwingRevalidate]),
+      { toolDeps: {} },
+    );
+
+    const { conversationId, actionId, promptMessageId } = await parkAndStamp('fold-reval');
+    const outcome = await resolve(db, {
+      conversationId,
+      quotedMessageId: promptMessageId,
+      text: 'yes',
+    });
+
+    expect(outcome.kind).toBe('failed');
+    expect(await actionStatus(actionId)).toBe('pending');
+  });
+});

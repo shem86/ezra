@@ -53,6 +53,21 @@ export async function markExpired(db: Queryable, actionId: string): Promise<bool
   return res.rows.length > 0;
 }
 
+/**
+ * approved/executed → pending (T40 ledger #5): the settle core caught a
+ * transient external failure mid-resolution, so the row goes back to
+ * approvable — within the SAME transaction that flipped it, so it never
+ * visibly left 'pending'. A re-approval retries; the TTL still bounds it.
+ * Never valid from any settled status. True only for the flipping call.
+ */
+export async function returnToPending(db: Queryable, actionId: string): Promise<boolean> {
+  const res = await db.query(
+    "UPDATE pending_actions SET status = 'pending' WHERE action_id = $1 AND status IN ('approved', 'executed') RETURNING action_id",
+    [actionId],
+  );
+  return res.rows.length > 0;
+}
+
 /** What the winning executor gets back: enough to run the parked tool call. */
 export interface ClaimedAction {
   readonly actionId: string;

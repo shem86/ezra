@@ -24,7 +24,13 @@ import {
   type Queryable,
 } from '../memory/store.js';
 import type { ToolRegistry } from '../tools/registry.js';
-import { claimForExecution, markApproved, markDenied, markStale } from './pending-actions.js';
+import {
+  claimForExecution,
+  markApproved,
+  markDenied,
+  markStale,
+  returnToPending,
+} from './pending-actions.js';
 import { interpretApprovalReply } from './approval-binding.js';
 
 export type ApprovalDecision = 'approve' | 'deny';
@@ -57,6 +63,17 @@ export type ApprovalOutcome =
   | { readonly kind: 'denied'; readonly actionId: string; readonly toolName: string }
   /** Approved, but revalidation failed (or the stored call no longer parses). */
   | { readonly kind: 'stale'; readonly actionId: string; readonly toolName: string }
+  /**
+   * The tool's external call failed transiently (T40 ledger #5) — the row is
+   * back to pending and a re-approval retries. Distinct from 'stale': the
+   * proposal itself is still valid.
+   */
+  | {
+      readonly kind: 'failed';
+      readonly actionId: string;
+      readonly toolName: string;
+      readonly message: string;
+    }
   /** The action was already settled when this reply arrived. */
   | {
       readonly kind: 'already-resolved';
@@ -134,39 +151,56 @@ async function settleDecision<TDeps>(
   };
   const externalId = def.externalId?.(idCtx);
 
-  // Revalidate at execute time, not propose time — the approval window is
-  // long (T26 carried the hook; this is its first real call site). The id
-  // context rides along so the check can exempt the action's own external id.
-  const stillValid =
-    def.revalidate === undefined
-      ? true
-      : await def.revalidate(args.data, deps.toolDeps, {
-          ...idCtx,
-          ...(externalId === undefined ? {} : { externalId }),
-        });
-  if (!stillValid) {
-    await markStale(db, action.actionId);
-    return { kind: 'stale', actionId: action.actionId, toolName: call.data.name };
-  }
+  // From here the tool's own code runs (revalidate, then execute) — for an
+  // external tool both can fail transiently (T40 ledger #5). A throw must not
+  // abort the reply turn: fold it into a 'failed' outcome and return the row
+  // to pending so a re-approval retries. The fold runs inside the same
+  // transaction as the flips, so the row never visibly left 'pending'; if
+  // the transaction itself is broken, the rollback lands on pending anyway.
+  try {
+    // Revalidate at execute time, not propose time — the approval window is
+    // long (T26 carried the hook; this is its first real call site). The id
+    // context rides along so the check can exempt the action's own external id.
+    const stillValid =
+      def.revalidate === undefined
+        ? true
+        : await def.revalidate(args.data, deps.toolDeps, {
+            ...idCtx,
+            ...(externalId === undefined ? {} : { externalId }),
+          });
+    if (!stillValid) {
+      await markStale(db, action.actionId);
+      return { kind: 'stale', actionId: action.actionId, toolName: call.data.name };
+    }
 
-  const claimed = await claimForExecution(db, action.actionId);
-  if (claimed === null) {
-    // Unreachable while this transaction holds the row it just flipped to
-    // approved — kept as a guard against a future caller splitting the
-    // transaction boundary.
+    const claimed = await claimForExecution(db, action.actionId);
+    if (claimed === null) {
+      // Unreachable while this transaction holds the row it just flipped to
+      // approved — kept as a guard against a future caller splitting the
+      // transaction boundary.
+      return {
+        kind: 'already-resolved',
+        actionId: action.actionId,
+        status: await currentStatus(db, action.actionId),
+      };
+    }
+
+    const result = await def.execute(args.data, deps.toolDeps, {
+      ...idCtx,
+      db,
+      ...(externalId === undefined ? {} : { externalId }),
+    });
+    return { kind: 'executed', actionId: action.actionId, toolName: call.data.name, result };
+  } catch (err) {
+    await returnToPending(db, action.actionId);
+    const message = err instanceof Error ? err.message : String(err);
     return {
-      kind: 'already-resolved',
+      kind: 'failed',
       actionId: action.actionId,
-      status: await currentStatus(db, action.actionId),
+      toolName: call.data.name,
+      message: message.slice(0, 200),
     };
   }
-
-  const result = await def.execute(args.data, deps.toolDeps, {
-    ...idCtx,
-    db,
-    ...(externalId === undefined ? {} : { externalId }),
-  });
-  return { kind: 'executed', actionId: action.actionId, toolName: call.data.name, result };
 }
 
 export function makeResolveApprovalReply<TDeps>(
