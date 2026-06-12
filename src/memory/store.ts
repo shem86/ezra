@@ -49,6 +49,8 @@ export interface PendingAction {
   readonly status: PendingActionStatus;
   readonly createdAt: Date;
   readonly expiresAt: Date;
+  /** Outbound id of the approval prompt — the quoted-reply binding anchor (T34/T35). */
+  readonly promptMessageId: string | null;
 }
 
 export interface SentLogEntry {
@@ -208,6 +210,7 @@ function mapPendingAction(row: Record<string, unknown>): PendingAction {
     status: row.status as PendingActionStatus,
     createdAt: row.created_at as Date,
     expiresAt: row.expires_at as Date,
+    promptMessageId: (row.prompt_message_id as string | null) ?? null,
   };
 }
 
@@ -231,6 +234,33 @@ export async function getPendingAction(
 ): Promise<PendingAction | null> {
   const res = await db.query('SELECT * FROM pending_actions WHERE action_id = $1', [actionId]);
   return res.rows[0] ? mapPendingAction(res.rows[0]) : null;
+}
+
+/** Stamp the approval prompt's outbound message id. False when no such action. */
+export async function setPromptMessageId(
+  db: Queryable,
+  actionId: string,
+  messageId: string,
+): Promise<boolean> {
+  const res = await db.query(
+    'UPDATE pending_actions SET prompt_message_id = $2 WHERE action_id = $1 RETURNING action_id',
+    [actionId, messageId],
+  );
+  return res.rows.length > 0;
+}
+
+/** Still-pending actions only — the digest and the prompt sender read this. */
+export async function getPendingActionsForConversation(
+  db: Queryable,
+  conversationId: string,
+): Promise<PendingAction[]> {
+  const res = await db.query(
+    `SELECT * FROM pending_actions
+     WHERE conversation_id = $1 AND status = 'pending'
+     ORDER BY created_at, action_id`,
+    [conversationId],
+  );
+  return res.rows.map(mapPendingAction);
 }
 
 function mapSentEntry(row: Record<string, unknown>): SentLogEntry {

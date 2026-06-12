@@ -9,6 +9,7 @@ import {
   getFact,
   getOpenItems,
   getPendingAction,
+  getPendingActionsForConversation,
   getPendingInbox,
   getSentEntry,
   insertInboxItem,
@@ -18,8 +19,10 @@ import {
   markReminderFired,
   recordSend,
   saveContext,
+  setPromptMessageId,
   upsertFact,
 } from '../../src/memory/store.ts';
+import { markApproved } from '../../src/hitl/pending-actions.ts';
 
 const connectionString = process.env.DATABASE_URL ?? '';
 // Unique per run: the dev DB is shared and migrations are forward-only, so
@@ -192,6 +195,49 @@ describe('pending actions store', () => {
 
   it('returns null for an unknown action id', async () => {
     expect(await getPendingAction(db, `act-missing-${runId}`)).toBeNull();
+  });
+
+  it('a fresh park has no prompt message id; stamping persists it (T34 quoted-reply anchor)', async () => {
+    const actionId = `act-stamp-${runId}`;
+    const created = await createPendingAction(db, {
+      actionId,
+      conversationId: `conv-${runId}`,
+      toolCall: { name: 'create_calendar_event', args: {} },
+      expiresAt: new Date(Date.now() + 12 * 3_600_000),
+    });
+    expect(created.promptMessageId).toBeNull();
+
+    expect(await setPromptMessageId(db, actionId, 'wa-msg-77')).toBe(true);
+    const stamped = await getPendingAction(db, actionId);
+    expect(stamped?.promptMessageId).toBe('wa-msg-77');
+  });
+
+  it('stamping an unknown action returns false', async () => {
+    expect(await setPromptMessageId(db, `act-missing-${runId}`, 'wa-msg-1')).toBe(false);
+  });
+
+  it('lists only still-pending actions for one conversation, oldest first', async () => {
+    const conversationId = `conv-digest-${runId}`;
+    const base = {
+      conversationId,
+      toolCall: { name: 'create_calendar_event', args: {} },
+      expiresAt: new Date(Date.now() + 12 * 3_600_000),
+    };
+    await createPendingAction(db, { ...base, actionId: `act-digest-1-${runId}` });
+    await createPendingAction(db, { ...base, actionId: `act-digest-2-${runId}` });
+    await createPendingAction(db, { ...base, actionId: `act-digest-gone-${runId}` });
+    await markApproved(db, `act-digest-gone-${runId}`);
+    await createPendingAction(db, {
+      ...base,
+      conversationId: `conv-other-${runId}`,
+      actionId: `act-digest-other-${runId}`,
+    });
+
+    const pending = await getPendingActionsForConversation(db, conversationId);
+    expect(pending.map((a) => a.actionId)).toEqual([
+      `act-digest-1-${runId}`,
+      `act-digest-2-${runId}`,
+    ]);
   });
 });
 
