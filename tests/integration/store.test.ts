@@ -5,6 +5,7 @@ import {
   addListItem,
   createPendingAction,
   createReminder,
+  getActionByPromptMessageId,
   getDueReminders,
   getFact,
   getOpenItems,
@@ -22,7 +23,7 @@ import {
   setPromptMessageId,
   upsertFact,
 } from '../../src/memory/store.ts';
-import { markApproved } from '../../src/hitl/pending-actions.ts';
+import { markApproved, markDenied } from '../../src/hitl/pending-actions.ts';
 
 const connectionString = process.env.DATABASE_URL ?? '';
 // Unique per run: the dev DB is shared and migrations are forward-only, so
@@ -238,6 +239,43 @@ describe('pending actions store', () => {
       `act-digest-1-${runId}`,
       `act-digest-2-${runId}`,
     ]);
+  });
+
+  it('resolves an action by its prompt message id, scoped to the conversation (T35 binding)', async () => {
+    const conversationId = `conv-bind-${runId}`;
+    const actionId = `act-bind-${runId}`;
+    await createPendingAction(db, {
+      actionId,
+      conversationId,
+      toolCall: { name: 'create_calendar_event', args: {} },
+      expiresAt: new Date(Date.now() + 12 * 3_600_000),
+    });
+    await setPromptMessageId(db, actionId, `wa-prompt-${runId}`);
+
+    const bound = await getActionByPromptMessageId(db, conversationId, `wa-prompt-${runId}`);
+    expect(bound?.actionId).toBe(actionId);
+
+    // A quote of anything that is not an approval prompt resolves to nothing.
+    expect(await getActionByPromptMessageId(db, conversationId, `wa-unrelated-${runId}`)).toBeNull();
+    // The same prompt id quoted from another conversation must not bind.
+    expect(await getActionByPromptMessageId(db, `conv-other-${runId}`, `wa-prompt-${runId}`)).toBeNull();
+  });
+
+  it('binding still resolves after the action leaves pending — resolver reports, guards refuse', async () => {
+    const conversationId = `conv-bind2-${runId}`;
+    const actionId = `act-bind2-${runId}`;
+    await createPendingAction(db, {
+      actionId,
+      conversationId,
+      toolCall: { name: 'create_calendar_event', args: {} },
+      expiresAt: new Date(Date.now() + 12 * 3_600_000),
+    });
+    await setPromptMessageId(db, actionId, `wa-prompt2-${runId}`);
+    await markDenied(db, actionId);
+
+    const bound = await getActionByPromptMessageId(db, conversationId, `wa-prompt2-${runId}`);
+    expect(bound?.actionId).toBe(actionId);
+    expect(bound?.status).toBe('denied');
   });
 });
 

@@ -255,6 +255,24 @@ export async function setPromptMessageId(
   return res.rows.length > 0;
 }
 
+/**
+ * Quoted-reply binding (T35): resolve which action a quoted approval prompt
+ * refers to. Deliberately status-blind — the resolver tells the user when a
+ * bound action is already settled; the transition guards refuse the rest.
+ * Conversation-scoped so a forwarded prompt can't bind across conversations.
+ */
+export async function getActionByPromptMessageId(
+  db: Queryable,
+  conversationId: string,
+  promptMessageId: string,
+): Promise<PendingAction | null> {
+  const res = await db.query(
+    'SELECT * FROM pending_actions WHERE conversation_id = $1 AND prompt_message_id = $2',
+    [conversationId, promptMessageId],
+  );
+  return res.rows[0] ? mapPendingAction(res.rows[0]) : null;
+}
+
 /** Still-pending actions only — the digest and the prompt sender read this. */
 export async function getPendingActionsForConversation(
   db: Queryable,
