@@ -18,15 +18,26 @@ export interface RouterPolicy {
 /**
  * Default routing heuristic (v1):
  * - forceFinal → cheap (text formatting only, no tools possible)
- * - 0–1 tool-result rounds → cheap (Haiku handles most simple household tasks)
- * - 2+ tool-result rounds → reasoning (chained multi-step planning)
+ * - 0–1 tool rounds this turn → cheap (Haiku handles most simple household tasks)
+ * - 2+ tool rounds this turn → reasoning (chained multi-step planning)
+ *
+ * "This turn" is everything after the last user message: the loop appends the
+ * batch's user messages before any round runs and never mid-turn, so that
+ * suffix is exactly the current turn's rounds. Counting the whole transcript
+ * instead would make escalation sticky — one tool-heavy turn (or one parallel
+ * two-call round) would route every later turn of the conversation to the
+ * reasoning tier. A round is ONE assistant message with tool calls, however
+ * many calls it carries in parallel.
  */
 export const defaultRouterPolicy: RouterPolicy = {
   select(messages, options) {
     if (options.forceFinal) return 'cheap';
-    const toolResultCount = messages.filter((m) => m.role === 'tool').length;
-    if (toolResultCount > 1) return 'reasoning';
-    return 'cheap';
+    const lastUser = messages.findLastIndex((m) => m.role === 'user');
+    let rounds = 0;
+    for (const m of messages.slice(lastUser + 1)) {
+      if (m.role === 'assistant' && m.toolCalls.length > 0) rounds += 1;
+    }
+    return rounds >= 2 ? 'reasoning' : 'cheap';
   },
 };
 
