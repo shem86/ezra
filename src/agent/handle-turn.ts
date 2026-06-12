@@ -26,7 +26,11 @@ import {
   shouldCompact,
   type CompactionConfig,
 } from './compaction.js';
-import { renderPendingActionsDigest, type PendingActionDigestEntry } from './prompts.js';
+import {
+  renderApprovalPrompt,
+  renderPendingActionsDigest,
+  type PendingActionDigestEntry,
+} from './prompts.js';
 
 export interface ModelCallOptions {
   /** Cap-hit recovery: the model must answer with a user-facing message, no tools. */
@@ -127,16 +131,37 @@ export function makeHandleTurnWorkflow(
       }
 
       let parked = false;
+      const parkedCalls: Array<{ readonly call: ToolCall; readonly actionId: string }> = [];
       for (const call of assistant.toolCalls) {
         const result = await deps.runTool(call, conversationId);
         // ALWAYS answer — an unanswered tool_use errors the next model call.
         msgs.push({ role: 'tool', toolUseId: result.toolUseId, content: result.content });
-        if (result.parked) parked = true;
+        if (result.parked) {
+          parked = true;
+          if (result.actionId !== undefined) {
+            parkedCalls.push({ call, actionId: result.actionId });
+          }
+        }
       }
       if (parked) {
         // Fire-and-fold: end the turn and free the slot; the real outcome
         // re-enters a fresh turn as a new context message, never a second
-        // tool_result for this tool_use.
+        // tool_result for this tool_use. The turn closes with one approval
+        // prompt per parked action — rendered from journaled values only
+        // (the assistant message holds the call), so replay regenerates the
+        // identical closing message; the composer sends it and stamps its
+        // receipt as prompt_message_id.
+        for (const { call, actionId } of parkedCalls) {
+          msgs.push({
+            role: 'assistant',
+            content: renderApprovalPrompt({
+              actionId,
+              toolName: call.name,
+              summary: JSON.stringify(call.args),
+            }),
+            toolCalls: [],
+          });
+        }
         status = 'parked';
         break;
       }

@@ -58,6 +58,20 @@ export function renderPendingActionsDigest(
   return `## Awaiting approval\nThese proposed actions are waiting for a yes/no. Mention them only when relevant; never treat them as done:\n${lines.join('\n')}`;
 }
 
+/**
+ * The user-facing message that closes a parked turn (T34). Deterministic
+ * given its inputs — the workflow appends it during replay, so no clock, no
+ * randomness. The send receipt of THIS message becomes prompt_message_id,
+ * which is what a quoted reply approves (T35) even with several outstanding.
+ */
+export function renderApprovalPrompt(entry: {
+  readonly actionId: string;
+  readonly toolName: string;
+  readonly summary: string;
+}): string {
+  return `Approval needed: ${entry.toolName} ${entry.summary}\nReply to this message to approve or decline. [${entry.actionId}]`;
+}
+
 /** Stable prefix first, digest strictly after — the cache-prefix discipline. */
 export function composeSystemPrompt(digest: string | null): string {
   if (digest === null) return stableSystemPrompt;

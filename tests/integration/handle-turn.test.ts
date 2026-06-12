@@ -177,19 +177,44 @@ describe('handleTurn skeleton (T22)', () => {
     assertEveryToolUseAnswered(messages);
   }, 30_000);
 
-  it('park path: synthetic pending result, pending_actions row, turn ends without a final round', async () => {
+  it('park path: synthetic pending result, pending_actions row, approval prompt closes the turn', async () => {
     const conversationId = `conv-${runId}-park`;
     const result = await runTurn(conversationId, humanBatch('script:park'));
 
     expect(result).toEqual({ status: 'parked', rounds: 1 });
     const actionId = `act-tu-park-1-${conversationId}`;
     const messages = await transcript(conversationId);
-    expect(messages[messages.length - 1]).toEqual({
+    expect(messages[messages.length - 2]).toEqual({
       role: 'tool',
       toolUseId: 'tu-park-1',
       content: `pending approval, action_id=${actionId}`,
     });
+    // The closing message is the approval prompt (T34) — deterministic, so
+    // replay regenerates identical bytes; its send receipt is what gets
+    // stamped as prompt_message_id.
+    const closing = messages[messages.length - 1];
+    expect(closing?.role).toBe('assistant');
+    expect(closing && 'content' in closing ? closing.content : '').toContain(actionId);
+    expect(closing && 'content' in closing ? closing.content : '').toMatch(/reply to this message/i);
     assertEveryToolUseAnswered(messages);
+
+    const parked = await db.query('SELECT status FROM pending_actions WHERE action_id = $1', [actionId]);
+    expect(parked.rows).toEqual([{ status: 'pending' }]);
+  }, 30_000);
+
+  it('mixed round: autonomous effect commits, every tool_use answered, turn parks after the round folds', async () => {
+    const conversationId = `conv-${runId}-mixed`;
+    const result = await runTurn(conversationId, humanBatch('script:mixed-park'));
+
+    expect(result).toEqual({ status: 'parked', rounds: 1 });
+    expect(await itemCount(toolListFor(conversationId), 'mixed-milk')).toBe(1);
+
+    const actionId = `act-tu-mixed-2-${conversationId}`;
+    const messages = await transcript(conversationId);
+    assertEveryToolUseAnswered(messages);
+    const closing = messages[messages.length - 1];
+    expect(closing?.role).toBe('assistant');
+    expect(closing && 'content' in closing ? closing.content : '').toContain(actionId);
 
     const parked = await db.query('SELECT status FROM pending_actions WHERE action_id = $1', [actionId]);
     expect(parked.rows).toEqual([{ status: 'pending' }]);

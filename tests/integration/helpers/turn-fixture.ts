@@ -97,7 +97,12 @@ const runToolStep = registerTransactionalStep(
           toolCall: call,
           expiresAt: new Date(Date.now() + 12 * 3_600_000),
         });
-        return { toolUseId: call.id, content: `pending approval, action_id=${actionId}`, parked: true };
+        return {
+          toolUseId: call.id,
+          content: `pending approval, action_id=${actionId}`,
+          parked: true,
+          actionId,
+        };
       }
       default:
         return { toolUseId: call.id, content: `unknown tool ${call.name}`, parked: false };
@@ -168,6 +173,18 @@ async function scriptedCallModel(
       role: 'assistant',
       content: 'this needs approval',
       toolCalls: [{ id: 'tu-park-1', name: 'park_me', args: {} }],
+    };
+  }
+  if (script.startsWith('script:mixed-park')) {
+    // One round mixing an autonomous write with a confirm-before park —
+    // T34's "every tool_use still answered, turn ends after the round folds".
+    return {
+      role: 'assistant',
+      content: 'adding and proposing',
+      toolCalls: [
+        { id: 'tu-mixed-1', name: 'add_item', args: { item: 'mixed-milk' } },
+        { id: 'tu-mixed-2', name: 'park_me', args: { title: 'dentist' } },
+      ],
     };
   }
   if (script.startsWith('script:loop-forever')) {

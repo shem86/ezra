@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   composeSystemPrompt,
+  renderApprovalPrompt,
   renderPendingActionsDigest,
   stableSystemPrompt,
   type PendingActionDigestEntry,
@@ -54,6 +55,26 @@ describe('composeSystemPrompt', () => {
     const digest = renderPendingActionsDigest([entry()]);
     const composed = composeSystemPrompt(digest);
     expect(composed.indexOf('act-conv-1-tu_9')).toBeGreaterThan(stableSystemPrompt.length - 1);
+  });
+});
+
+describe('renderApprovalPrompt', () => {
+  it('identifies the action and tells the user to quote-reply', () => {
+    const prompt = renderApprovalPrompt({
+      actionId: 'act-conv-1-tu_9',
+      toolName: 'create_event',
+      summary: '{"title":"dentist"}',
+    });
+
+    expect(prompt).toContain('act-conv-1-tu_9');
+    expect(prompt).toContain('create_event');
+    expect(prompt).toContain('dentist');
+    expect(prompt).toMatch(/reply to this message/i);
+  });
+
+  it('is deterministic — same inputs, same bytes (workflow replay renders it)', () => {
+    const entry = { actionId: 'act-1', toolName: 'create_event', summary: '{}' };
+    expect(renderApprovalPrompt(entry)).toBe(renderApprovalPrompt(entry));
   });
 });
 

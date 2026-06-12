@@ -105,9 +105,9 @@ export function makeRunTool<TDeps>(
         call,
         ...(externalId === undefined ? {} : { externalId }),
       });
-      // parked drives fire-and-fold in the loop — never trust an
-      // implementation to remember it.
-      return { ...result, parked: true };
+      // parked and actionId drive fire-and-fold and the approval prompt in
+      // the loop — never trust a park implementation to remember them.
+      return { ...result, parked: true, actionId: idCtx.actionId };
     }
 
     const content = await def.execute(parsed.data, deps.toolDeps, {

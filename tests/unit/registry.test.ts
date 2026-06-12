@@ -165,6 +165,15 @@ describe('makeRunTool', () => {
     expect(result.parked).toBe(true);
     expect(result.toolUseId).toBe('tu_1');
     expect(result.content).toContain(parked[0]?.request.actionId);
+    // The loop appends the approval prompt from this id — stamped by
+    // makeRunTool itself so no park implementation can forget it (T34).
+    expect(result.actionId).toBe(parked[0]?.request.actionId);
+  });
+
+  it('autonomous results carry no actionId', async () => {
+    const { runTool } = makeRunner();
+    const result = await runTool(fakeDb, call('list_add', { item: 'milk' }), 'conv-1');
+    expect(result.actionId).toBeUndefined();
   });
 
   it('forces parked=true even if a park implementation forgets it', async () => {

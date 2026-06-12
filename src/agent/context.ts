@@ -27,6 +27,8 @@ export interface ToolResult {
   readonly toolUseId: string;
   readonly content: string;
   readonly parked: boolean;
+  /** Present iff parked: the pending_actions key the approval prompt names (T34). */
+  readonly actionId?: string;
 }
 
 export function parseTurnMessages(raw: unknown): TurnMessage[] {
