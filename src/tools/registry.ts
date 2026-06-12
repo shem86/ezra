@@ -26,6 +26,16 @@ export function makeToolRegistry<TDeps>(
   return byName;
 }
 
+/**
+ * Deterministic from journaled values only (the tool_use id lives in the
+ * journaled assistant message), so a recovery replay re-derives the same id
+ * without any DBOS runtime read. Exported so the T31 tracer tags spans with
+ * the same id the runTool body uses — one derivation, no drift.
+ */
+export function deriveActionId(conversationId: string, toolUseId: string): string {
+  return `act-${conversationId}-${toolUseId}`;
+}
+
 /** The `tools` dep for T25's makeCallModel: schemas for the model, no execute. */
 export function toToolSet<TDeps>(registry: ToolRegistry<TDeps>): ToolSet {
   const toolSet: ToolSet = {};
@@ -82,11 +92,8 @@ export function makeRunTool<TDeps>(
       };
     }
 
-    // Derived from journaled values only (the tool_use id lives in the
-    // journaled assistant message), so a recovery replay re-derives the same
-    // ids without any DBOS runtime read.
     const idCtx = {
-      actionId: `act-${conversationId}-${call.id}`,
+      actionId: deriveActionId(conversationId, call.id),
       conversationId,
       toolUseId: call.id,
     };
