@@ -49,6 +49,14 @@ describe('loadConfig', () => {
     expect(config.langfuseBaseUrl).toBe('https://cloud.langfuse.com');
   });
 
+  it('defaults the approval TTL to 12 hours (Open Q1, resolved at T34) and accepts overrides', () => {
+    expect(loadConfig(validEnv).approvalTtlHours).toBe(12);
+    expect(loadConfig({ ...validEnv, APPROVAL_TTL_HOURS: '24' }).approvalTtlHours).toBe(24);
+    expect(() => loadConfig({ ...validEnv, APPROVAL_TTL_HOURS: '0' })).toThrowError(
+      /APPROVAL_TTL_HOURS/,
+    );
+  });
+
   it('fails loudly naming every missing variable', () => {
     const { DATABASE_URL: _db, ANTHROPIC_API_KEY: _key, ...partial } = validEnv;
 

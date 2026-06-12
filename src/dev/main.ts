@@ -17,11 +17,14 @@ import { makeLangfuseSink } from '../ops/langfuse-sink.js';
 import { registerTransactionalStep } from '../orchestration/steps.js';
 import { makeHandleTurnWorkflow } from '../agent/handle-turn.js';
 import { makeCallModel } from '../agent/call-model.js';
-import { composeSystemPrompt } from '../agent/prompts.js';
+import { stableSystemPrompt, type PendingActionDigestEntry } from '../agent/prompts.js';
+import { makePark } from '../hitl/park.js';
+import { toDigestEntries } from '../hitl/digest.js';
+import { sendApprovalPrompts } from '../hitl/approval-prompt.js';
 import { defaultCompactionConfig, makeSummarize } from '../agent/compaction.js';
 import { parseTurnMessages, type TurnMessage } from '../agent/context.js';
 import { runMigrations } from '../memory/migrate.js';
-import { loadContext, saveContext } from '../memory/store.js';
+import { getPendingActionsForConversation, loadContext, saveContext } from '../memory/store.js';
 import { writeSemanticMemory, type SemanticMemoryInput } from '../memory/semantic.js';
 import { makeVoyageEmbedder } from '../memory/embedder.js';
 import { makeHouseholdToolRegistry } from '../tools/index.js';
@@ -46,8 +49,10 @@ async function main(): Promise<void> {
   const registry = makeHouseholdToolRegistry();
   const embedder = makeVoyageEmbedder({ apiKey: config.voyageApiKey });
   const callModel = makeCallModel({
+    // Stable prefix only — the pending-actions digest rides per call as the
+    // post-prefix system block (T34).
+    systemPrompt: stableSystemPrompt,
     model: anthropic(config.reasoningModelId),
-    systemPrompt: composeSystemPrompt(null), // digest slot inert until T34
     tools: toToolSet(registry),
     onUsage: tracer.onModelUsage,
   });
@@ -74,15 +79,18 @@ async function main(): Promise<void> {
     tracer.traceRunTool(
       makeRunTool(registry, {
         toolDeps: { embedder },
-        // All v1 tools are autonomous; the production park lands with T34.
-        park: async (_db, request) => ({
-          toolUseId: request.call.id,
-          content: 'pending approval (HITL lands in M5)',
-          parked: true,
-        }),
+        // Production park (T34). All v1 tools are autonomous, so this fires
+        // only when a confirm-before tool lands (T40) — but the wiring is live.
+        park: makePark({ ttlHours: config.approvalTtlHours }),
       }),
       registry,
     ),
+  );
+  const loadPendingDigestStep = registerTransactionalStep(
+    dataSource,
+    'loadPendingDigest',
+    async (db, conversationId: string): Promise<PendingActionDigestEntry[]> =>
+      toDigestEntries(await getPendingActionsForConversation(db, conversationId)),
   );
   const writeMemoryStep = registerTransactionalStep(
     dataSource,
@@ -96,6 +104,7 @@ async function main(): Promise<void> {
       loadContext: loadContextStep,
       persistContext: persistContextStep,
       runTool: runToolStep,
+      loadPendingDigest: loadPendingDigestStep,
       callModel,
       compaction: {
         ...defaultCompactionConfig,
@@ -142,11 +151,21 @@ async function main(): Promise<void> {
         })(conversationId, [{ senderId: message.senderId, payload: { text: message.text } }]);
         const result = await handle.getResult();
 
-        const transcript = parseTurnMessages(await loadContext(db, conversationId));
-        const reply = transcript.filter((m) => m.role === 'assistant').at(-1);
-        const text = reply === undefined || reply.content === '' ? '(no text)' : reply.content;
-        await transport.send({ conversationId, text });
-        console.log(`  assistant [${result.status}, ${result.rounds} round(s)]: ${text}`);
+        if (result.status === 'parked') {
+          // The closing transcript message IS the approval prompt; send it
+          // through the stamping path so prompt_message_id is persisted
+          // (the quoted-reply anchor), never as a plain reply.
+          const prompted = await sendApprovalPrompts(db, transport, conversationId);
+          console.log(
+            `  assistant [parked, ${result.rounds} round(s)]: approval prompt(s) sent for ${prompted.join(', ')}`,
+          );
+        } else {
+          const transcript = parseTurnMessages(await loadContext(db, conversationId));
+          const reply = transcript.filter((m) => m.role === 'assistant').at(-1);
+          const text = reply === undefined || reply.content === '' ? '(no text)' : reply.content;
+          await transport.send({ conversationId, text });
+          console.log(`  assistant [${result.status}, ${result.rounds} round(s)]: ${text}`);
+        }
       }
     }
     console.log(`\ndone: ${transport.sent.length} replies sent through the stub transport`);

@@ -11,7 +11,9 @@ import { runMigrations } from '../../src/memory/migrate.ts';
 import { defineTool } from '../../src/tools/define-tool.ts';
 import { deriveActionId, makeRunTool, makeToolRegistry } from '../../src/tools/registry.ts';
 import { makePark } from '../../src/hitl/park.ts';
+import { sendApprovalPrompts } from '../../src/hitl/approval-prompt.ts';
 import { getPendingAction } from '../../src/memory/store.ts';
+import { createStubTransport } from '../../src/transport/stub.ts';
 import type { ToolCall } from '../../src/agent/context.ts';
 
 const connectionString = process.env.DATABASE_URL ?? '';
@@ -74,6 +76,34 @@ describe('production park (T34)', () => {
     const ttlMs = 12 * 3_600_000;
     expect(row!.expiresAt.getTime()).toBeGreaterThanOrEqual(before + ttlMs - 60_000);
     expect(row!.expiresAt.getTime()).toBeLessThanOrEqual(Date.now() + ttlMs + 60_000);
+  });
+
+  it('sends one approval prompt per unstamped action and persists each message id', async () => {
+    const conv2 = `park-send-${runId}`;
+    const callA = call({ title: 'first' });
+    const callB = call({ title: 'second' });
+    await runTool(db, callA, conv2);
+    await runTool(db, callB, conv2);
+
+    const transport = createStubTransport();
+    await transport.connect();
+    const sent = await sendApprovalPrompts(db, transport, conv2);
+
+    expect(sent).toEqual([deriveActionId(conv2, callA.id), deriveActionId(conv2, callB.id)]);
+    expect(transport.sent).toHaveLength(2);
+    expect(transport.sent[0]?.conversationId).toBe(conv2);
+    expect(transport.sent[0]?.text).toContain(deriveActionId(conv2, callA.id));
+    expect(transport.sent[0]?.text).toContain('first');
+    expect(transport.sent[1]?.text).toContain(deriveActionId(conv2, callB.id));
+
+    const rowA = await getPendingAction(db, deriveActionId(conv2, callA.id));
+    const rowB = await getPendingAction(db, deriveActionId(conv2, callB.id));
+    expect(rowA?.promptMessageId).toBe('stub-sent-1');
+    expect(rowB?.promptMessageId).toBe('stub-sent-2');
+
+    // Already-stamped actions are never re-prompted.
+    expect(await sendApprovalPrompts(db, transport, conv2)).toEqual([]);
+    expect(transport.sent).toHaveLength(2);
   });
 
   it('schema-invalid args return an error result and park nothing', async () => {

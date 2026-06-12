@@ -18,6 +18,9 @@ const envSchema = z.object({
   ALERT_CHANNEL_CHAT_ID: z.string().min(1, 'required — Telegram chat id the alerts go to'),
   DEADMAN_PING_URL: z.url('must be a URL — external dead-man check endpoint'),
   WA_SESSION_DIR: z.string().min(1).default('.wa-session'),
+  // Open Q1 (resolved at T34): how long a parked confirm-before action waits
+  // for approval. Written into expires_at at park time; T37's sweep consumes it.
+  APPROVAL_TTL_HOURS: z.coerce.number().positive().default(12),
 });
 
 export interface Config {
@@ -33,6 +36,7 @@ export interface Config {
   readonly alertChannelChatId: string;
   readonly deadmanPingUrl: string;
   readonly waSessionDir: string;
+  readonly approvalTtlHours: number;
 }
 
 function formatIssues(issues: Array<{ path: PropertyKey[]; message: string }>): string {
@@ -108,5 +112,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     alertChannelChatId: parsed.data.ALERT_CHANNEL_CHAT_ID,
     deadmanPingUrl: parsed.data.DEADMAN_PING_URL,
     waSessionDir: parsed.data.WA_SESSION_DIR,
+    approvalTtlHours: parsed.data.APPROVAL_TTL_HOURS,
   };
 }
