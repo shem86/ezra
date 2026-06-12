@@ -1,5 +1,30 @@
 # Spike results
 
+## T41 — production calendar stack round-trip gate (2026-06-12)
+
+**Verdict: PASS first run — the production client + real tool
+`execute`/`revalidate` round-trip the real Calendar API; T41 closed.**
+
+`spikes/calendar-roundtrip.ts` (`node --env-file=.env
+spikes/calendar-roundtrip.ts`), husband's calendar, far-future slot
+(precheck-abort if occupied; self-cleaning — deletes only its own ids):
+
+- The production 66-char `hh`+sha256(action_id) event id — first time the
+  real derivation touched Google (T39's spike used `toString(32)`) —
+  **accepted on create and returned verbatim** by events.list.
+- Re-execute with the same ctx: **real 409 → folded to already-exists
+  success** through the production status path (the recovery-replay no-op).
+- Production `listEvents` Zod parse holds against real responses, **timed
+  and all-day shapes**; the list tool renders both correctly.
+- **Eastern anchoring round-trips**: Google returned exactly the instant
+  `wallTimeToInstant` produced (07:30 EDT → 11:30Z); `durationMin` default
+  landed as a 60-minute event.
+- **Manufactured conflict caught**: `revalidate` for a different action over
+  the occupied window → busy; the action's own id stays exempt (the
+  replay-after-landed-POST guard) → free; an all-day event does **not**
+  block the slot.
+- Clean exit: both gate events deleted, window empty.
+
 ## T39 — calendar service-account round trip (2026-06-12)
 
 **Verdict: PASS — full create / idempotent-409 / read / delete drill on
