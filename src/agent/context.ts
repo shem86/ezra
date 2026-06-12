@@ -43,6 +43,10 @@ export interface BatchItem {
 
 const humanPayloadSchema = z.looseObject({ text: z.string() });
 const proactivePayloadSchema = z.looseObject({ reminder: z.string() });
+// Pre-rendered [action update] text (T37 expiry notices). Deliberately NOT a
+// `text` payload: extractMessageText returns null for it, so system-produced
+// updates can never reach the relatedness classifier or settle an action.
+const actionUpdatePayloadSchema = z.looseObject({ actionUpdate: z.string() });
 const quotedReplySchema = z.looseObject({ text: z.string(), quotedMessageId: z.string().min(1) });
 
 export interface QuotedReply {
@@ -90,6 +94,11 @@ export function toModelMessages(batch: readonly BatchItem[]): TurnMessage[] {
         senderId: item.senderId,
         content: `[reminder] ${proactive.data.reminder}`,
       };
+    }
+    const update = actionUpdatePayloadSchema.safeParse(item.payload);
+    if (update.success) {
+      // Verbatim: the producer already rendered the [action update] line.
+      return { role: 'user' as const, senderId: item.senderId, content: update.data.actionUpdate };
     }
     return { role: 'user' as const, senderId: item.senderId, content: JSON.stringify(item.payload) };
   });

@@ -103,6 +103,20 @@ export function renderApprovalOutcome(
   }
 }
 
+/**
+ * The proactive context message for an action nobody answered before its TTL
+ * (T37). Deterministic — the sweep enqueues it and replay must regenerate
+ * identical bytes. Gentle by content (nothing failed, no blame, an easy path
+ * back); the model relays it in the user's language per the system:hitl rule.
+ */
+export function renderExpiryNotice(entry: {
+  readonly actionId: string;
+  readonly toolName: string;
+  readonly summary: string;
+}): string {
+  return `[action update] the proposed ${entry.toolName} (${entry.summary}) [${entry.actionId}] was not approved in time and has quietly expired — nothing was executed. If it is still wanted, just ask again.`;
+}
+
 /** Stable prefix first, digest strictly after — the cache-prefix discipline. */
 export function composeSystemPrompt(digest: string | null): string {
   if (digest === null) return stableSystemPrompt;

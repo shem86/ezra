@@ -102,3 +102,25 @@ describe('extractMessageText (T36)', () => {
     expect(extractMessageText({ senderId: 'wife', payload: null })).toBe(null);
   });
 });
+
+describe('action-update payload (T37)', () => {
+  const item = {
+    senderId: 'system:hitl',
+    payload: { actionUpdate: '[action update] act-1 (propose_event) expired — nothing was executed.' },
+  };
+
+  it('toModelMessages renders the update text verbatim as a user message', () => {
+    expect(toModelMessages([item])).toEqual([
+      {
+        role: 'user',
+        senderId: 'system:hitl',
+        content: '[action update] act-1 (propose_event) expired — nothing was executed.',
+      },
+    ]);
+  });
+
+  it('is invisible to the classifier and the quoted-reply binder — only utterances route', () => {
+    expect(extractMessageText(item)).toBeNull();
+    expect(extractQuotedReply(item)).toBeNull();
+  });
+});

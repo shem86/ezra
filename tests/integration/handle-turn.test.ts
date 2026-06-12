@@ -484,6 +484,27 @@ describe('relatedness routing (T36)', () => {
     expect((await actionRow(secondId)).status).toBe('pending');
   });
 
+  it('an action-update item (T37 expiry notice) never reaches the classifier, even with one pending', async () => {
+    const { conversationId, actionId } = await parkDirect('t37-update-blind');
+    const before = classifyLog.length;
+
+    const result = await runTurn(conversationId, [
+      {
+        senderId: 'system:hitl',
+        payload: { actionUpdate: `[action update] some other action expired — nothing was executed.` },
+      },
+    ]);
+
+    expect(result.status).toBe('completed');
+    expect(classifyLog.length).toBe(before);
+    expect((await actionRow(actionId)).status).toBe('pending');
+    const messages = await transcript(conversationId);
+    const update = messages.find(
+      (m) => m.role === 'user' && m.content.includes('some other action expired'),
+    );
+    expect(update).toMatchObject({ senderId: 'system:hitl' });
+  });
+
   it('a bound quoted approve takes precedence — the classifier is never consulted', async () => {
     const { conversationId, actionId } = await parkDirect('t36-quoted');
     const promptMessageId = `wa-prompt-${runId}-t36-quoted`;

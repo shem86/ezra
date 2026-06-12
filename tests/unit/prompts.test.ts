@@ -7,6 +7,7 @@ import {
   composeSystemPrompt,
   renderApprovalOutcome,
   renderApprovalPrompt,
+  renderExpiryNotice,
   renderPendingActionsDigest,
   stableSystemPrompt,
   type PendingActionDigestEntry,
@@ -164,5 +165,22 @@ describe('stableSystemPrompt approval guidance (T36)', () => {
   it('teaches the multi-pending rule: never pick an action yourself, ask for a quoted reply', () => {
     expect(stableSystemPrompt).toMatch(/more than one/i);
     expect(stableSystemPrompt).toMatch(/quot/i);
+  });
+});
+
+describe('renderExpiryNotice (T37)', () => {
+  it('names the action, says nothing was executed, and invites a re-ask — gently', () => {
+    const text = renderExpiryNotice(entry({ actionId: 'act-9', toolName: 'propose_event' }));
+    expect(text).toContain('[action update]');
+    expect(text).toContain('act-9');
+    expect(text).toContain('propose_event');
+    expect(text).toContain('dentist Tuesday 15:00');
+    expect(text).toMatch(/expired/);
+    expect(text).toMatch(/nothing was executed/i);
+    expect(text).toMatch(/ask/i);
+  });
+
+  it('is deterministic — the sweep enqueues it and replay must regenerate identical bytes', () => {
+    expect(renderExpiryNotice(entry())).toBe(renderExpiryNotice(entry()));
   });
 });
