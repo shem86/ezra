@@ -16,7 +16,7 @@ import { makeTracer } from '../ops/tracing.js';
 import { makeLangfuseSink } from '../ops/langfuse-sink.js';
 import { registerTransactionalStep } from '../orchestration/steps.js';
 import { makeHandleTurnWorkflow } from '../agent/handle-turn.js';
-import { makeRoutedCallModel } from '../agent/router.js';
+import { makeCallModel } from '../agent/call-model.js';
 import { composeSystemPrompt } from '../agent/prompts.js';
 import { defaultCompactionConfig, makeSummarize } from '../agent/compaction.js';
 import { parseTurnMessages, type TurnMessage } from '../agent/context.js';
@@ -41,13 +41,12 @@ async function main(): Promise<void> {
   });
   const tracer = makeTracer({ sink, getTraceId: () => DBOS.workflowID });
 
-  // --- Model tiers (T25/T30) ------------------------------------------------
+  // --- Model (T25; Sonnet-only per ADR-0003 — Haiku stays for summarize) ----
   const anthropic = createAnthropic({ apiKey: config.anthropicApiKey });
   const registry = makeHouseholdToolRegistry();
   const embedder = makeVoyageEmbedder({ apiKey: config.voyageApiKey });
-  const callModel = makeRoutedCallModel({
-    cheap: anthropic(config.cheapModelId),
-    reasoning: anthropic(config.reasoningModelId),
+  const callModel = makeCallModel({
+    model: anthropic(config.reasoningModelId),
     systemPrompt: composeSystemPrompt(null), // digest slot inert until T34
     tools: toToolSet(registry),
     onUsage: tracer.onModelUsage,

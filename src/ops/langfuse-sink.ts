@@ -51,8 +51,7 @@ function toEvent(span: TraceSpan): IngestionEvent {
     span.error === undefined ? {} : { level: 'ERROR', statusMessage: span.error };
 
   if (span.name === 'callModel') {
-    const { tier, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens } =
-      span.attributes;
+    const { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens } = span.attributes;
     return {
       id: randomUUID(),
       timestamp: span.endTime.toISOString(),
@@ -73,7 +72,6 @@ function toEvent(span: TraceSpan): IngestionEvent {
             ? {}
             : { cache_creation_input_tokens: cacheWriteTokens }),
         },
-        metadata: { ...(tier === undefined ? {} : { tier }) },
         ...errorFields,
       },
     };

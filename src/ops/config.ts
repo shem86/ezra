@@ -7,7 +7,8 @@ const envSchema = z.object({
   DATABASE_URL: z.string().min(1, 'required — postgres connection string, see .env.example'),
   ANTHROPIC_API_KEY: z.string().min(1, 'required — Claude Console API key'),
   VOYAGE_API_KEY: z.string().min(1, 'required — Voyage AI embeddings key (semantic recall, T28)'),
-  // T30 tiers — overridable so T33 cost retuning needs no code change.
+  // Reasoning = every turn call (ADR-0003); cheap = classification only
+  // (compaction summarize, T36 relatedness). Overridable for T33 retuning.
   CHEAP_MODEL_ID: z.string().min(1).default('claude-haiku-4-5-20251001'),
   REASONING_MODEL_ID: z.string().min(1).default('claude-sonnet-4-6'),
   LANGFUSE_PUBLIC_KEY: z.string().min(1, 'required — Langfuse project public key'),

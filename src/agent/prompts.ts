@@ -1,5 +1,5 @@
 // System prompt (T32). The stable prompt is the prompt-cache prefix (T25
-// attaches cacheControl to it; T30 means it caches once per model tier), so
+// attaches cacheControl to it; one turn model, one cache — ADR-0003), so
 // it must be byte-stable across calls: no dates, no per-turn state, nothing
 // from Config. Anything dynamic goes through the digest slot, which appends
 // strictly AFTER the prefix so cache reads survive digest changes.

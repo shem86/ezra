@@ -94,7 +94,7 @@ export function renderForSummary(msgs: readonly TurnMessage[]): string {
 }
 
 export interface SummarizeDeps {
-  /** Haiku-class — summarization is routing-tier work (instantiated by the composer). */
+  /** Haiku-class — cheap classification, kept by ADR-0003 (instantiated by the composer). */
   readonly model: LanguageModel;
 }
 

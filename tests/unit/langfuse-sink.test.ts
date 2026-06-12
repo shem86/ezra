@@ -78,7 +78,7 @@ describe('makeLangfuseSink', () => {
     expect(requests[1]!.body.batch.filter((e) => e.type === 'trace-create')).toHaveLength(0);
   });
 
-  it('maps callModel spans to generation-create with usageDetails incl. cache tokens and tier metadata', async () => {
+  it('maps callModel spans to generation-create with usageDetails incl. cache tokens', async () => {
     const { requests, fetchFn } = stubbedFetch();
     const sink = makeLangfuseSink(options(fetchFn));
 
@@ -86,7 +86,6 @@ describe('makeLangfuseSink', () => {
       span({
         name: 'callModel',
         attributes: {
-          tier: 'cheap',
           inputTokens: 100,
           outputTokens: 20,
           cacheReadTokens: 80,
@@ -106,7 +105,7 @@ describe('makeLangfuseSink', () => {
       cache_read_input_tokens: 80,
       cache_creation_input_tokens: 5,
     });
-    expect(gen!.body['metadata']).toEqual({ tier: 'cheap' });
+    expect(gen!.body['metadata']).toBeUndefined();
     expect(gen!.body['startTime']).toBe('2026-06-11T12:00:00.000Z');
     expect(gen!.body['endTime']).toBe('2026-06-11T12:00:00.250Z');
   });
@@ -145,7 +144,7 @@ describe('makeLangfuseSink', () => {
     const sink = makeLangfuseSink(options(fetchFn));
 
     sink.emit(span());
-    sink.emit(span({ name: 'callModel', attributes: { tier: 'cheap' } }));
+    sink.emit(span({ name: 'callModel', attributes: { inputTokens: 1 } }));
     await sink.flush();
 
     const ids = requests[0]!.body.batch.map((e) => e.id);
