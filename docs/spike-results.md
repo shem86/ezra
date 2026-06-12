@@ -1,5 +1,25 @@
 # Spike results
 
+## T39 — calendar service-account round trip (2026-06-12)
+
+**Verdict: PASS on the auth path and idempotency contract; one calendar
+pending an ACL click (wife's share not yet granted — rerun then).**
+
+`spikes/calendar-sa.ts` (`node --env-file=.env spikes/calendar-sa.ts`),
+service account `hh-agent@shem86.iam.gserviceaccount.com` per ADR-0004:
+
+- Zero-dep RS256 JWT (`node:crypto`) → `oauth2.googleapis.com/token`
+  accepted; access token issued for scope `calendar.events`.
+- Husband's calendar, full drill: **create 200 → re-create with the same
+  supplied event id 409 → read-back matches → delete 204.** The 409 on
+  re-create is the deterministic-event-id idempotency T40's `execute`
+  builds on (event ids are base32hex, `a-v0-9` — `toString(32)` emits
+  exactly that alphabet).
+- Wife's calendar returned **404 on create** — the Calendar API's "no
+  access" answer; her share to the SA email hadn't been granted yet.
+  Expected failure mode confirmed loud and first-call, not silent.
+- Rerun the spike after she shares; T39 closes on a two-calendar PASS.
+
 ## T28 — Voyage embeddings wire smoke (2026-06-11)
 
 **Verdict: PASS — real-API contract matches the client; Hebrew code-switched
