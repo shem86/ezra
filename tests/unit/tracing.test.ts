@@ -1,12 +1,14 @@
 // T31: tracing seam — span emission from the turn's step taps.
 // All sinks here are captured fakes; Langfuse never runs in CI.
 
+import { MockLanguageModelV3 } from 'ai/test';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { makeTracer, type TraceSink, type TraceSpan } from '../../src/ops/tracing.js';
+import { makeRoutedCallModel } from '../../src/agent/router.js';
 import { defineTool } from '../../src/tools/define-tool.js';
 import { makeRunTool, makeToolRegistry } from '../../src/tools/registry.js';
-import type { ToolCall } from '../../src/agent/context.js';
+import type { ToolCall, TurnMessage } from '../../src/agent/context.js';
 import type { Queryable } from '../../src/memory/store.js';
 
 // ---------------------------------------------------------------------------
@@ -196,6 +198,120 @@ describe('makeTracer — traceRunTool', () => {
 // ---------------------------------------------------------------------------
 // Generic step tap (compaction summarize/embed)
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Credential-boundary sweep (T31 hard criterion): a scripted turn exercising
+// the model, tool, and compaction taps with operational credentials reachable
+// from every deps object — the serialized span payloads must contain none of
+// them. This verifies the by-construction boundary (SPEC "Truth vs
+// continuity") actually holds in what the taps emit.
+// ---------------------------------------------------------------------------
+
+describe('credential-boundary sweep', () => {
+  const SECRETS = {
+    anthropicKey: 'sk-ant-test-supersecret-model-key-000',
+    voyageKey: 'pa-test-supersecret-voyage-key-111',
+    langfuseSecretKey: 'sk-lf-test-supersecret-trace-key-222',
+    dbPassword: 'supersecret-pg-password-333',
+    oauthToken: 'ya29.test-supersecret-oauth-token-444',
+  } as const;
+
+  it('no Config secret value reaches any serialized span', async () => {
+    const { spans, sink } = capturedSink();
+    const tracer = makeTracer({ sink, getTraceId: () => 'wf-sweep' });
+
+    // Model path: routed callModel with the tracer as the usage tap. The
+    // system prompt and message content are model-facing — the span must
+    // carry usage numbers only.
+    const model = new MockLanguageModelV3({
+      doGenerate: async () => ({
+        content: [{ type: 'text', text: 'תוספתי חלב' }],
+        finishReason: { unified: 'stop', raw: undefined },
+        usage: {
+          inputTokens: { total: 50, noCache: 10, cacheRead: 40, cacheWrite: 0 },
+          outputTokens: { total: 8, text: 8, reasoning: undefined },
+        },
+        warnings: [],
+      }),
+    });
+    const callModel = makeRoutedCallModel({
+      cheap: model,
+      reasoning: model,
+      systemPrompt: 'You are the household assistant.',
+      onUsage: tracer.onModelUsage,
+    });
+    const messages: readonly TurnMessage[] = [
+      { role: 'user', senderId: 'builder@wa', content: 'add milk תוסיף חלב' },
+    ];
+    await callModel(messages, { forceFinal: false });
+
+    // Tool path: deps carry credentials the way authenticated clients do
+    // (the secret is reachable from the deps object the tool executes with).
+    interface SecretDeps {
+      readonly apiKey: string;
+      readonly oauthToken: string;
+    }
+    const calendarish = defineTool<SecretDeps, z.ZodType<{ title: string }>>({
+      name: 'create_event',
+      description: 'creates an event via an authenticated client',
+      schema: z.object({ title: z.string() }),
+      riskTier: 'autonomous',
+      execute: async (args, deps) => `created "${args.title}" (auth ${deps.apiKey.length} chars)`,
+    });
+    const secretRegistry = makeToolRegistry<SecretDeps>([calendarish]);
+    const runTool = tracer.traceRunTool(
+      makeRunTool(secretRegistry, {
+        toolDeps: { apiKey: SECRETS.anthropicKey, oauthToken: SECRETS.oauthToken },
+        park: async () => ({ toolUseId: 'never', content: 'parked', parked: true }),
+      }),
+      secretRegistry,
+    );
+    await runTool(fakeDb, call('create_event', { title: 'dentist' }, 'tu_s1'), 'conv-sweep');
+
+    // Compaction path: summarize/embed close over provider keys exactly the
+    // way the composed production deps do.
+    const summarize = tracer.traceStep('summarizeContext', async () => {
+      void SECRETS.anthropicKey; // the closed-over credential
+      return 'summary: milk added';
+    });
+    const embed = tracer.traceStep('embedSummary', async () => {
+      void SECRETS.voyageKey;
+      return [0.1, 0.2];
+    });
+    await summarize();
+    await embed();
+
+    // Failure path too — error spans are part of the surface being swept.
+    // (Clients keep key material out of error messages by construction —
+    // embedder.ts truncates response bodies, never echoes its key; the
+    // documented-limit test below is what guards that assumption.)
+    const failingEmbed = tracer.traceStep('embedSummary', async () => {
+      throw new Error('voyage: HTTP 500 — upstream unavailable');
+    });
+    await expect(failingEmbed()).rejects.toThrow('HTTP 500');
+
+    expect(spans.length).toBeGreaterThanOrEqual(5);
+    const serialized = JSON.stringify(spans);
+    for (const [name, secret] of Object.entries(SECRETS)) {
+      expect(serialized, `${name} leaked into a span`).not.toContain(secret);
+    }
+  });
+
+  it('an upstream error message containing a secret DOES leak — documented limit', async () => {
+    // The tracer copies error strings verbatim; redaction of upstream error
+    // text is NOT provided. The real boundary is that clients never put key
+    // material in error messages (embedder.ts truncates response bodies, not
+    // keys). This test documents the limit so a future client that violates
+    // it has a named failing expectation to update.
+    const { spans, sink } = capturedSink();
+    const tracer = makeTracer({ sink });
+    const leaky = tracer.traceStep('embedSummary', async () => {
+      throw new Error('HTTP 401 for key pa-test-supersecret-voyage-key-111');
+    });
+    await expect(leaky()).rejects.toThrow();
+    expect(JSON.stringify(spans)).toContain('pa-test-supersecret-voyage-key-111');
+  });
+});
 
 describe('makeTracer — traceStep', () => {
   it('emits a named span around a successful step and passes the result through', async () => {
