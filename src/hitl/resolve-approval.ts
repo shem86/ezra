@@ -1,0 +1,143 @@
+// Approval resolution (T35, architecture decision 10 step 5): the body the
+// composer wraps in registerTransactionalStep when a turn's batch carries a
+// quoted reply. Everything — the guard flip, the revalidation verdict, the
+// executed→ claim, and the tool's own writes — happens on one transaction-
+// scoped client, so the claim co-commits with the effect: a crash anywhere
+// rolls the whole resolution back and recovery replays it from 'pending'.
+//
+// Single-winner does NOT rely on the conversation queue: markApproved /
+// markDenied / claimForExecution are guarded UPDATEs, and Postgres row
+// locking serializes concurrent transactions on the row — the loser's flip
+// matches zero rows and reports 'already-resolved'.
+
+import { toolCallSchema } from '../agent/context.js';
+import { getActionByPromptMessageId, type PendingActionStatus, type Queryable } from '../memory/store.js';
+import type { ToolRegistry } from '../tools/registry.js';
+import { claimForExecution, markApproved, markDenied, markStale } from './pending-actions.js';
+import { interpretApprovalReply } from './approval-binding.js';
+
+export interface ApprovalReplyInput {
+  readonly conversationId: string;
+  /** The quoted message's id — matched against the stamped prompt_message_id. */
+  readonly quotedMessageId: string;
+  readonly text: string;
+}
+
+export type ApprovalOutcome =
+  /** The quote doesn't match any approval prompt — a normal turn. */
+  | { readonly kind: 'unbound' }
+  /** Bound, but the reply is not a clean yes/no — normal turn, action untouched. */
+  | { readonly kind: 'unclear'; readonly actionId: string }
+  | {
+      readonly kind: 'executed';
+      readonly actionId: string;
+      readonly toolName: string;
+      readonly result: string;
+    }
+  | { readonly kind: 'denied'; readonly actionId: string; readonly toolName: string }
+  /** Approved, but revalidation failed (or the stored call no longer parses). */
+  | { readonly kind: 'stale'; readonly actionId: string; readonly toolName: string }
+  /** The action was already settled when this reply arrived. */
+  | {
+      readonly kind: 'already-resolved';
+      readonly actionId: string;
+      readonly status: PendingActionStatus;
+    };
+
+export interface ResolveApprovalDeps<TDeps> {
+  readonly toolDeps: TDeps;
+}
+
+async function currentStatus(db: Queryable, actionId: string): Promise<PendingActionStatus> {
+  const res = await db.query('SELECT status FROM pending_actions WHERE action_id = $1', [actionId]);
+  return res.rows[0]!.status as PendingActionStatus;
+}
+
+export function makeResolveApprovalReply<TDeps>(
+  registry: ToolRegistry<TDeps>,
+  deps: ResolveApprovalDeps<TDeps>,
+): (db: Queryable, input: ApprovalReplyInput) => Promise<ApprovalOutcome> {
+  return async function resolveApprovalReply(db, input) {
+    const action = await getActionByPromptMessageId(db, input.conversationId, input.quotedMessageId);
+    if (action === null) return { kind: 'unbound' };
+
+    const reply = interpretApprovalReply(input.text);
+    if (reply === 'unclear') return { kind: 'unclear', actionId: action.actionId };
+
+    if (reply === 'deny') {
+      if (!(await markDenied(db, action.actionId))) {
+        return {
+          kind: 'already-resolved',
+          actionId: action.actionId,
+          status: await currentStatus(db, action.actionId),
+        };
+      }
+      const call = toolCallSchema.safeParse(action.toolCall);
+      return {
+        kind: 'denied',
+        actionId: action.actionId,
+        toolName: call.success ? call.data.name : 'unknown',
+      };
+    }
+
+    // Approve. The flip is the single-winner gate: a duplicate approval —
+    // sequential or concurrent — finds a non-pending row and stops here.
+    if (!(await markApproved(db, action.actionId))) {
+      return {
+        kind: 'already-resolved',
+        actionId: action.actionId,
+        status: await currentStatus(db, action.actionId),
+      };
+    }
+
+    // A stored call that no longer parses (tool removed, schema tightened
+    // since the park) is by definition no longer valid — same terminal state
+    // as a failed revalidation, never a throw that bricks the reply turn.
+    const call = toolCallSchema.safeParse(action.toolCall);
+    const def = call.success ? registry.get(call.data.name) : undefined;
+    const args =
+      call.success && def !== undefined ? def.schema.safeParse(call.data.args) : undefined;
+    if (!call.success || def === undefined || args === undefined || !args.success) {
+      await markStale(db, action.actionId);
+      return {
+        kind: 'stale',
+        actionId: action.actionId,
+        toolName: call.success ? call.data.name : 'unknown',
+      };
+    }
+
+    // Revalidate at execute time, not propose time — the approval window is
+    // long (T26 carried the hook; this is its first real call site).
+    const stillValid =
+      def.revalidate === undefined ? true : await def.revalidate(args.data, deps.toolDeps);
+    if (!stillValid) {
+      await markStale(db, action.actionId);
+      return { kind: 'stale', actionId: action.actionId, toolName: call.data.name };
+    }
+
+    const claimed = await claimForExecution(db, action.actionId);
+    if (claimed === null) {
+      // Unreachable while this transaction holds the row it just flipped to
+      // approved — kept as a guard against a future caller splitting the
+      // transaction boundary.
+      return {
+        kind: 'already-resolved',
+        actionId: action.actionId,
+        status: await currentStatus(db, action.actionId),
+      };
+    }
+
+    const idCtx = {
+      actionId: action.actionId,
+      conversationId: action.conversationId,
+      toolUseId: call.data.id,
+    };
+    const externalId = def.externalId?.(idCtx);
+    const result = await def.execute(args.data, deps.toolDeps, {
+      ...idCtx,
+      db,
+      ...(externalId === undefined ? {} : { externalId }),
+    });
+    return { kind: 'executed', actionId: action.actionId, toolName: call.data.name, result };
+  };
+}
