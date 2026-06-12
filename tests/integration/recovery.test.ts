@@ -20,7 +20,12 @@ import { Client } from 'pg';
 import { DBOS } from '@dbos-inc/dbos-sdk';
 import { runMigrations } from '../../src/memory/migrate.ts';
 import { createPendingAction } from '../../src/memory/store.ts';
-import { claimForExecution, markApproved, markDenied } from '../../src/hitl/pending-actions.ts';
+import {
+  claimForExecution,
+  markApproved,
+  markDenied,
+  markStale,
+} from '../../src/hitl/pending-actions.ts';
 
 const runId = `run-${Date.now()}`;
 let db: Client;
@@ -125,5 +130,17 @@ describe('pending-action execute-once guard (T24)', () => {
     expect(claimed?.actionId).toBe(actionId);
     expect(claimed?.toolCall).toEqual({ name: 'create_calendar_event', args: { title: 'תור לרופא' } });
     expect(await claimForExecution(db, actionId)).toBeNull(); // claim is once
+  }, 30_000);
+
+  it('stale is terminal and reachable only from approved (T35 revalidation failure)', async () => {
+    const actionId = `act-${runId}-stale`;
+    await park(actionId);
+
+    expect(await markStale(db, actionId)).toBe(false); // never from pending — that is expiry's job (T37)
+    expect(await markApproved(db, actionId)).toBe(true);
+    expect(await markStale(db, actionId)).toBe(true);
+    expect(await markStale(db, actionId)).toBe(false); // already stale
+    expect(await claimForExecution(db, actionId)).toBeNull(); // a stale action can never execute
+    expect(await actionStatus(actionId)).toBe('stale');
   }, 30_000);
 });

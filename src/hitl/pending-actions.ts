@@ -26,6 +26,19 @@ export async function markDenied(db: Queryable, actionId: string): Promise<boole
   return res.rows.length > 0;
 }
 
+/**
+ * approved → stale: the action survived to execution but failed its
+ * revalidation check (T35) — terminal, never executed. Distinct from
+ * 'expired' (unanswered past TTL) on purpose. True only for the flipping call.
+ */
+export async function markStale(db: Queryable, actionId: string): Promise<boolean> {
+  const res = await db.query(
+    "UPDATE pending_actions SET status = 'stale' WHERE action_id = $1 AND status = 'approved' RETURNING action_id",
+    [actionId],
+  );
+  return res.rows.length > 0;
+}
+
 /** What the winning executor gets back: enough to run the parked tool call. */
 export interface ClaimedAction {
   readonly actionId: string;

@@ -12,7 +12,13 @@ export interface Queryable {
 }
 
 export type ReminderStatus = 'scheduled' | 'fired' | 'cancelled';
-export type PendingActionStatus = 'pending' | 'approved' | 'denied' | 'executed' | 'expired';
+export type PendingActionStatus =
+  | 'pending'
+  | 'approved'
+  | 'denied'
+  | 'executed'
+  | 'expired'
+  | 'stale';
 export type DeliveryClass = 'at-least-once' | 'at-most-once';
 
 export interface ListItem {
