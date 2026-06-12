@@ -192,14 +192,19 @@
   - Depends on: T31 (usage in traces), T32 (fixtures + dev loop).
   - **Gate M4 complete:** every tool exercised through `pnpm dev` stub conversations; T33 numbers recorded.
 
-## M5 — HITL *(refined at milestone entry)*
+## M5 — HITL *(draft criteria added + accepted by builder 2026-06-11; final confirm/amend still happens at milestone entry per the living-document rule)*
 
 - [ ] **T34: Fire-and-fold park path (synthetic pending result, `pending_actions` row, approval prompt as closing message)**
+  - Draft acceptance: park writes the `pending_actions` row + synthetic tool_result via transactional steps, turn closes with an approval prompt identifying the action; replaces T32's stub park in the composition; T32's digest slot goes live (outstanding actions render post-prefix; prefix-stability unit test keeps passing); kill-mid-park replays to exactly one row + one prompt (joins `pnpm test:recovery`). Verified against a fake confirm-before tool — the real one is T40.
 - [ ] **T35: Quoted-reply approval binding + fresh-turn execution (status transitions from T24, revalidation, result injected as new context message)**
+  - Draft acceptance: quoted-reply resolves the pending action (unresolvable quotes degrade to a normal turn, never throw); approved→executed claim co-commits with the effect — execute-once under double approval re-proven through this path (sequential + concurrent); `revalidate` invoked here (first real call site — T26 carried it), failure surfaces to the user; deny closes the row; outcome enters context as a NEW message, never a second tool_result. Depends on: T34.
 - [ ] **T36: Relatedness classifier (Haiku) — refine / unrelated / approve-deny routing while actions pend**
+  - Draft acceptance: classifier is a step with an injected model dep (fakes in CI, never a real call); routing — approve/deny → T35 path, refine → update pending action + re-prompt, unrelated → normal turn with action still pending; code-switched Hebrew/English fixtures for every class. Accuracy measured at T38, not CI. Parallelizable after T34.
 - [ ] **T37: TTL GC + gentle expiry surfacing**
+  - Draft acceptance: expiry is a guarded transition (pending→expired only; expired can no longer be approved); sweep replay-safe on the T23 pattern (firing id anchors idempotency); expiry message rides the proactive lane at-least-once; TTL configurable — resolves SPEC Open Q1 (propose 12h). Depends on: T34.
 - [ ] **T38: Eval harness (`pnpm eval`) + the five SPEC scenarios incl. code-switched fixtures**
-  - **Gate M5 complete:** all five scenarios pass + execute-once under double approval.
+  - Draft acceptance: approve-after-delay, deny, abandon-by-unrelated, refine-the-pending-action, stale-action-at-execution all pass; execute-once under double approval asserted at eval level too; classifier-accuracy fixtures + the T27 deferral (sender attribution correctness); reuses T32's scripted-day fixture format. On-demand only, never CI. Harness scaffolding can start parallel to T35–T37; the scenarios need the features.
+  - **Gate M5 complete:** all five scenarios pass + execute-once under double approval; `pnpm test:recovery` still green (T34/T35 joined it).
 
 ## M5.5 — Calendar *(parallel after T26)*
 
@@ -215,9 +220,28 @@
 - [ ] **T45 [H]: Deploy hardened process to host; egress allowlist final**
 - [ ] **T46 [H]: Launch sweep — SPEC success-criteria checklist top to bottom**
 
+## Deferred-decisions ledger *(added 2026-06-11 — threads buried in done-task notes; each resolves at the milestone named, swept at M6 entry)*
+
+| # | Thread | Buried in | Lands at |
+|---|---|---|---|
+| 1 | Launch-recovery race in production — scope executor IDs per process generation or verify fixed DBOS version, else crash-restart can permanently kill the turn it should recover | dbos.md ⚠ note (from T24) | T42/T45 |
+| 2 | Real socket acks — Baileys `onMessage` ack is a documented no-op; durable-enqueue-before-ack must bind to real acks | T20 note | T42 |
+| 3 | Production reminder-sweep cron cadence + make-up (missed-firing) mode | T23 note | T42/T45 |
+| 4 | Recurrence schema-only since T27 — expose or cut for v1 | T27 note | M6 entry |
+| 5 | Execute-error folding for fallible external tools | T26/T27 notes | T40 |
+| 6 | Compaction crash window can write one overlapping summary row — benign, documented | T29 note | accepted |
+| 7 | T19 kill-mid-flight flake under triple-suite load (1/~9, unreproduced) | T21 note | watch in `test:recovery` |
+| 8 | Open Q1: approval TTL default (propose 12h) | SPEC | T37 |
+| 9 | Open Q4: bot persona name | SPEC | before T46 (trivial — decide at M5 entry) |
+| 10 | Branch protection unenforced (free plan) — red CI blocks by discipline | T5 note | standing |
+| 11 | Echo handling is sent-ID-based, not `fromMe` (personal number) — T42 must preserve | T11/T20 notes | T42 |
+
 ## Sequencing notes
 
 - Start with T1–T6 (scaffold batch).
 - T7/T8/T9 are independent — good parallel batch after M0.
 - T11 needs a paired WhatsApp number available (provisioning out of scope) — everything else in M2–M5 proceeds without it via the stub transport.
 - M4 tasks stay coarse on purpose: T25's exact shape depends on T7's verdict, T29's threshold on real transcript sizes from T33's scripted days. Refine at milestone entry per the living-document rule.
+- **Current frontier (2026-06-11):** the M4 gate is blocked entirely on three builder-run [H] items that chain into ONE sitting — T31 real-wire smoke (proves keys) → T32 manual dev run (produces traces, covers T31's cache-read criterion) → T33 cost gate (computes from those traces). Kick off T39 (OAuth consent) and T15 (host decision) in the same sitting: both have external lead time, both block M6, and nothing downstream starts until they exist.
+- **M5.5 does not wait for M5.** T41's round-trip gate exercises the calendar tool's `execute`/`revalidate` directly with injected deps against a test calendar; only the approval-path end-to-end needs M5 (covered by T38/M6). T40–T41 proceed as soon as T39 lands.
+- **M6 entry must sweep the deferred-decisions ledger above** — that, plus refining T42–T46 criteria, is the entry step.
