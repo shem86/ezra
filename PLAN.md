@@ -43,7 +43,7 @@ The spine, fully testable without LLM or WhatsApp:
 **Gate:** integration suite green, specifically: recovery replay (kill mid-flight, diff, no double effect), exactly-once state write under kill, execute-once pending-action guard under duplicate approvals, debounce grouping, FIFO ordering across human + proactive interleave. This is the `pnpm test:recovery` checkpoint from SPEC.
 
 ### M4 — Reasoning layer (real model, stubbed transport)
-- `callModel` step via AI SDK Core with caching from M1a; Haiku router; tool registry (`defineTool`: Zod schema, risk tier, idempotency, revalidation hooks).
+- `callModel` step via AI SDK Core with caching from M1a, Sonnet-only (tiered turn routing removed — ADR-0003); tool registry (`defineTool`: Zod schema, risk tier, idempotency, revalidation hooks).
 - Tools for lists, reminders, memory read/write (calendar arrives in M5.5); pull-only semantic recall tool; compaction step (idempotency-keyed) with threshold from Open Question 3 (propose: compact at ~30 turns, keep open commitments verbatim).
 - MAX_ROUNDS cap with forced final user-facing message; Langfuse tracing on every step; mixed Hebrew/English prompt + fixture set.
 **Gate:** scripted conversations through `pnpm dev` (stub transport) exercise every tool happy-path; traces show cache reads; cost per realistic turn measured and extrapolated ≤ $30/mo.
@@ -74,7 +74,7 @@ Swap stub transport for the M2 Baileys adapter; durable-enqueue-before-ack again
 | DBOS behavior diverges from assumed semantics | Low | M1b proves transactional steps, replay, queues before anything builds on them; pin the validated version |
 | Oracle capacity/policy blocks $0 host | Med | Hetzner decision pre-made at ~EUR 4/mo; M2.5 is host-agnostic |
 | Relatedness classifier misjudges refine-vs-unrelated | Med | M5 eval fixtures (incl. code-switched Hebrew/English); accepted v1 risk per architecture |
-| Cost exceeds $30/mo | Low | M4 gate measures per-turn cost before launch; levers: compaction threshold, Haiku routing share |
+| Cost exceeds $30/mo | Low | M4 gate measures per-turn cost (Sonnet-only) before launch; levers: compaction threshold, prompt caching; contingency: reintroduce a cheap turn tier per ADR-0003 |
 | Old-Mac dev environment (Colima/QEMU) flakiness | Low | Single-Postgres compose is the only container need; CI (Linux) is the arbiter, Colima only for local runs |
 
 ## What this plan deliberately defers

@@ -3,12 +3,11 @@
 // tests) and wires the taps around the existing deps — this module never
 // touches Config, credentials, or DBOS (the composer passes
 // () => DBOS.workflowID as getTraceId so workflow context stays out of ops).
-// Spans carry metadata only — names, tiers, token counts, ids — never
+// Spans carry metadata only — names, token counts, ids — never
 // transcript content and never anything from Config, which is what the
 // credential-boundary sweep in tests/unit/tracing.test.ts locks.
 
 import type { ModelUsage } from '../agent/call-model.js';
-import type { ModelTier } from '../agent/router.js';
 import type { ToolCall, ToolResult } from '../agent/context.js';
 import type { Queryable } from '../memory/store.js';
 import { deriveActionId, type ToolRegistry } from '../tools/registry.js';
@@ -38,8 +37,8 @@ export interface TracerDeps {
 type RunToolFn = (db: Queryable, call: ToolCall, conversationId: string) => Promise<ToolResult>;
 
 export interface Tracer {
-  /** Drop-in for RoutedCallModelDeps['onUsage'] — tags model cost by tier (T30). */
-  onModelUsage(usage: ModelUsage, tier: ModelTier): void;
+  /** Drop-in for CallModelDeps['onUsage'] — per-call cost (single-tier, ADR-0003). */
+  onModelUsage(usage: ModelUsage): void;
   /** Wraps the composed runTool body; span carries tool name, risk tier, actionId. */
   traceRunTool<TDeps>(runTool: RunToolFn, registry: ToolRegistry<TDeps>): RunToolFn;
   /** Wraps a plain async step dep (compaction summarize/embed) in a timed span. */
@@ -83,10 +82,9 @@ export function makeTracer(deps: TracerDeps): Tracer {
   }
 
   return {
-    onModelUsage(usage, tier) {
+    onModelUsage(usage) {
       const now = new Date();
       emit('callModel', now, {
-        tier,
         ...(usage.inputTokens === undefined ? {} : { inputTokens: usage.inputTokens }),
         ...(usage.outputTokens === undefined ? {} : { outputTokens: usage.outputTokens }),
         ...(usage.cacheReadTokens === undefined

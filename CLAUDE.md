@@ -37,7 +37,8 @@ Spikes run directly: `node --env-file=.env spikes/<name>.ts` (Node 22 strips typ
 
 Node 22 / TypeScript strict / pnpm exact pins · DBOS 4.19.8 (durable
 execution) · single Postgres + pgvector · Vercel AI SDK Core + Claude
-(Haiku-class routing, Sonnet-class reasoning; prompt caching verified through
+(Sonnet-class turn reasoning, single-tier v1 — ADR-0003; Haiku-class for
+cheap classification; prompt caching verified through
 passthrough) · Voyage embeddings (voyage-4-lite, zero-dep fetch client —
 ADR-0002) · Baileys (M2+) · Langfuse tracing · Vitest · ESLint flat config.
 

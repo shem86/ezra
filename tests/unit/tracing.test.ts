@@ -5,7 +5,7 @@ import { MockLanguageModelV3 } from 'ai/test';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { makeTracer, type TraceSink, type TraceSpan } from '../../src/ops/tracing.js';
-import { makeRoutedCallModel } from '../../src/agent/router.js';
+import { makeCallModel } from '../../src/agent/call-model.js';
 import { defineTool } from '../../src/tools/define-tool.js';
 import { makeRunTool, makeToolRegistry } from '../../src/tools/registry.js';
 import type { ToolCall, TurnMessage } from '../../src/agent/context.js';
@@ -62,20 +62,21 @@ const call = (name: string, args: unknown, id = 'tu_1'): ToolCall => ({ id, name
 // ---------------------------------------------------------------------------
 
 describe('makeTracer — onModelUsage', () => {
-  it('emits a callModel span carrying tier and full usage incl. cache tokens', () => {
+  it('emits a callModel span carrying full usage incl. cache tokens', () => {
     const { spans, sink } = capturedSink();
     const tracer = makeTracer({ sink, getTraceId: () => 'wf-123' });
 
-    tracer.onModelUsage(
-      { inputTokens: 100, outputTokens: 20, cacheReadTokens: 80, cacheWriteTokens: 5 },
-      'cheap',
-    );
+    tracer.onModelUsage({
+      inputTokens: 100,
+      outputTokens: 20,
+      cacheReadTokens: 80,
+      cacheWriteTokens: 5,
+    });
 
     expect(spans).toHaveLength(1);
     expect(spans[0]!.name).toBe('callModel');
     expect(spans[0]!.traceId).toBe('wf-123');
     expect(spans[0]!.attributes).toEqual({
-      tier: 'cheap',
       inputTokens: 100,
       outputTokens: 20,
       cacheReadTokens: 80,
@@ -87,17 +88,14 @@ describe('makeTracer — onModelUsage', () => {
     const { spans, sink } = capturedSink();
     const tracer = makeTracer({ sink });
 
-    tracer.onModelUsage(
-      {
-        inputTokens: 10,
-        outputTokens: undefined,
-        cacheReadTokens: undefined,
-        cacheWriteTokens: undefined,
-      },
-      'reasoning',
-    );
+    tracer.onModelUsage({
+      inputTokens: 10,
+      outputTokens: undefined,
+      cacheReadTokens: undefined,
+      cacheWriteTokens: undefined,
+    });
 
-    expect(spans[0]!.attributes).toEqual({ tier: 'reasoning', inputTokens: 10 });
+    expect(spans[0]!.attributes).toEqual({ inputTokens: 10 });
   });
 
   it('never throws into the caller, even when the sink throws', () => {
@@ -110,10 +108,7 @@ describe('makeTracer — onModelUsage', () => {
     });
 
     expect(() =>
-      tracer.onModelUsage(
-        { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
-        'cheap',
-      ),
+      tracer.onModelUsage({ inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }),
     ).not.toThrow();
   });
 
@@ -126,10 +121,7 @@ describe('makeTracer — onModelUsage', () => {
       },
     });
 
-    tracer.onModelUsage(
-      { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
-      'cheap',
-    );
+    tracer.onModelUsage({ inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 });
 
     expect(spans).toHaveLength(1);
     expect(spans[0]!.traceId).toBeUndefined();
@@ -220,9 +212,9 @@ describe('credential-boundary sweep', () => {
     const { spans, sink } = capturedSink();
     const tracer = makeTracer({ sink, getTraceId: () => 'wf-sweep' });
 
-    // Model path: routed callModel with the tracer as the usage tap. The
-    // system prompt and message content are model-facing — the span must
-    // carry usage numbers only.
+    // Model path: callModel with the tracer as the usage tap. The system
+    // prompt and message content are model-facing — the span must carry
+    // usage numbers only.
     const model = new MockLanguageModelV3({
       doGenerate: async () => ({
         content: [{ type: 'text', text: 'תוספתי חלב' }],
@@ -234,9 +226,8 @@ describe('credential-boundary sweep', () => {
         warnings: [],
       }),
     });
-    const callModel = makeRoutedCallModel({
-      cheap: model,
-      reasoning: model,
+    const callModel = makeCallModel({
+      model,
       systemPrompt: 'You are the household assistant.',
       onUsage: tracer.onModelUsage,
     });

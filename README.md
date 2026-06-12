@@ -23,7 +23,7 @@ WhatsApp (Baileys) ──► durable enqueue ──► one FIFO lane (concurrenc
                                    handleTurn workflow
                                    loadContext → model loop → persistContext
                                               │
-                          Claude via AI SDK Core (Haiku routes, Sonnet reasons,
+                          Claude via AI SDK Core (Sonnet reasons — v1 single-tier,
                           prompt caching on the stable prefix)
                                               │
                               typed tools (Zod schema, risk tier,

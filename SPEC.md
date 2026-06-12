@@ -38,7 +38,7 @@ Everything else (subagents, self-improving loops, code execution) is explicitly 
 | Transport | Baileys (unofficial WhatsApp); number provisioning out of scope | Decision 1 |
 | Orchestration | DBOS (TS durable execution, embedded) | Decision 3 |
 | Reasoning | Vercel AI SDK Core primitives only (`generateText`/`generateObject` + Zod tools); DBOS owns the loop | Decision 4 |
-| Models | Claude via Console API key — Haiku-class routing/classification, Sonnet-class reasoning | Decision 6 |
+| Models | Claude via Console API key — Sonnet-class for all turn reasoning (single-tier v1, ADR-0003); Haiku-class for cheap classification (compaction summaries, relatedness classifier) | Decision 6, narrowed by ADR-0003 |
 | State | One local Postgres on the box: DBOS journal + structured state + pgvector, co-located so state writes commit atomically with their step record (exactly-once); WAL + base backups shipped off-box, encrypted, to B2/R2 for PITR | Decisions 3, 5, 8 |
 | Tracing | Langfuse | Decision 9 |
 | Host | Oracle PAYG if verified at provisioning, else Hetzner | Decision 7 |
@@ -182,7 +182,7 @@ Never in CI: real WhatsApp traffic, real calendar writes, real model calls. Real
 - [ ] One full restore drill: state restored to scratch DB, diffed, and the recovery runbook's reconciliation steps executed against the sent-log.
 
 **Cost:**
-- [ ] Steady-state runtime spend ≤ $30/mo at realistic household volume, with prompt caching verified active (cache-read tokens visible in Langfuse traces) and Haiku-class handling routing/classification turns.
+- [ ] Steady-state runtime spend ≤ $30/mo at realistic household volume, with prompt caching verified active (cache-read tokens visible in Langfuse traces), measured Sonnet-only (ADR-0003 — reintroducing a cheap turn tier is the contingency lever if this fails, not a precondition).
 
 ## Open Questions
 
