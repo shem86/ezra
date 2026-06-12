@@ -68,7 +68,10 @@ describe('relatedness classifier accuracy (report-only)', () => {
         lines.push(`  "${miss.message}" expected ${miss.expected}, got ${miss.got}${note}`);
       }
     }
-    console.log(lines.join('\n'));
+    // process.stdout.write, not console.log: vitest 4's default reporter
+    // swallows intercepted console output from PASSING tests, and this test
+    // passes by design — the report must survive its own success.
+    process.stdout.write(`${lines.join('\n')}\n\n`);
 
     // Report-only: the assertion is structural (every fixture classified,
     // fail-safe parse means a kind always comes back), never on accuracy.
