@@ -13,7 +13,10 @@ import { createPendingAction, setPromptMessageId } from '../../src/memory/store.
 import { markDenied } from '../../src/hitl/pending-actions.ts';
 import { defineTool } from '../../src/tools/define-tool.ts';
 import { makeToolRegistry } from '../../src/tools/registry.ts';
-import { makeResolveApprovalReply } from '../../src/hitl/resolve-approval.ts';
+import {
+  makeResolveApprovalReply,
+  makeResolveClassifiedDecision,
+} from '../../src/hitl/resolve-approval.ts';
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) throw new Error('DATABASE_URL required');
@@ -187,6 +190,83 @@ describe('resolveApprovalReply (T35)', () => {
     const outcome = await resolve(db, { conversationId, quotedMessageId: promptMessageId, text: 'yes' });
 
     expect(outcome).toMatchObject({ kind: 'already-resolved', actionId, status: 'denied' });
+    expect(await effectCount(conversationId)).toBe(0);
+  });
+
+  it('classified approve (T36): same full path — revalidate, claim, execute', async () => {
+    const { conversationId, actionId } = await parkAndStamp('cls-approve');
+    const resolve = makeResolveClassifiedDecision(registry, { toolDeps: { revalidateOk: true } });
+
+    const outcome = await resolve(db, { conversationId, actionId, decision: 'approve' });
+
+    expect(outcome).toMatchObject({
+      kind: 'executed',
+      actionId,
+      toolName: 'propose_event',
+      result: 'event created: תור לרופא',
+    });
+    expect(await actionStatus(actionId)).toBe('executed');
+    expect(await effectCount(conversationId)).toBe(1);
+  });
+
+  it('classified deny (T36): flips to denied, never executes', async () => {
+    const { conversationId, actionId } = await parkAndStamp('cls-deny');
+    const resolve = makeResolveClassifiedDecision(registry, { toolDeps: { revalidateOk: true } });
+
+    const outcome = await resolve(db, { conversationId, actionId, decision: 'deny' });
+
+    expect(outcome).toMatchObject({ kind: 'denied', actionId, toolName: 'propose_event' });
+    expect(await actionStatus(actionId)).toBe('denied');
+    expect(await effectCount(conversationId)).toBe(0);
+  });
+
+  it('classified approve on a settled action reports already-resolved, effect stays single', async () => {
+    const { conversationId, actionId, promptMessageId } = await parkAndStamp('cls-settled');
+    const quoted = makeResolver(true);
+    await quoted(db, { conversationId, quotedMessageId: promptMessageId, text: 'yes' });
+    const resolve = makeResolveClassifiedDecision(registry, { toolDeps: { revalidateOk: true } });
+
+    const outcome = await resolve(db, { conversationId, actionId, decision: 'approve' });
+
+    expect(outcome).toMatchObject({ kind: 'already-resolved', actionId, status: 'executed' });
+    expect(await effectCount(conversationId)).toBe(1);
+  });
+
+  it('classified decision for an unknown action id is unbound — degrades, never throws', async () => {
+    const resolve = makeResolveClassifiedDecision(registry, { toolDeps: { revalidateOk: true } });
+
+    const outcome = await resolve(db, {
+      conversationId: `conv-${runId}-cls-missing`,
+      actionId: `act-${runId}-no-such-action`,
+      decision: 'approve',
+    });
+
+    expect(outcome).toEqual({ kind: 'unbound' });
+  });
+
+  it("classified decision scoped to the conversation — another conversation's action id is unbound", async () => {
+    const { actionId, conversationId } = await parkAndStamp('cls-crossconv');
+    const resolve = makeResolveClassifiedDecision(registry, { toolDeps: { revalidateOk: true } });
+
+    const outcome = await resolve(db, {
+      conversationId: `conv-${runId}-cls-other`,
+      actionId,
+      decision: 'approve',
+    });
+
+    expect(outcome).toEqual({ kind: 'unbound' });
+    expect(await actionStatus(actionId)).toBe('pending');
+    expect(await effectCount(conversationId)).toBe(0);
+  });
+
+  it('classified approve that fails revalidation goes stale, never executes', async () => {
+    const { conversationId, actionId } = await parkAndStamp('cls-stale');
+    const resolve = makeResolveClassifiedDecision(registry, { toolDeps: { revalidateOk: false } });
+
+    const outcome = await resolve(db, { conversationId, actionId, decision: 'approve' });
+
+    expect(outcome).toMatchObject({ kind: 'stale', actionId, toolName: 'propose_event' });
+    expect(await actionStatus(actionId)).toBe('stale');
     expect(await effectCount(conversationId)).toBe(0);
   });
 

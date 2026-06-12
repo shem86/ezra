@@ -9,18 +9,38 @@
 // markDenied / claimForExecution are guarded UPDATEs, and Postgres row
 // locking serializes concurrent transactions on the row — the loser's flip
 // matches zero rows and reports 'already-resolved'.
+//
+// T36 adds a second entry point: a classified non-quoted message resolves by
+// action id (the workflow's journaled digest read supplies it) and runs the
+// SAME settle core — the classifier decides what a message means, never how
+// an approval executes.
 
 import { toolCallSchema } from '../agent/context.js';
-import { getActionByPromptMessageId, type PendingActionStatus, type Queryable } from '../memory/store.js';
+import {
+  getActionByPromptMessageId,
+  getPendingAction,
+  type PendingAction,
+  type PendingActionStatus,
+  type Queryable,
+} from '../memory/store.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import { claimForExecution, markApproved, markDenied, markStale } from './pending-actions.js';
 import { interpretApprovalReply } from './approval-binding.js';
+
+export type ApprovalDecision = 'approve' | 'deny';
 
 export interface ApprovalReplyInput {
   readonly conversationId: string;
   /** The quoted message's id — matched against the stamped prompt_message_id. */
   readonly quotedMessageId: string;
   readonly text: string;
+}
+
+/** A classified (non-quoted) approve/deny — T36 routes these by action id. */
+export interface ClassifiedDecisionInput {
+  readonly conversationId: string;
+  readonly actionId: string;
+  readonly decision: ApprovalDecision;
 }
 
 export type ApprovalOutcome =
@@ -53,6 +73,95 @@ async function currentStatus(db: Queryable, actionId: string): Promise<PendingAc
   return res.rows[0]!.status as PendingActionStatus;
 }
 
+/**
+ * The shared settle core: every approve/deny — whether it arrived as a
+ * quoted reply (T35) or a classified non-quoted message (T36) — runs the
+ * SAME guarded transitions, revalidation, and claim+execute co-commit.
+ */
+async function settleDecision<TDeps>(
+  db: Queryable,
+  registry: ToolRegistry<TDeps>,
+  deps: ResolveApprovalDeps<TDeps>,
+  action: PendingAction,
+  decision: ApprovalDecision,
+): Promise<ApprovalOutcome> {
+  if (decision === 'deny') {
+    if (!(await markDenied(db, action.actionId))) {
+      return {
+        kind: 'already-resolved',
+        actionId: action.actionId,
+        status: await currentStatus(db, action.actionId),
+      };
+    }
+    const call = toolCallSchema.safeParse(action.toolCall);
+    return {
+      kind: 'denied',
+      actionId: action.actionId,
+      toolName: call.success ? call.data.name : 'unknown',
+    };
+  }
+
+  // Approve. The flip is the single-winner gate: a duplicate approval —
+  // sequential or concurrent — finds a non-pending row and stops here.
+  if (!(await markApproved(db, action.actionId))) {
+    return {
+      kind: 'already-resolved',
+      actionId: action.actionId,
+      status: await currentStatus(db, action.actionId),
+    };
+  }
+
+  // A stored call that no longer parses (tool removed, schema tightened
+  // since the park) is by definition no longer valid — same terminal state
+  // as a failed revalidation, never a throw that bricks the reply turn.
+  const call = toolCallSchema.safeParse(action.toolCall);
+  const def = call.success ? registry.get(call.data.name) : undefined;
+  const args =
+    call.success && def !== undefined ? def.schema.safeParse(call.data.args) : undefined;
+  if (!call.success || def === undefined || args === undefined || !args.success) {
+    await markStale(db, action.actionId);
+    return {
+      kind: 'stale',
+      actionId: action.actionId,
+      toolName: call.success ? call.data.name : 'unknown',
+    };
+  }
+
+  // Revalidate at execute time, not propose time — the approval window is
+  // long (T26 carried the hook; this is its first real call site).
+  const stillValid =
+    def.revalidate === undefined ? true : await def.revalidate(args.data, deps.toolDeps);
+  if (!stillValid) {
+    await markStale(db, action.actionId);
+    return { kind: 'stale', actionId: action.actionId, toolName: call.data.name };
+  }
+
+  const claimed = await claimForExecution(db, action.actionId);
+  if (claimed === null) {
+    // Unreachable while this transaction holds the row it just flipped to
+    // approved — kept as a guard against a future caller splitting the
+    // transaction boundary.
+    return {
+      kind: 'already-resolved',
+      actionId: action.actionId,
+      status: await currentStatus(db, action.actionId),
+    };
+  }
+
+  const idCtx = {
+    actionId: action.actionId,
+    conversationId: action.conversationId,
+    toolUseId: call.data.id,
+  };
+  const externalId = def.externalId?.(idCtx);
+  const result = await def.execute(args.data, deps.toolDeps, {
+    ...idCtx,
+    db,
+    ...(externalId === undefined ? {} : { externalId }),
+  });
+  return { kind: 'executed', actionId: action.actionId, toolName: call.data.name, result };
+}
+
 export function makeResolveApprovalReply<TDeps>(
   registry: ToolRegistry<TDeps>,
   deps: ResolveApprovalDeps<TDeps>,
@@ -64,80 +173,21 @@ export function makeResolveApprovalReply<TDeps>(
     const reply = interpretApprovalReply(input.text);
     if (reply === 'unclear') return { kind: 'unclear', actionId: action.actionId };
 
-    if (reply === 'deny') {
-      if (!(await markDenied(db, action.actionId))) {
-        return {
-          kind: 'already-resolved',
-          actionId: action.actionId,
-          status: await currentStatus(db, action.actionId),
-        };
-      }
-      const call = toolCallSchema.safeParse(action.toolCall);
-      return {
-        kind: 'denied',
-        actionId: action.actionId,
-        toolName: call.success ? call.data.name : 'unknown',
-      };
-    }
+    return settleDecision(db, registry, deps, action, reply);
+  };
+}
 
-    // Approve. The flip is the single-winner gate: a duplicate approval —
-    // sequential or concurrent — finds a non-pending row and stops here.
-    if (!(await markApproved(db, action.actionId))) {
-      return {
-        kind: 'already-resolved',
-        actionId: action.actionId,
-        status: await currentStatus(db, action.actionId),
-      };
+export function makeResolveClassifiedDecision<TDeps>(
+  registry: ToolRegistry<TDeps>,
+  deps: ResolveApprovalDeps<TDeps>,
+): (db: Queryable, input: ClassifiedDecisionInput) => Promise<ApprovalOutcome> {
+  return async function resolveClassifiedDecision(db, input) {
+    const action = await getPendingAction(db, input.actionId);
+    // Conversation-scoped like the quoted path: an action id from anywhere
+    // else degrades to a normal turn, never a cross-conversation settle.
+    if (action === null || action.conversationId !== input.conversationId) {
+      return { kind: 'unbound' };
     }
-
-    // A stored call that no longer parses (tool removed, schema tightened
-    // since the park) is by definition no longer valid — same terminal state
-    // as a failed revalidation, never a throw that bricks the reply turn.
-    const call = toolCallSchema.safeParse(action.toolCall);
-    const def = call.success ? registry.get(call.data.name) : undefined;
-    const args =
-      call.success && def !== undefined ? def.schema.safeParse(call.data.args) : undefined;
-    if (!call.success || def === undefined || args === undefined || !args.success) {
-      await markStale(db, action.actionId);
-      return {
-        kind: 'stale',
-        actionId: action.actionId,
-        toolName: call.success ? call.data.name : 'unknown',
-      };
-    }
-
-    // Revalidate at execute time, not propose time — the approval window is
-    // long (T26 carried the hook; this is its first real call site).
-    const stillValid =
-      def.revalidate === undefined ? true : await def.revalidate(args.data, deps.toolDeps);
-    if (!stillValid) {
-      await markStale(db, action.actionId);
-      return { kind: 'stale', actionId: action.actionId, toolName: call.data.name };
-    }
-
-    const claimed = await claimForExecution(db, action.actionId);
-    if (claimed === null) {
-      // Unreachable while this transaction holds the row it just flipped to
-      // approved — kept as a guard against a future caller splitting the
-      // transaction boundary.
-      return {
-        kind: 'already-resolved',
-        actionId: action.actionId,
-        status: await currentStatus(db, action.actionId),
-      };
-    }
-
-    const idCtx = {
-      actionId: action.actionId,
-      conversationId: action.conversationId,
-      toolUseId: call.data.id,
-    };
-    const externalId = def.externalId?.(idCtx);
-    const result = await def.execute(args.data, deps.toolDeps, {
-      ...idCtx,
-      db,
-      ...(externalId === undefined ? {} : { externalId }),
-    });
-    return { kind: 'executed', actionId: action.actionId, toolName: call.data.name, result };
+    return settleDecision(db, registry, deps, action, input.decision);
   };
 }
