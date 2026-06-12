@@ -21,6 +21,7 @@ import { stableSystemPrompt, type PendingActionDigestEntry } from '../agent/prom
 import { makePark } from '../hitl/park.js';
 import { toDigestEntries } from '../hitl/digest.js';
 import { sendApprovalPrompts } from '../hitl/approval-prompt.js';
+import { makeResolveApprovalReply } from '../hitl/resolve-approval.js';
 import { defaultCompactionConfig, makeSummarize } from '../agent/compaction.js';
 import { parseTurnMessages, type TurnMessage } from '../agent/context.js';
 import { runMigrations } from '../memory/migrate.js';
@@ -92,6 +93,14 @@ async function main(): Promise<void> {
     async (db, conversationId: string): Promise<PendingActionDigestEntry[]> =>
       toDigestEntries(await getPendingActionsForConversation(db, conversationId)),
   );
+  const resolveApprovalStep = registerTransactionalStep(
+    dataSource,
+    'resolveApproval',
+    // T35: quoted-reply approvals — guard flip, revalidation, and the tool
+    // effect co-commit in this one transaction. Live wiring; nothing parks
+    // until a confirm-before tool lands (T40), same as the park seam above.
+    makeResolveApprovalReply(registry, { toolDeps: { embedder } }),
+  );
   const writeMemoryStep = registerTransactionalStep(
     dataSource,
     'writeSemanticMemory',
@@ -105,6 +114,7 @@ async function main(): Promise<void> {
       persistContext: persistContextStep,
       runTool: runToolStep,
       loadPendingDigest: loadPendingDigestStep,
+      resolveApproval: resolveApprovalStep,
       callModel,
       compaction: {
         ...defaultCompactionConfig,
