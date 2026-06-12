@@ -21,7 +21,12 @@ import { stableSystemPrompt, type PendingActionDigestEntry } from '../agent/prom
 import { makePark } from '../hitl/park.js';
 import { toDigestEntries } from '../hitl/digest.js';
 import { sendApprovalPrompts } from '../hitl/approval-prompt.js';
-import { makeResolveApprovalReply } from '../hitl/resolve-approval.js';
+import {
+  makeResolveApprovalReply,
+  makeResolveClassifiedDecision,
+} from '../hitl/resolve-approval.js';
+import { makeRefineAction } from '../hitl/refine-action.js';
+import { makeClassifyRelatedness } from '../agent/relatedness.js';
 import { defaultCompactionConfig, makeSummarize } from '../agent/compaction.js';
 import { parseTurnMessages, type TurnMessage } from '../agent/context.js';
 import { runMigrations } from '../memory/migrate.js';
@@ -101,6 +106,18 @@ async function main(): Promise<void> {
     // until a confirm-before tool lands (T40), same as the park seam above.
     makeResolveApprovalReply(registry, { toolDeps: { embedder } }),
   );
+  const resolveClassifiedStep = registerTransactionalStep(
+    dataSource,
+    'resolveClassified',
+    // T36: a classified non-quoted approve/deny runs the same settle core as
+    // a quoted reply — guard flip, revalidation, claim+effect in one commit.
+    makeResolveClassifiedDecision(registry, { toolDeps: { embedder } }),
+  );
+  const refineActionStep = registerTransactionalStep(
+    dataSource,
+    'refineAction',
+    makeRefineAction(registry),
+  );
   const writeMemoryStep = registerTransactionalStep(
     dataSource,
     'writeSemanticMemory',
@@ -115,6 +132,15 @@ async function main(): Promise<void> {
       runTool: runToolStep,
       loadPendingDigest: loadPendingDigestStep,
       resolveApproval: resolveApprovalStep,
+      // T36: Haiku-class classification (ADR-0003 keeps Haiku for exactly
+      // this); the workflow runStep-wraps classify, the other two are the
+      // transactions above. Live wiring; nothing pends until T40's
+      // confirm-before tool, same as the park and resolver seams.
+      relatedness: {
+        classify: makeClassifyRelatedness({ model: anthropic(config.cheapModelId) }),
+        resolveDecision: resolveClassifiedStep,
+        refine: refineActionStep,
+      },
       callModel,
       compaction: {
         ...defaultCompactionConfig,
