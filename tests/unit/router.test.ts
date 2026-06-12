@@ -60,6 +60,31 @@ const withTwoToolRounds: readonly TurnMessage[] = [
   { role: 'tool', toolUseId: 'tu_2', content: 'added' },
 ];
 
+// A PREVIOUS turn's chained tool work, completed, followed by a fresh user
+// message — the production shape of every ongoing conversation. The prior
+// turn's tool messages must not leak into the current turn's routing signal.
+const freshTurnAfterToolHeavyHistory: readonly TurnMessage[] = [
+  ...withTwoToolRounds,
+  { role: 'assistant', content: 'Added both.', toolCalls: [] },
+  { role: 'user', senderId: 'wife@wa', content: 'מה יש ברשימה?' },
+];
+
+// ONE round answering with two parallel tool calls ("add milk and eggs") —
+// two tool messages, but a single round. Must not count as two rounds.
+const oneParallelRound: readonly TurnMessage[] = [
+  { role: 'user', senderId: 'builder@wa', content: 'add milk and eggs' },
+  {
+    role: 'assistant',
+    content: 'Adding both.',
+    toolCalls: [
+      { id: 'tu_a', name: 'add_list_item', args: { item: 'milk' } },
+      { id: 'tu_b', name: 'add_list_item', args: { item: 'eggs' } },
+    ],
+  },
+  { role: 'tool', toolUseId: 'tu_a', content: 'added' },
+  { role: 'tool', toolUseId: 'tu_b', content: 'added' },
+];
+
 // ---------------------------------------------------------------------------
 // defaultRouterPolicy
 // ---------------------------------------------------------------------------
@@ -82,6 +107,16 @@ describe('defaultRouterPolicy', () => {
 
   it('returns reasoning after two or more tool-result rounds (complex chain)', () => {
     expect(defaultRouterPolicy.select(withTwoToolRounds, normal)).toBe<ModelTier>('reasoning');
+  });
+
+  it('returns cheap for a fresh turn after a tool-heavy PREVIOUS turn (history must not leak)', () => {
+    expect(defaultRouterPolicy.select(freshTurnAfterToolHeavyHistory, normal)).toBe<ModelTier>(
+      'cheap',
+    );
+  });
+
+  it('returns cheap after one round of PARALLEL tool calls (rounds, not tool messages)', () => {
+    expect(defaultRouterPolicy.select(oneParallelRound, normal)).toBe<ModelTier>('cheap');
   });
 });
 
@@ -185,6 +220,19 @@ describe('makeRoutedCallModel', () => {
     const result = await callModel(userMsg, { forceFinal: false });
 
     expect(result).toEqual({ role: 'assistant', content: '[haiku]', toolCalls: [] });
+  });
+
+  it('uses the cheap model on a fresh turn even when prior turns used tools', async () => {
+    const calls: string[] = [];
+    const callModel = makeRoutedCallModel({
+      cheap: trackedModel('haiku', calls),
+      reasoning: trackedModel('sonnet', calls),
+      systemPrompt: SYSTEM,
+    });
+
+    await callModel(freshTurnAfterToolHeavyHistory, { forceFinal: false });
+
+    expect(calls).toEqual(['haiku']);
   });
 
   it('mixed-language context routes consistently', async () => {
