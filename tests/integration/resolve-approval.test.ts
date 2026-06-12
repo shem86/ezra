@@ -325,3 +325,38 @@ describe('resolveApprovalReply (T35)', () => {
     }
   });
 });
+
+// T40: revalidation gets the id context — the calendar tool's freshness check
+// must exempt its OWN deterministic event id (a crash between a landed POST
+// and the commit otherwise reads as a conflict on replay and wrongly stales
+// the action), so settleDecision now passes actionId/externalId through.
+describe('revalidate id context (T40)', () => {
+  it('passes actionId and the derived externalId to revalidate', async () => {
+    const seen: Array<{ actionId: string; externalId?: string }> = [];
+    const ctxTool = defineTool<Record<string, never>, z.ZodType<{ title: string }>>({
+      name: 'propose_event',
+      description: 'captures the revalidation context',
+      schema: z.object({ title: z.string() }),
+      riskTier: 'confirm-before',
+      externalId: (ctx) => `evt-${ctx.actionId}`,
+      revalidate: async (_args, _deps, ctx) => {
+        seen.push({ actionId: ctx.actionId, ...(ctx.externalId === undefined ? {} : { externalId: ctx.externalId }) });
+        return true;
+      },
+      execute: async (args) => `event created: ${args.title}`,
+    });
+    const resolve = makeResolveApprovalReply(makeToolRegistry<Record<string, never>>([ctxTool]), {
+      toolDeps: {},
+    });
+
+    const { conversationId, actionId, promptMessageId } = await parkAndStamp('reval-ctx');
+    const outcome = await resolve(db, {
+      conversationId,
+      quotedMessageId: promptMessageId,
+      text: 'yes',
+    });
+
+    expect(outcome.kind).toBe('executed');
+    expect(seen).toEqual([{ actionId, externalId: `evt-${actionId}` }]);
+  });
+});

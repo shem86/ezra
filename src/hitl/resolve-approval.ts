@@ -127,10 +127,23 @@ async function settleDecision<TDeps>(
     };
   }
 
+  const idCtx = {
+    actionId: action.actionId,
+    conversationId: action.conversationId,
+    toolUseId: call.data.id,
+  };
+  const externalId = def.externalId?.(idCtx);
+
   // Revalidate at execute time, not propose time — the approval window is
-  // long (T26 carried the hook; this is its first real call site).
+  // long (T26 carried the hook; this is its first real call site). The id
+  // context rides along so the check can exempt the action's own external id.
   const stillValid =
-    def.revalidate === undefined ? true : await def.revalidate(args.data, deps.toolDeps);
+    def.revalidate === undefined
+      ? true
+      : await def.revalidate(args.data, deps.toolDeps, {
+          ...idCtx,
+          ...(externalId === undefined ? {} : { externalId }),
+        });
   if (!stillValid) {
     await markStale(db, action.actionId);
     return { kind: 'stale', actionId: action.actionId, toolName: call.data.name };
@@ -148,12 +161,6 @@ async function settleDecision<TDeps>(
     };
   }
 
-  const idCtx = {
-    actionId: action.actionId,
-    conversationId: action.conversationId,
-    toolUseId: call.data.id,
-  };
-  const externalId = def.externalId?.(idCtx);
   const result = await def.execute(args.data, deps.toolDeps, {
     ...idCtx,
     db,

@@ -17,6 +17,16 @@ export interface ExternalIdContext {
   readonly toolUseId: string;
 }
 
+/**
+ * What revalidate sees beyond args and deps (T40): the id context, so a
+ * freshness check can exempt the action's OWN deterministic external id —
+ * without it, a crash between a landed external effect and the commit makes
+ * the replay read its own effect as a conflict and wrongly stale the action.
+ */
+export interface RevalidationContext extends ExternalIdContext {
+  readonly externalId?: string;
+}
+
 /** What execute sees beyond its parsed args and injected deps. */
 export interface ToolContext extends ExternalIdContext {
   /**
@@ -42,7 +52,13 @@ export interface ToolDefinition<TDeps, TSchema extends z.ZodType = z.ZodType> {
    * concretely-schemed definition assignable to AnyToolDefinition (bivariant
    * parameter check), which arrow-property declarations would forbid.
    */
-  revalidate?(args: z.output<TSchema>, deps: TDeps): Promise<boolean>;
+  revalidate?(args: z.output<TSchema>, deps: TDeps, ctx: RevalidationContext): Promise<boolean>;
+  /**
+   * Human-readable one-liner for approval prompts and the pending digest
+   * (T40, deferred from T34). Pure function of the parsed args — prompt
+   * rendering is replay-deterministic. Optional: JSON fallback otherwise.
+   */
+  summarize?(args: z.output<TSchema>): string;
   /** Returns the model-facing tool_result content. */
   execute(args: z.output<TSchema>, deps: TDeps, ctx: ToolContext): Promise<string>;
 }
