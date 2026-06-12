@@ -6,6 +6,7 @@ import {
   batchLog,
   completedLog,
   enqueueWorkflow,
+  expirySweepWorkflow,
   launchSchedRuntime,
   schedConnectionString,
   schedRunId,
@@ -16,8 +17,14 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Client } from 'pg';
 import { DBOS } from '@dbos-inc/dbos-sdk';
 import { runMigrations } from '../../src/memory/migrate.ts';
-import { createReminder } from '../../src/memory/store.ts';
+import {
+  createPendingAction,
+  createReminder,
+  getPendingActionsForConversation,
+} from '../../src/memory/store.ts';
 import { reminderFiringId } from '../../src/orchestration/scheduled.ts';
+import { expiryFiringId } from '../../src/hitl/expiry.ts';
+import { toDigestEntries } from '../../src/hitl/digest.ts';
 
 let db: Client;
 
@@ -147,6 +154,104 @@ describe('scheduled reminders → proactive turns (T23)', () => {
 
     // No runSweep here: only the every-second scheduled workflow can do it.
     await waitFor(async () => (await reminderStatus(reminder.id)) === 'fired', 30_000);
+    await waitFor(
+      () => batchLog.some((batch) => batch[0]?.conversationId === conversationId),
+      20_000,
+    );
+    const deliveries = batchLog.filter((b) => b[0]?.conversationId === conversationId);
+    expect(deliveries).toHaveLength(1);
+    expect(deliveries[0]?.[0]?.kind).toBe('proactive');
+  }, 60_000);
+});
+
+// NOTE: same interleaving-invariance rule as above — the fixture's
+// every-second expiry cron runs concurrently with these tests, so every
+// assertion checks outcomes (expired exactly once, one inbox row), never
+// which sweep got there first.
+describe('TTL expiry sweep (T37)', () => {
+  async function seedAction(
+    key: string,
+    expiresAt: Date,
+    conversationId = `conv-${schedRunId}-${key}`,
+  ): Promise<{ conversationId: string; actionId: string }> {
+    const actionId = `act-${schedRunId}-${key}`;
+    await createPendingAction(db, {
+      actionId,
+      conversationId,
+      toolCall: { id: `tu-${key}`, name: 'propose_event', args: { title: 'תור לרופא' } },
+      expiresAt,
+    });
+    return { conversationId, actionId };
+  }
+
+  async function runExpirySweep(label: string): Promise<void> {
+    const handle = await DBOS.startWorkflow(expirySweepWorkflow, {
+      workflowID: `expsweep-${schedRunId}-${label}`,
+    })(new Date(), new Date());
+    await handle.getResult();
+  }
+
+  async function actionStatus(actionId: string): Promise<string> {
+    const res = await db.query('SELECT status FROM pending_actions WHERE action_id = $1', [
+      actionId,
+    ]);
+    return (res.rows[0] as { status: string }).status;
+  }
+
+  it('an overdue action expires exactly once and the gentle notice rides its own lane', async () => {
+    const { conversationId, actionId } = await seedAction('overdue', new Date(Date.now() - 1000));
+
+    await runExpirySweep('first');
+    await runExpirySweep('second'); // a second sweep (or any cron tick) must add nothing
+
+    expect(await actionStatus(actionId)).toBe('expired');
+    expect(await inboxCount(expiryFiringId(actionId))).toBe(1);
+
+    await waitFor(
+      () =>
+        batchLog.some(
+          (batch) =>
+            batch[0]?.conversationId === conversationId &&
+            batch[0]?.kind === 'proactive' &&
+            ((batch[0]?.payload as { actionUpdate?: string }).actionUpdate ?? '').includes(
+              actionId,
+            ),
+        ),
+      20_000,
+    );
+    const deliveries = batchLog.filter((b) => b[0]?.conversationId === conversationId);
+    expect(deliveries).toHaveLength(1);
+    const payload = deliveries[0]?.[0]?.payload as { actionUpdate: string };
+    expect(payload.actionUpdate).toMatch(/nothing was executed/i);
+    expect(deliveries[0]?.[0]?.senderId).toBe('system:hitl');
+  }, 30_000);
+
+  it('future actions are untouched, and expired ones drop out of the digest', async () => {
+    const conversationId = `conv-${schedRunId}-digest`;
+    const { actionId: overdueId } = await seedAction(
+      'dig-overdue',
+      new Date(Date.now() - 1000),
+      conversationId,
+    );
+    const { actionId: futureId } = await seedAction(
+      'dig-future',
+      new Date(Date.now() + 12 * 3_600_000),
+      conversationId,
+    );
+
+    await runExpirySweep('digest');
+
+    expect(await actionStatus(overdueId)).toBe('expired');
+    expect(await actionStatus(futureId)).toBe('pending');
+    const digest = toDigestEntries(await getPendingActionsForConversation(db, conversationId));
+    expect(digest.map((e) => e.actionId)).toEqual([futureId]);
+  }, 30_000);
+
+  it('the cron schedule expires overdue actions with no manual trigger', async () => {
+    const { conversationId, actionId } = await seedAction('cron', new Date(Date.now() - 1000));
+
+    // No runExpirySweep here: only the every-second scheduled workflow can do it.
+    await waitFor(async () => (await actionStatus(actionId)) === 'expired', 30_000);
     await waitFor(
       () => batchLog.some((batch) => batch[0]?.conversationId === conversationId),
       20_000,

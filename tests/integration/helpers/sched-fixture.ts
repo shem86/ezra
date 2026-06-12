@@ -12,6 +12,13 @@ import {
 } from '../../../src/orchestration/queue.ts';
 import { makeReminderSweepWorkflow, type DueReminder } from '../../../src/orchestration/scheduled.ts';
 import {
+  makeExpirySweepWorkflow,
+  toOverdueActions,
+  type OverdueAction,
+} from '../../../src/hitl/expiry.ts';
+import { markExpired } from '../../../src/hitl/pending-actions.ts';
+import {
+  getOverduePendingActions,
   getPendingInbox,
   insertInboxItem,
   markInboxProcessed,
@@ -125,6 +132,40 @@ DBOS.registerScheduled(sweepCronWorkflow, {
   crontab: '* * * * * *',
   mode: SchedulerMode.ExactlyOncePerIntervalWhenActive,
   name: 'reminderSweepCron',
+});
+
+// --- T37 expiry sweep: same lane, same fixture discipline ------------------
+
+// Scoped like getDueScoped: the every-second cron here must never expire
+// pending actions seeded by OTHER test files on the shared dev DB.
+const getOverdueScopedStep = registerTransactionalStep(
+  dataSource,
+  'getOverdueScoped',
+  async (db, asOfMs: number): Promise<OverdueAction[]> =>
+    toOverdueActions(await getOverduePendingActions(db, asOfMs)).filter((action) =>
+      action.conversationId.startsWith(`conv-${schedRunId}`),
+    ),
+);
+
+const markExpiredStep = registerTransactionalStep(dataSource, 'markExpired', markExpired);
+
+const expiryDeps = {
+  getOverdue: getOverdueScopedStep,
+  markExpired: markExpiredStep,
+  enqueueWorkflow,
+};
+
+export const expirySweepWorkflow = DBOS.registerWorkflow(makeExpirySweepWorkflow(expiryDeps), {
+  name: 'expirySweep',
+});
+
+const expirySweepCronWorkflow = DBOS.registerWorkflow(makeExpirySweepWorkflow(expiryDeps), {
+  name: 'expirySweepCron',
+});
+DBOS.registerScheduled(expirySweepCronWorkflow, {
+  crontab: '* * * * * *',
+  mode: SchedulerMode.ExactlyOncePerIntervalWhenActive,
+  name: 'expirySweepCron',
 });
 
 export async function launchSchedRuntime(): Promise<void> {

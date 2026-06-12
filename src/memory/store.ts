@@ -273,6 +273,24 @@ export async function getActionByPromptMessageId(
   return res.rows[0] ? mapPendingAction(res.rows[0]) : null;
 }
 
+/**
+ * Pending rows past their TTL — the T37 sweep's read. asOf rides as epoch ms
+ * because the caller is a journaled step whose inputs/outputs must survive a
+ * JSON round-trip (same reason as scheduled.ts's DueReminder.dueAtIso).
+ */
+export async function getOverduePendingActions(
+  db: Queryable,
+  asOfMs: number,
+): Promise<PendingAction[]> {
+  const res = await db.query(
+    `SELECT * FROM pending_actions
+     WHERE status = 'pending' AND expires_at <= $1
+     ORDER BY expires_at, action_id`,
+    [new Date(asOfMs)],
+  );
+  return res.rows.map(mapPendingAction);
+}
+
 /** Still-pending actions only — the digest and the prompt sender read this. */
 export async function getPendingActionsForConversation(
   db: Queryable,
