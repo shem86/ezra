@@ -186,8 +186,8 @@ Never in CI: real WhatsApp traffic, real calendar writes, real model calls. Real
 
 ## Open Questions
 
-1. **Soft TTL default for approvals** — proposing 12h (architecture says "hours to a day; exact value barely matters").
-2. **`MAX_ROUNDS` default** — proposing 8.
+1. **Soft TTL default for approvals** — ~~proposing 12h (architecture says "hours to a day; exact value barely matters").~~ *Resolved at T34: 12h, written into `expires_at` at park time (`config.approvalTtlHours`).*
+2. **`MAX_ROUNDS` default** — ~~proposing 8.~~ *Resolved at T22: 8 (`handle-turn.ts`), with the forced final user-facing message on cap.*
 3. **Compaction threshold and summary shape** — ~~at what transcript size to compact, and what the summary keeps verbatim (e.g., open commitments) vs folds into semantic memory.~~ *Resolved 2026-06-11 (T29): compact above 60 messages keeping ≥ 20 (`defaultCompactionConfig`); the summary keeps open commitments verbatim and preserves languages as written, travels as a `system:compaction` user message, and the full text folds into the semantic store keyed `compact-<workflowID>`.*
-4. **Bot persona name** for the group.
+4. **Bot persona name** for the group. *Resolved 2026-06-12 (M6 entry, builder pick): **Golem (גולם)** — Hebrew-native, thematically apt (a constructed servant animated by written words); lands in the production system prompt at T42.*
 5. Oracle vs Hetzner — deliberately resolved at provisioning per decision 7, not here.
