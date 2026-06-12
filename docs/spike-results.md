@@ -99,3 +99,71 @@ Notes for M4 (`callModel`):
 (no escape hatch), DBOS pin 4.19.8 accepted per T8 findings above. Follow-up
 carried into M3: extend the T9 determinism rule to the functional
 `DBOS.registerWorkflow` API before T22.
+
+## T31 — Langfuse real-wire smoke (2026-06-11)
+
+**Verdict: PASS — the zero-dep batch ingestion sink delivers; spans render
+with usage, levels, and error status intact.**
+
+`node --env-file=.env spikes/langfuse-trace.ts` against the US cloud
+(`LANGFUSE_BASE_URL=https://us.cloud.langfuse.com` — the config default is
+the EU host; US projects must set the var). Flush accepted all events;
+verified through the public read API (not just the flush 207): trace
+`hh-spike-1781234469074` shows the GENERATION (`callModel`,
+`cache_read_input_tokens=1100` in usageDetails), the DEFAULT span
+(`runTool`), and the ERROR span (`embedSummary`) with its statusMessage.
+
+Gotcha fixed en route: the spike originally died under bare node with
+`ERR_MODULE_NOT_FOUND` — `tracing.ts` VALUE-imports `deriveActionId` from
+the tools registry (the T31 "ops imports are type-only" note was wrong for
+that one), and bare node doesn't remap `.js` specifiers. The spike now uses
+the documented child-entry pattern (`ts-ext-hooks` + dynamic import).
+
+## T32/T33 — `pnpm dev` scripted day + cost gate (2026-06-11)
+
+**Verdict: PASS — every v1 tool exercised happy-path end-to-end with real
+Sonnet calls; cost extrapolates to $1.62/mo, 18× under the $30 ceiling;
+cache reads nonzero on every generation.**
+
+Run `dev-*-mqadcmm0` (9 turns, 18 generations, `claude-sonnet-4-6`,
+Sonnet-only per ADR-0003). Usage pulled from the Langfuse traces
+(`turn-mqadcmm0-1..9`); note the AI SDK's `usage.inputTokens` is the TOTAL
+(uncached + cache read + cache write) — verified in the pinned
+`@ai-sdk/anthropic` source — so uncached = input − cacheRead − cacheWrite.
+
+| Metric | Value |
+|---|---|
+| Input tokens (total) | 48,727 |
+| — served from cache | 41,388 (85%) |
+| — cache writes | 3,812 |
+| — uncached | 3,527 |
+| Output tokens | 1,122 |
+| Day cost (Sonnet 4.6: $3/$15 per MTok in/out, $3.75 cache write, $0.30 cache read) | **$0.0541** |
+| Per turn | $0.0060 |
+| × 30 days | **$1.62/mo** |
+
+Margin: even at 5× the scripted volume (~45 turns/day) the month lands
+≈ $8 — the gate cannot plausibly fail on volume. Caveats recorded honestly:
+no compaction fired (short conversations; adds one Haiku summarize + one
+Voyage embed per ~60 messages — negligible), no proactive reminder turns in
+the script (same per-turn economics), and the day contains no multi-tool
+chain turn (T33's coverage line) — a chained turn roughly doubles per-turn
+cost, irrelevant at this margin; T38's evals add chained scenarios anyway.
+
+Two real findings from the runs (both fixed in this commit):
+
+1. **Prompt: shared-data framing was missing.** Sonnet refused a member's
+   request for the stored parking-gate code ("I can only share household
+   information with household members"). The stable prompt now states the
+   two senders ARE the two members and all household data is shared between
+   them, no secrecy (matches ADR-0001's rationale).
+2. **Fixture: `builder@wa` read as a building contractor.** The refusal
+   persisted after fix 1 — the model interpreted "builder" semantically as
+   a tradesperson and would not give an "outside party" a gate code
+   (observed twice). Fixture id renamed `husband@wa`; production JIDs are
+   phone-number-shaped, so the production prompt must name/map the two real
+   sender ids — added to the TASKS.md ledger for T42.
+
+Minor observation, not a defect: the dev DB's lists are shared across runs
+(keyed by list name, not conversation), so re-runs accumulate items — the
+model noticed the duplicate לחם rows and offered to clean them up.

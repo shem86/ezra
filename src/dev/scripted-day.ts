@@ -18,7 +18,13 @@ export interface ScriptedConversation {
   readonly covers: readonly string[];
 }
 
-const BUILDER = 'builder@wa';
+// 'husband@wa', not 'builder@wa': the model read "builder" semantically — a
+// contractor at the house — and refused to hand the parking-gate code to an
+// "outside party" (observed twice on claude-sonnet-4-6, 2026-06-11). Fixture
+// ids must read as unambiguous household members; production JIDs are
+// phone-number-shaped and carry no such semantics (prompt mapping is a T42
+// concern).
+const BUILDER = 'husband@wa';
 const WIFE = 'wife@wa';
 
 export const scriptedDay: readonly ScriptedConversation[] = [
