@@ -10,7 +10,7 @@
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
-    "test:recovery": "vitest run tests/integration/steps.test.ts tests/integration/queue.test.ts tests/integration/handle-turn.test.ts tests/integration/scheduled.test.ts tests/integration/recovery.test.ts tests/integration/compaction.test.ts",
+    "test:recovery": "vitest run tests/integration/steps.test.ts tests/integration/queue.test.ts tests/integration/handle-turn.test.ts tests/integration/scheduled.test.ts tests/integration/recovery.test.ts tests/integration/compaction.test.ts tests/integration/park-recovery.test.ts",
     "lint": "eslint .",
     "dev": "tsc && node --env-file=.env dist/dev/main.js",
     "migrate": "tsc && node --env-file=.env dist/memory/migrate-cli.js",
