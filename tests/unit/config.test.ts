@@ -6,6 +6,16 @@ import {
   loadWaSessionDir,
 } from '../../src/ops/config.js';
 
+// Shape-faithful service-account key (T39/ADR-0004): the real file has more
+// fields; config must tolerate them and extract exactly these two.
+const saKey = {
+  type: 'service_account',
+  project_id: 'hh-assistant-test',
+  client_email: 'hh-agent@hh-assistant-test.iam.gserviceaccount.com',
+  private_key: '-----BEGIN PRIVATE KEY-----\nMIItest\n-----END PRIVATE KEY-----\n',
+};
+const saKeyB64 = Buffer.from(JSON.stringify(saKey)).toString('base64');
+
 const validEnv = {
   DATABASE_URL: 'postgres://hh:hh@localhost:5432/hh_assistant',
   ANTHROPIC_API_KEY: 'sk-ant-test',
@@ -15,6 +25,9 @@ const validEnv = {
   ALERT_CHANNEL_TOKEN: 'tg-bot-token',
   ALERT_CHANNEL_CHAT_ID: '123456789',
   DEADMAN_PING_URL: 'https://hc-ping.com/some-uuid',
+  GOOGLE_SA_KEY_B64: saKeyB64,
+  CALENDAR_ID_HUSBAND: 'husband@gmail.com',
+  CALENDAR_ID_WIFE: 'wife@gmail.com',
 };
 
 describe('loadConfig', () => {
@@ -55,6 +68,36 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ ...validEnv, APPROVAL_TTL_HOURS: '0' })).toThrowError(
       /APPROVAL_TTL_HOURS/,
     );
+  });
+
+  it('decodes the service-account key and exposes email + private key (T39/ADR-0004)', () => {
+    const config = loadConfig(validEnv);
+    expect(config.googleServiceAccount.clientEmail).toBe(saKey.client_email);
+    expect(config.googleServiceAccount.privateKey).toBe(saKey.private_key);
+  });
+
+  it('rejects a service-account key that is not valid base64 JSON, naming the variable', () => {
+    expect(() => loadConfig({ ...validEnv, GOOGLE_SA_KEY_B64: 'not-base64!!!' })).toThrowError(
+      /GOOGLE_SA_KEY_B64/,
+    );
+  });
+
+  it('rejects a decodable key missing client_email or private_key', () => {
+    const incomplete = Buffer.from(JSON.stringify({ type: 'service_account' })).toString('base64');
+    expect(() => loadConfig({ ...validEnv, GOOGLE_SA_KEY_B64: incomplete })).toThrowError(
+      /GOOGLE_SA_KEY_B64/,
+    );
+  });
+
+  it('exposes the per-owner calendar ids (ADR-0004 requester routing)', () => {
+    const config = loadConfig(validEnv);
+    expect(config.calendarIds.husband).toBe('husband@gmail.com');
+    expect(config.calendarIds.wife).toBe('wife@gmail.com');
+  });
+
+  it('requires both calendar ids — half a household map is a misconfiguration', () => {
+    const { CALENDAR_ID_WIFE: _wife, ...partial } = validEnv;
+    expect(() => loadConfig(partial)).toThrowError(/CALENDAR_ID_WIFE/);
   });
 
   it('fails loudly naming every missing variable', () => {

@@ -3,6 +3,13 @@ import { z } from 'zod';
 // The ONLY module allowed to read environment/secrets (SPEC src/ops contract).
 // Everything else receives a Config through its deps object — never process.env.
 
+// The downloaded key file holds more fields; only these two authenticate
+// (ADR-0004): client_email is the JWT issuer, private_key signs it.
+const serviceAccountKeySchema = z.looseObject({
+  client_email: z.string().min(1),
+  private_key: z.string().min(1),
+});
+
 const envSchema = z.object({
   DATABASE_URL: z.string().min(1, 'required — postgres connection string, see .env.example'),
   ANTHROPIC_API_KEY: z.string().min(1, 'required — Claude Console API key'),
@@ -21,6 +28,31 @@ const envSchema = z.object({
   // Open Q1 (resolved at T34): how long a parked confirm-before action waits
   // for approval. Written into expires_at at park time; T37's sweep consumes it.
   APPROVAL_TTL_HOURS: z.coerce.number().positive().default(12),
+  // Calendar service-account key (T39/ADR-0004), base64 of the downloaded
+  // JSON file. Decoded and validated HERE so a bad paste fails at startup,
+  // not at the first calendar call.
+  GOOGLE_SA_KEY_B64: z
+    .string()
+    .min(1, 'required — base64 of the service-account key JSON (ADR-0004)')
+    .transform((value, ctx) => {
+      try {
+        const parsed = serviceAccountKeySchema.parse(
+          JSON.parse(Buffer.from(value, 'base64').toString('utf8')),
+        );
+        return { clientEmail: parsed.client_email, privateKey: parsed.private_key };
+      } catch {
+        ctx.addIssue({
+          code: 'custom',
+          message:
+            'must be base64 of the service-account key JSON (with client_email and private_key)',
+        });
+        return z.NEVER;
+      }
+    }),
+  // Per-owner calendar ids (ADR-0004 requester routing). For personal
+  // primary calendars the id IS the Gmail address.
+  CALENDAR_ID_HUSBAND: z.string().min(1, 'required — calendar id the husband-owner maps to'),
+  CALENDAR_ID_WIFE: z.string().min(1, 'required — calendar id the wife-owner maps to'),
 });
 
 export interface Config {
@@ -37,6 +69,8 @@ export interface Config {
   readonly deadmanPingUrl: string;
   readonly waSessionDir: string;
   readonly approvalTtlHours: number;
+  readonly googleServiceAccount: { readonly clientEmail: string; readonly privateKey: string };
+  readonly calendarIds: { readonly husband: string; readonly wife: string };
 }
 
 function formatIssues(issues: Array<{ path: PropertyKey[]; message: string }>): string {
@@ -113,5 +147,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     deadmanPingUrl: parsed.data.DEADMAN_PING_URL,
     waSessionDir: parsed.data.WA_SESSION_DIR,
     approvalTtlHours: parsed.data.APPROVAL_TTL_HOURS,
+    googleServiceAccount: parsed.data.GOOGLE_SA_KEY_B64,
+    calendarIds: {
+      husband: parsed.data.CALENDAR_ID_HUSBAND,
+      wife: parsed.data.CALENDAR_ID_WIFE,
+    },
   };
 }
