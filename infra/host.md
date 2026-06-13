@@ -27,22 +27,23 @@ retained below as the planned post-credits destination).
    2026-06-12): $0.00 spend MTD against the existing "My Zero-Spend Budget"
    ($1/mo); **$134.65 free-tier credits remaining** (new-style post-2025-07
    plan: credits only, NO free instance-hours allowance); account opened
-   ~2025-09-30 (budget start date), so credits expire **~2026-09-30**
-   (12-month rule) — exact date to be confirmed in console Billing →
-   Credits. Credits are expiry-bound, not exhaustion-bound, at this burn
-   rate — so sizing generously is free.
+   ~2025-10-29, and credits expire **2026-10-29** (confirmed by builder in
+   console Billing → Credits, 2026-06-12). At ~$31/mo the credits exhaust
+   ~mid-Oct 2026 — almost exactly when they expire anyway, so generous
+   sizing costs nothing either way.
 
-## Accepted trade-off: the ~Sep 2026 decision point
+## Accepted trade-off: the ~mid-Oct 2026 decision point
 
-Credits cover ~3.5 months. When they expire, this box bills ~**$31/mo**
+Credits cover ~4.3 months (exhaustion ~mid-Oct ≈ expiry 2026-10-29). After
+that, this box bills ~**$31/mo**
 (t3a.medium ~$25 + EBS ~$2.5 + IPv4 $3.65) — 4–7× Hetzner. The standing
-plan: **migrate to Hetzner CX23 before credit expiry** (~Sep 2026), using
+plan: **migrate to Hetzner CX23 before the credits run out**, using
 the T44 runbook — host loss is a drilled scenario: restore base backup +
 WAL into fresh Postgres, re-pair WhatsApp (NEVER restore Baileys session),
 reconcile via sent_log + deterministic calendar ids. The existing
 zero-spend budget is the tripwire: actual spend stays ~$0 while credits
 cover, so its first alert ≈ credits stopped covering. Calendar reminder for
-mid-Sep 2026 recommended regardless.
+~2026-10-01 recommended regardless.
 
 Shape rationale: **x86 (t3a) over ARM (t4g)** — both fully covered until
 expiry and leftover credits evaporate, so eliminating the ARM variable
@@ -67,17 +68,16 @@ dwarfs the data.
 - Budget: pre-existing "My Zero-Spend Budget" ($1/mo) doubles as the
   credit-expiry tripwire (see above)
 
-### Remaining builder steps (then tick T15)
+### Builder completion record
 
-1. First-login baseline (user `ubuntu`): create `hh` user + copy key,
-   sshd drop-in (`PasswordAuthentication no`, `PermitRootLogin no`),
-   `apt upgrade` + `unattended-upgrades`, hostname `hh-assistant`
-   (TZ stays UTC deliberately — reminders anchor Eastern in config).
-   Verify key-only login as `hh` before closing the root-capable session.
-2. Console Billing → Credits: record the exact credit expiration date here:
-   - Credit expiry: _pending_
-3. Drop a calendar reminder ~2 weeks before expiry for the
-   migrate-vs-pay call.
+1. First-login baseline — **done 2026-06-12** (`hh` user, key-only +
+   no-root sshd, apt upgrade + unattended-upgrades, hostname
+   `hh-assistant`; TZ stays UTC deliberately — reminders anchor Eastern
+   in config).
+2. Credit expiry: **2026-10-29** (console Billing → Credits, read
+   2026-06-12).
+3. Still open: calendar reminder ~2026-10-01 for the migrate-vs-pay call
+   (recommend: book it now).
 
 ## Fallback / post-credits destination (pre-made): Hetzner CX23
 
