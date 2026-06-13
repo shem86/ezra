@@ -21,6 +21,7 @@ import { createTelegramAlertChannel } from './ops/alerts.js';
 import { createHealthMonitor } from './ops/health.js';
 import { createDeadmanPinger } from './ops/deadman.js';
 import { registerTransactionalStep } from './orchestration/steps.js';
+import { resumeStrandedWorkflows } from './orchestration/recovery.js';
 import { createIngestion, ingestWorkflowId } from './orchestration/ingest.js';
 import {
   makeConversationEnqueueWorkflow,
@@ -350,6 +351,13 @@ async function main(): Promise<void> {
   DBOS.setConfig({ name: 'hh-assistant', systemDatabaseUrl: config.databaseUrl });
   await DBOS.launch();
   await registerConversationQueue();
+  // Ledger #1: rescue work stranded by the previous generation's crash —
+  // AFTER launch so every datasource is initialized (the race the
+  // per-generation executor id in start.ts exists to dodge).
+  const resumed = await resumeStrandedWorkflows();
+  if (resumed.length > 0) {
+    console.log(`launch-recovery: resumed ${resumed.length} stranded workflow(s)`);
+  }
 
   await replyDb.connect();
   await transport.connect();
