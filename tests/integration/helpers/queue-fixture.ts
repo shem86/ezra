@@ -43,6 +43,15 @@ const processBatchStep = DBOS.registerStep(
   },
   { name: 'processBatch' },
 );
+// Registered as a WORKFLOW (not a bare step) to mirror the production
+// composition, where processBatch is the processTurnBatch child workflow —
+// the workflow wrapper is the only dep kind that rejects a bound `this`.
+const processBatchWorkflow = DBOS.registerWorkflow(
+  async function processTurnBatch(batch: InboxItem[]): Promise<void> {
+    await processBatchStep(batch);
+  },
+  { name: 'processTurnBatch' },
+);
 
 // Short silence window keeps the suite fast while staying far above the
 // few-ms spread of a scripted bubble burst.
@@ -51,7 +60,7 @@ export const silenceWindowMs = 1000;
 export const drainWorkflow = DBOS.registerWorkflow(
   makeDrainWorkflow({
     readPending: readPendingStep,
-    processBatch: processBatchStep,
+    processBatch: processBatchWorkflow,
     markProcessed: markProcessedStep,
     silenceWindowMs,
     maxQuietWaitMs: 8000,
