@@ -35,6 +35,11 @@ export interface SendReceipt {
  * this only AFTER the message is durably enqueued: un-acked messages must be
  * redelivered on reconnect (that redelivery is the crash-loss prevention —
  * architecture "ingestion durability"). Idempotent.
+ *
+ * The stub transport honors this contract fully. The real Baileys adapter
+ * CANNOT (receipts are sent lib-internally before the event fires — see the
+ * T42 note in baileys.ts): there, down-window redelivery comes from
+ * WhatsApp's offline flow and the ms-scale in-flight window is accepted.
  */
 export type MessageAck = () => Promise<void>;
 

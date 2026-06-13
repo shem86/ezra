@@ -139,10 +139,16 @@ export function createBaileysTransport(deps: BaileysTransportDeps): Transport {
 
   const sentIds = new RecentIds(SENT_ID_CAPACITY);
   const messageHandlers: Array<(m: InboundMessage, ack: MessageAck) => void> = [];
-  // Receive-ack deferral against the real socket is M6 work (PLAN: "durable-
-  // enqueue-before-ack against the real socket"); until then Baileys acks on
-  // receipt and this callback is a no-op, so the redelivery guarantee only
-  // holds for the stub transport.
+  // Receipt deferral is NOT possible on the real socket (T42 finding, builder
+  // accepted 2026-06-12): Baileys 7.x sends the protocol receipt inside its
+  // own message handler BEFORE emitting messages.upsert (messages-recv.js,
+  // sendReceipt precedes upsertMessage), with no public hook — so this ack
+  // callback is permanently a no-op here. The durability guarantee is carried
+  // instead by (a) WhatsApp's offline redelivery on reconnect for any
+  // process-down window — those arrive as 'append' upserts, handled below —
+  // and (b) ingestWorkflowId dedupe making redelivery safe. The residual loss
+  // window (receipt sent, crash before the inbox commit, ms-scale in-process)
+  // is accepted and documented in the recovery runbook (T44).
   const noopAck: MessageAck = async () => {};
   const stateHandlers: Array<(s: TransportState) => void> = [];
 
