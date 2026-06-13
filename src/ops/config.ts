@@ -55,6 +55,31 @@ const envSchema = z.object({
   CALENDAR_ID_WIFE: z.string().min(1, 'required — calendar id the wife-owner maps to'),
 });
 
+/** Comma-separated JID list → trimmed non-empty array. */
+const jidList = (what: string): z.ZodType<string[], string> =>
+  z
+    .string({ error: `required — ${what}` })
+    .transform((value) =>
+      value
+        .split(',')
+        .map((jid) => jid.trim())
+        .filter((jid) => jid.length > 0),
+    )
+    .refine((jids) => jids.length > 0, { message: `required — ${what}` });
+
+// Production-only vars (T42). A member may appear under several JID forms
+// (phone-shaped @s.whatsapp.net AND @lid — see docs/pairing.md), hence lists.
+// The conversation allowlist is a hard privacy boundary: the bot runs on a
+// PERSONAL number, so without it every chat on the account would flow into
+// ingestion, prompts, and traces.
+const productionEnvSchema = envSchema.extend({
+  WA_JID_HUSBAND: jidList('comma-separated sender JIDs that are the husband'),
+  WA_JID_WIFE: jidList('comma-separated sender JIDs that are the wife'),
+  WA_HOUSEHOLD_CONVERSATIONS: jidList(
+    'comma-separated chat JIDs the bot serves (the household group; optionally the two DMs)',
+  ),
+});
+
 export interface Config {
   readonly databaseUrl: string;
   readonly anthropicApiKey: string;
@@ -126,6 +151,30 @@ export function loadDatabaseUrl(env: Record<string, string | undefined> = proces
     throw new Error('Invalid environment configuration:\n  DATABASE_URL: required');
   }
   return parsed.data.DATABASE_URL;
+}
+
+export interface ProductionConfig extends Config {
+  /** Sender JID(s) → member, the ledger #12 mapping (prompt + attribution). */
+  readonly memberJids: { readonly husband: string[]; readonly wife: string[] };
+  /** Chat JIDs the bot serves — everything else is ignored at ingestion. */
+  readonly householdConversations: string[];
+}
+
+export function loadProductionConfig(
+  env: Record<string, string | undefined> = process.env,
+): ProductionConfig {
+  const parsed = productionEnvSchema.safeParse(env);
+  if (!parsed.success) {
+    throw new Error(`Invalid environment configuration:\n${formatIssues(parsed.error.issues)}`);
+  }
+  return {
+    ...loadConfig(env),
+    memberJids: {
+      husband: parsed.data.WA_JID_HUSBAND,
+      wife: parsed.data.WA_JID_WIFE,
+    },
+    householdConversations: parsed.data.WA_HOUSEHOLD_CONVERSATIONS,
+  };
 }
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {

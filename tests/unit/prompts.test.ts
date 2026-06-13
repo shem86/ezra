@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   composeSystemPrompt,
+  makeProductionSystemPrompt,
   renderApprovalOutcome,
   renderApprovalPrompt,
   renderExpiryNotice,
@@ -198,5 +199,54 @@ describe('renderExpiryNotice (T37)', () => {
 
   it('is deterministic — the sweep enqueues it and replay must regenerate identical bytes', () => {
     expect(renderExpiryNotice(entry())).toBe(renderExpiryNotice(entry()));
+  });
+});
+
+describe('makeProductionSystemPrompt (T42)', () => {
+  const memberJids = {
+    husband: ['15550001111@s.whatsapp.net', '111222333@lid'],
+    wife: ['15550002222@s.whatsapp.net'],
+  };
+  const prompt = makeProductionSystemPrompt({ memberJids });
+
+  it('names the persona, in both scripts (SPEC Q4: Golem)', () => {
+    expect(prompt).toContain('Golem');
+    expect(prompt).toContain('גולם');
+  });
+
+  it('maps every configured JID to its member', () => {
+    expect(prompt).toContain('15550001111@s.whatsapp.net');
+    expect(prompt).toContain('111222333@lid');
+    expect(prompt).toContain('15550002222@s.whatsapp.net');
+    expect(prompt).toMatch(/husband/);
+    expect(prompt).toMatch(/wife/);
+  });
+
+  it('instructs attribution by member label, never the raw id (ledger #12)', () => {
+    expect(prompt).toMatch(/addedBy\/createdBy/);
+    expect(prompt).toMatch(/member label/i);
+    expect(prompt).toMatch(/never the raw id/i);
+  });
+
+  it('is honest about one-time-only reminders (ledger #4 cut)', () => {
+    expect(prompt).toMatch(/repeat/i);
+    expect(prompt).toMatch(/one-time/i);
+    expect(prompt).toMatch(/honest/i);
+  });
+
+  it('keeps the shared household invariants — language, Eastern time, tools-are-truth', () => {
+    expect(prompt).toContain('Hebrew and English');
+    expect(prompt).toContain('Eastern wall time');
+    expect(prompt).toContain('never answer from memory');
+    expect(prompt).toMatch(/more than one/i); // T36 multi-pending rule rides along
+  });
+
+  it('is deterministic — same config, same bytes (this is a cache prefix)', () => {
+    expect(makeProductionSystemPrompt({ memberJids })).toBe(prompt);
+  });
+
+  it('leaves stableSystemPrompt as the dev prefix, byte-stable', () => {
+    expect(stableSystemPrompt.startsWith('You are the household assistant')).toBe(true);
+    expect(stableSystemPrompt).toContain('like "wife@wa: the message"');
   });
 });

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   loadConfig,
   loadDatabaseUrl,
+  loadProductionConfig,
   loadTransportOpsConfig,
   loadWaSessionDir,
 } from '../../src/ops/config.js';
@@ -168,5 +169,42 @@ describe('loadDatabaseUrl', () => {
   it('fails loudly when DATABASE_URL is missing or empty', () => {
     expect(() => loadDatabaseUrl({})).toThrowError(/DATABASE_URL/);
     expect(() => loadDatabaseUrl({ DATABASE_URL: '' })).toThrowError(/DATABASE_URL/);
+  });
+});
+
+describe('loadProductionConfig (T42)', () => {
+  const prodEnv = {
+    ...validEnv,
+    WA_JID_HUSBAND: '15550001111@s.whatsapp.net, 111222333@lid',
+    WA_JID_WIFE: '15550002222@s.whatsapp.net',
+    WA_HOUSEHOLD_CONVERSATIONS: '120363041234567890@g.us, 15550002222@s.whatsapp.net',
+  };
+
+  it('extends Config with member JIDs and the conversation allowlist (comma-separated, trimmed)', () => {
+    const config = loadProductionConfig(prodEnv);
+    expect(config.memberJids.husband).toEqual(['15550001111@s.whatsapp.net', '111222333@lid']);
+    expect(config.memberJids.wife).toEqual(['15550002222@s.whatsapp.net']);
+    expect(config.householdConversations).toEqual([
+      '120363041234567890@g.us',
+      '15550002222@s.whatsapp.net',
+    ]);
+    // The base Config rides along — one loader, one validation pass.
+    expect(config.databaseUrl).toBe(validEnv.DATABASE_URL);
+    expect(config.calendarIds.wife).toBe(validEnv.CALENDAR_ID_WIFE);
+  });
+
+  it('rejects a blank member JID list', () => {
+    expect(() => loadProductionConfig({ ...prodEnv, WA_JID_HUSBAND: ' ' })).toThrowError(
+      /WA_JID_HUSBAND/,
+    );
+  });
+
+  it('rejects a missing conversation allowlist — a personal-number bot must never serve every chat', () => {
+    const { WA_HOUSEHOLD_CONVERSATIONS: _omit, ...rest } = prodEnv;
+    expect(() => loadProductionConfig(rest)).toThrowError(/WA_HOUSEHOLD_CONVERSATIONS/);
+  });
+
+  it('loadConfig keeps working without the production vars (dev unaffected)', () => {
+    expect(() => loadConfig(validEnv)).not.toThrow();
   });
 });
