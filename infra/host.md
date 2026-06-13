@@ -1,104 +1,124 @@
 # T15 — Host decision + evidence
 
-**Decision (2026-06-12): Hetzner Cloud CX23, EU (Falkenstein or Nuremberg), Ubuntu 24.04 LTS.**
-~€3.99/mo + ~€0.71/mo IPv4 ≈ **€4.70/mo**. Pending builder confirmation at
-provision time (spending money is ask-first); the evidence below is the
-re-verification the architecture (decision 7) required the week of
-provisioning.
+**Decision (builder call, 2026-06-12): Oracle Cloud PAYG, A1.Flex, home region US East (Ashburn).**
+Target $0/mo inside the Always Free window. Hetzner CX23 (below) stays the
+pre-made fallback if A1 capacity blocks provisioning or the exemption check
+in step 0 fails.
 
-## Why not Oracle PAYG — the verification failed, per the pre-made rule
+## Re-verification evidence (2026-06-12) and what the builder accepted
 
-Architecture decision 7 made the rule: *Oracle PAYG if you can provision A1
-and the current reclamation policy still holds; otherwise Hetzner* — and
-flagged the PAYG-exempts-from-reclamation claim as "a vendor-policy assertion
-to re-verify at provisioning time, not a locked fact."
+Architecture decision 7's rule: Oracle PAYG only if A1 provisions and the
+reclamation policy still holds — re-verified the week of provisioning.
 
-Re-verified 2026-06-12:
+1. **Idle reclamation is live in current docs:** "Idle Always Free compute
+   instances may be reclaimed by Oracle" — 7-day window, 95th-pct CPU < 20%,
+   network < 20%, memory < 20% (A1).
+   [Always Free Resources](https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm) (fetched 2026-06-12).
+2. **PAYG exemption:** Oracle's reclamation notices and FAQ say reclamation
+   targets *Always Free customers only* and that converting to PAYG keeps
+   idle instances from being stopped ([archived notice](https://blog.51sec.org/2023/02/oracle-cloud-cleaning-up-idle-compute.html)).
+   The current policy doc is silent on account type and the
+   [FAQ](https://www.oracle.com/cloud/free/faq/) blocks programmatic fetch —
+   **step 0 below captures the FAQ wording in-browser as the missing
+   evidence.** This matters here: a two-user agent sits under 20%
+   CPU/network forever, so the exemption is load-bearing.
+3. **A1 allotment (multiple 2026 sources, consistent):** 3,000 OCPU-hours +
+   18,000 GB-hours/month free = **4 OCPU / 24 GB always-on**; 200 GB total
+   boot+block storage; 10 TB egress/month. Free limits persist on PAYG —
+   billing starts only above them. **Always Free resources provision in the
+   home region only** (elsewhere bills at paid rates).
+   [Grokipedia summary](https://grokipedia.com/page/Oracle_Cloud_Always_Free_Tier) · [fullmetalbrackets breakdown](https://fullmetalbrackets.com/blog/oci-free-tier-breakdown) · confirm live numbers in the console at create time.
+4. **Accepted residual risks** (named in decision 7, accepted by builder
+   2026-06-12): exemption lives in FAQ prose rather than the policy doc;
+   A1 capacity lottery (much rarer on PAYG); Oracle account-termination
+   opacity. Mitigations: step-0 evidence capture; budget alert makes any
+   billing drift loud; M2's external dead-man switch detects a
+   stopped/reclaimed box within minutes; T17's off-box encrypted backups +
+   T44 runbook make host loss a drill, not a disaster.
 
-1. **The idle-reclamation policy is live in Oracle's current docs.** "Idle
-   Always Free compute instances may be reclaimed by Oracle" when, over a
-   7-day window: 95th-percentile CPU < 20%, network < 20%, and (A1 only)
-   memory < 20%.
-   Source: [Always Free Resources](https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm) (fetched 2026-06-12).
-2. **The current docs do NOT state that PAYG accounts are exempt.** The
-   exemption claim traces to Oracle's 2023 reclamation-notice emails and FAQ
-   wording ("reclaiming idle Always Free compute resources from Always Free
-   customers only"; "you can keep idle compute instances from being stopped
-   by converting your account to Pay As You Go" — secondhand via
-   [51sec.org's archive of the notice](https://blog.51sec.org/2023/02/oracle-cloud-cleaning-up-idle-compute.html)).
-   The [official FAQ](https://www.oracle.com/cloud/free/faq/) could not be
-   fetched programmatically (403) and the docs page is silent on account
-   type. **This is exactly the silent-failure shape decision 7 warned
-   about**: the exemption lives in deletable FAQ prose, not the policy doc.
-3. **This workload reads as "idle" under Oracle's definition.** A WhatsApp
-   socket plus DBOS queue-polling for a two-person household will sit far
-   under 20% CPU/network/memory essentially every week of its life. The
-   exemption is therefore load-bearing, not theoretical — if it quietly
-   stops applying, the box hosting a live Baileys session gets reclaimed,
-   and Baileys session loss means re-pair (never restore) plus reconnect
-   churn, the exact ban-signal the architecture works to avoid.
-4. **Residual Oracle frictions still present (2026 reports):** A1 "out of
-   host capacity" remains a known provisioning lottery in popular regions
-   (PAYG improves but does not guarantee it), and account-termination
-   opacity is unchanged.
+## Provisioning guide (T15 [H] — builder)
 
-Net: the condition the rule requires ("current reclamation policy still
-holds" — verifiable against current docs) is **not met**, so the pre-made
-fallback applies. At €4.70/mo the cost is noise against the reliability of
-the foundation (decision 7's own words), and SPEC's "reliability beats
-sophistication" settles any remaining pull toward $0.
+**Step 0 — capture the exemption evidence (before paying anything).**
+Open the [Free Tier FAQ](https://www.oracle.com/cloud/free/faq/) in a
+browser. Find the idle-reclamation answer; confirm it still says PAYG
+(upgraded) accounts' instances are not reclaimed. Paste the exact quote +
+date into the evidence block below (screenshot optional, keep off-repo).
+If the wording is gone, stop — fall back to Hetzner.
 
-**What would reopen Oracle:** the exemption stated in Oracle's current docs
-(not FAQ prose), plus same-week successful A1 provisioning in the home
-region. Not worth re-litigating below that bar.
+**Step 1 — account.** Sign up at signup.oraclecloud.com.
+**Home region = US East (Ashburn) — permanent, cannot be changed**, and
+Always Free capacity is home-region-locked. Identity + card verification.
 
-## Why this Hetzner shape
+**Step 2 — upgrade to PAYG.** Console → Billing & Cost Management →
+Upgrade and Manage Payment → Upgrade to Pay As You Go. Can take up to a
+day to process; wait for confirmation before provisioning (the exemption
+and the paid capacity pool both hinge on the account class).
 
-| Choice | Pick | Why |
-|---|---|---|
-| Plan | CX23 (2 vCPU Intel, 4 GB RAM, 40 GB SSD, 20 TB traffic) | Cheapest adequate shape. 4 GB comfortably fits Node + Postgres(+pgvector) at two-user scale; 40 GB dwarfs the data. €3.99/mo post-April-2026 pricing. |
-| Arch | x86, not CAX/ARM | CAX is ~equal price but ARM is one more variable under the Baileys transitive tree (native deps). Boring wins; CI is x86 Linux too. |
-| Location | Falkenstein (fsn1) or Nuremberg (nbg1) | CX and CAX are **not sold in US locations**; Ashburn's cheapest is CPX22 at €7.99/mo with 1 TB traffic — ~2× for nothing this workload needs. Latency is irrelevant: async messaging, and reminders anchor to Eastern wall time in config by hard rule, never server time. Server TZ stays UTC. |
-| IPs | IPv4 + IPv6 | IPv4 (~€0.71/mo) kept for v1 — WhatsApp/Google endpoint IPv6 coverage is not something to debug at launch. |
-| Hetzner auto-backups/snapshots | **OFF** | A whole-box snapshot captures Baileys session state; restoring it would roll back the Signal ratchet — the exact restore-hostile failure the SPEC "Never" forbids. T17's WAL+base-backup pipeline (which deliberately excludes Baileys state) owns durability. |
+**Step 3 — budget tripwire.** Billing → Budgets → create: amount $5,
+alert rule at 1% actual + forecast, email. Anything nonzero is a signal
+something left the free window.
 
-Pricing evidence: [Hetzner new-CX press release](https://www.hetzner.com/pressroom/new-cx-plans/),
-[Better Stack Hetzner review](https://betterstack.com/community/guides/web-servers/hetzner-cloud-review/)
-(documents the 2026-04-01 price adjustment, CX23/CPX22 current pricing, EU-only
-cost-optimized tier, IPv4 €0.00097/hr). Fetched 2026-06-12; confirm the live
-price in the console at order time.
+**Step 4 — create the instance.** Compute → Instances → Create:
+- Name `hh-assistant`; image **Canonical Ubuntu 24.04** (aarch64 pairs
+  automatically with the A1 shape).
+- Shape: Ampere → **VM.Standard.A1.Flex → 4 OCPU / 24 GB** — first confirm
+  the console still marks this sizing Always Free (see evidence note 3).
+- Networking: create new VCN with the wizard defaults; **assign public
+  IPv4**. Default security list (SSH 22 open, key-only) is fine for T15;
+  T16 adds the egress allowlist — OCI security lists can enforce it at the
+  cloud layer in addition to on-host rules.
+- SSH: paste the public half of a fresh `ed25519` keypair (private key
+  never leaves the Mac).
+- Boot volume: default ~50 GB (≤200 GB free total; plenty — leave headroom).
+- If **"Out of host capacity"**: try each availability domain, retry over a
+  few hours (PAYG draws on the paid pool, so this is usually brief). If it
+  persists past a day or two, that's the pre-made Hetzner trigger.
 
-## Provisioning checklist (T15 [H] — builder clicks)
+**Step 5 — first-login baseline** (image default user is `ubuntu`;
+everything deeper is T16):
+```sh
+sudo adduser --disabled-password hh && sudo usermod -aG sudo hh
+sudo install -d -m 700 /home/hh/.ssh && sudo cp /home/ubuntu/.ssh/authorized_keys /home/hh/.ssh/ && sudo chown -R hh:hh /home/hh/.ssh
+# /etc/ssh/sshd_config.d/10-hardening.conf:
+#   PasswordAuthentication no
+#   PermitRootLogin no
+sudo systemctl restart ssh
+sudo apt-get update && sudo apt-get -y upgrade && sudo apt-get -y install unattended-upgrades
+sudo hostnamectl set-hostname hh-assistant   # TZ stays UTC deliberately
+```
+Verify key-only login as `hh` from a second terminal **before** closing the
+first session.
 
-1. Hetzner account + payment method; create project `hh-assistant`.
-2. Console → Security → add SSH **public** key (generate a fresh
-   `ed25519` keypair for this host; private key never leaves your Mac).
-3. Create server: location **fsn1** (or nbg1), image **Ubuntu 24.04**, type
-   **CX23**, public IPv4 ✓ + IPv6 ✓, your SSH key selected, backups **off**,
-   no volumes (T16 defines the writable mounts), cloud-init empty (keep the
-   first boot inspectable; hardening is T16's scripted layer).
-4. First login as root, minimal baseline (everything deeper is T16):
-   ```sh
-   adduser --disabled-password hh && usermod -aG sudo hh
-   install -d -m 700 /home/hh/.ssh && cp /root/.ssh/authorized_keys /home/hh/.ssh/ && chown -R hh:hh /home/hh/.ssh
-   # /etc/ssh/sshd_config.d/10-hardening.conf:
-   #   PasswordAuthentication no
-   #   PermitRootLogin no
-   systemctl restart ssh
-   apt-get update && apt-get -y upgrade && apt-get -y install unattended-upgrades
-   hostnamectl set-hostname hh-assistant   # TZ stays UTC deliberately
-   ```
-   Verify key-only login as `hh` from a second terminal **before** closing
-   the root session.
-5. Record below: server IP, server ID, datacenter, price as billed, date.
-6. Mark T15 done in TASKS.md; T16 (hardening + egress allowlist) and T17
-   (backups → B2/R2, restore drill) proceed against this box. T17's B2-vs-R2
-   pick is still open — decide there, not here.
+**Step 6 — record + close.** Fill the evidence and host blocks below, mark
+T15 done in TASKS.md. T16 (hardening + egress) and T17 (backups → B2/R2,
+restore drill) proceed against this box; B2-vs-R2 is decided at T17.
 
-## Provisioned host (fill at T15 completion)
+**ARM note:** the box is arm64; Node 22, Postgres + pgvector (PGDG), and the
+Baileys tree all ship arm64. Dev/CI are x86, so any native-dep weirdness
+surfaces only on the box — accepted; the T45 on-host drills are where it
+would show.
+
+## Fallback (pre-made): Hetzner CX23
+
+EU-only (fsn1/nbg1), 2 vCPU Intel / 4 GB / 40 GB / 20 TB, €3.99/mo +
+~€0.71/mo IPv4 (post-2026-04-01 pricing,
+[Better Stack review](https://betterstack.com/community/guides/web-servers/hetzner-cloud-review/)).
+US Ashburn floor is CPX22 at €7.99/mo with 1 TB — not worth it; latency is
+irrelevant (reminders anchor to Eastern via config, never server time).
+Hetzner auto-backups stay **OFF** — a box snapshot captures Baileys session
+state and restoring it rolls back the Signal ratchet (SPEC "Never").
+
+## Evidence captured at provisioning (fill at step 0)
+
+- FAQ exemption quote: _pending_
+- Quoted on (date): _pending_
+
+## Provisioned host (fill at step 6)
 
 - Provisioned on: _pending_
-- Server ID / name: _pending_
-- IPv4 / IPv6: _pending_
-- Datacenter: _pending_
-- Billed: _pending_
+- PAYG upgrade confirmed on: _pending_
+- Instance OCID / name: _pending_
+- Shape as created: _pending_
+- Public IPv4: _pending_
+- Availability domain: _pending_
+- Budget alert set: _pending_
