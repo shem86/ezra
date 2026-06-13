@@ -4,6 +4,7 @@ import {
   makeWASocket,
   type AuthenticationState,
 } from 'baileys';
+import { markAgentText } from './agent-marker.js';
 import type { SessionStore } from './session-store.js';
 import type {
   InboundMessage,
@@ -286,7 +287,9 @@ export function createBaileysTransport(deps: BaileysTransportDeps): Transport {
       });
       try {
         const result = await Promise.race([
-          socket.sendMessage(message.conversationId, { text: message.text }),
+          // Marker applied here, at the wire, so the journaled turn and model
+          // context stay clean (src/transport/agent-marker.ts).
+          socket.sendMessage(message.conversationId, { text: markAgentText(message.text) }),
           timeout,
         ]);
         const messageId = result?.key?.id;

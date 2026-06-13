@@ -335,6 +335,15 @@ describe('baileys adapter: messages', () => {
     expect(receipt.messageId).toMatch(/^SENT-/);
   });
 
+  it('prepends the agent marker on the wire (shared identity needs it)', async () => {
+    const h = harness();
+    await connectOpen(h);
+    await h.transport.send({ conversationId: 'x@s.whatsapp.net', text: 'trash night' });
+    expect(h.sockets[0]!.sendMessage).toHaveBeenCalledWith('x@s.whatsapp.net', {
+      text: '🤖 trash night',
+    });
+  });
+
   it('send fails fast when the socket hangs (timeout)', async () => {
     const h = harness();
     await connectOpen(h);

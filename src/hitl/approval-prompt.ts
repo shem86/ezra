@@ -5,7 +5,9 @@
 // "unstamped pending row" is the durable to-send marker, so a crash between
 // turn and send is retried by the next call rather than lost. The rendered
 // text matches the closing transcript message byte-for-byte (same renderer,
-// same journaled values).
+// same journaled values); the transport prepends the agent marker on the wire
+// only (src/transport/agent-marker.ts) — the reply binding keys on the sent
+// message id, not the text, so the marker does not affect it.
 
 import { renderApprovalPrompt } from '../agent/prompts.js';
 import { getPendingActionsForConversation, setPromptMessageId, type Queryable } from '../memory/store.js';
