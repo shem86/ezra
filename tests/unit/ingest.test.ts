@@ -130,6 +130,52 @@ describe('createIngestion', () => {
   });
 });
 
+describe('createIngestion conversation allowlist (T42)', () => {
+  function harness(allowed: string[]) {
+    const enqueued: string[] = [];
+    const events: string[] = [];
+    const ingest = createIngestion({
+      enqueueDurably: async (message) => {
+        enqueued.push(message.conversationId);
+      },
+      wasSentByBot: () => false,
+      isHouseholdConversation: (conversationId) => allowed.includes(conversationId),
+    });
+    const ack = async () => {
+      events.push('ack');
+    };
+    return { ingest, ack, enqueued, events };
+  }
+
+  it('enqueues messages from an allowlisted conversation', async () => {
+    const { ingest, ack, enqueued } = harness([validMessage.conversationId]);
+    const result = await ingest(validMessage, ack);
+    expect(result.outcome).toBe('enqueued');
+    expect(enqueued).toEqual([validMessage.conversationId]);
+  });
+
+  it('ignores (acks, never enqueues) a conversation outside the household — the personal-number privacy boundary', async () => {
+    const { ingest, ack, enqueued, events } = harness(['other@g.us']);
+    const result = await ingest(validMessage, ack);
+    expect(result.outcome).toBe('ignored-conversation');
+    expect(enqueued).toEqual([]);
+    expect(events).toEqual(['ack']); // acked so it never redelivers as poison
+  });
+
+  it('without the filter, every conversation is served (dev/stub compatibility)', async () => {
+    const enqueued: string[] = [];
+    const ingest = createIngestion({
+      enqueueDurably: async (m) => {
+        enqueued.push(m.conversationId);
+      },
+      wasSentByBot: () => false,
+    });
+    const result = await ingest(validMessage, async () => {});
+    expect(result.outcome).toBe('enqueued');
+    expect(enqueued.length).toBe(1);
+  });
+});
+
 describe('ingestWorkflowId', () => {
   it('derives a stable workflow id from the WhatsApp message id', () => {
     expect(ingestWorkflowId('3EB0A9C7D2F1')).toBe(ingestWorkflowId('3EB0A9C7D2F1'));

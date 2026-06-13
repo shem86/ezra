@@ -41,6 +41,7 @@ export function ingestWorkflowId(messageId: string): string {
 export type IngestOutcome =
   | { readonly outcome: 'enqueued' }
   | { readonly outcome: 'self-echo' }
+  | { readonly outcome: 'ignored-conversation' }
   | { readonly outcome: 'invalid'; readonly detail: string }
   | { readonly outcome: 'enqueue-failed'; readonly error: unknown };
 
@@ -53,6 +54,13 @@ export interface IngestionDeps {
    * must be processed — only ids the bot itself sent are echoes.
    */
   readonly wasSentByBot: (messageId: string) => boolean;
+  /**
+   * Conversation allowlist (T42). The bot runs on a PERSONAL number, so
+   * without this every chat on the account would flow into ingestion,
+   * prompts, and traces — a hard privacy boundary, not an optimization.
+   * Absent ⇒ serve everything (dev/stub compositions).
+   */
+  readonly isHouseholdConversation?: (conversationId: string) => boolean;
 }
 
 /**
@@ -72,6 +80,10 @@ export function createIngestion(
     if (!parsed.success) {
       await ack();
       return { outcome: 'invalid', detail: parsed.error.message };
+    }
+    if (deps.isHouseholdConversation?.(parsed.data.conversationId) === false) {
+      await ack();
+      return { outcome: 'ignored-conversation' };
     }
     if (deps.wasSentByBot(parsed.data.id)) {
       await ack();
