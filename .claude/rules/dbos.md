@@ -36,10 +36,13 @@
   therefore run children under their own executor ID (`DBOS__VMID`, read at
   SDK import like `DBOS__APPVERSION`) and the parent resumes the workflow
   explicitly post-launch via `DBOS.resumeWorkflow` (public; re-enqueues any
-  non-terminal workflow). ⚠ Production wiring (M6) must solve this too —
-  scope executor IDs per process generation or verify a fixed DBOS version —
-  or a crash-restart can permanently kill the in-flight turn it should have
-  recovered.
+  non-terminal workflow). ✅ Production solved at T42 with the same recipe:
+  `src/start.ts` sets a per-generation `DBOS__VMID` before the SDK import
+  (launch-time auto-recovery becomes a no-op), and
+  `resumeStrandedWorkflows()` (`src/orchestration/recovery.ts`) runs
+  explicitly post-launch — finds prior-generation PENDING roots, skips the
+  current generation and foreign app versions, resumes the rest. Proven in
+  `tests/integration/launch-recovery.test.ts` (in `test:recovery`).
 - `DBOS.registerScheduled(fn, …)` requires `fn` to ALREADY be a registered
   workflow — pass the wrapper `DBOS.registerWorkflow` returned (same `name`
   in both calls). A raw function fails **silently-ish**: the scheduler loop
