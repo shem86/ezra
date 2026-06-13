@@ -91,7 +91,7 @@
 
 ## M2.5 — Host + backups (parallel to M3–M5; all required before M6)
 
-- [ ] **T15 [H]: Provision host** — Oracle PAYG with reclamation policy re-verified that week, else Hetzner; decision + evidence in `infra/host.md`.
+- [ ] **T15 [H]: Provision host** — Oracle PAYG with reclamation policy re-verified that week, else Hetzner; decision + evidence in `infra/host.md`. *(2026-06-12: Oracle verification FAILED — the PAYG reclamation exemption is gone from the current FAQ/docs; builder call = AWS EC2 on expiring free-tier credits (t3a.medium, us-east-1, provisioned via CLI, EIP 98.91.67.226), Hetzner CX23 stays the planned post-credits migration target ~Sep 2026. Full trail in `infra/host.md`. Remaining before tick: builder runs the first-login baseline + records the credit expiry date.)*
 - [ ] **T16: Production runtime hardening** — non-root service user, read-only rootfs, writable volumes only for Baileys session + Postgres data, egress allowlist v0 (Anthropic, Voyage (api.voyageai.com), Google, B2/R2, alert channel, WhatsApp iterated), secrets injected at runtime. Files: `infra/` (compose/systemd + allowlist). Verify: process runs hardened; blocked egress to a non-listed host confirmed.
 - [ ] **T17: Backup pipeline + restore drill (SPEC Phase-0 gate)** — WAL archiving + base backups, client-side encrypted, to B2/R2; restore into a scratch DB and diff. Files: `infra/backup/`. Verify: documented successful restore. Depends on: T15.
 
