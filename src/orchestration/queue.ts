@@ -59,11 +59,17 @@ export interface DrainDeps {
 export function makeDrainWorkflow(deps: DrainDeps): (conversationId: string) => Promise<number> {
   const silenceWindowMs = deps.silenceWindowMs ?? 2000;
   const maxQuietWaitMs = deps.maxQuietWaitMs ?? 15_000;
+  // Detach each dep from `deps` so it's invoked as a free function, not a
+  // method. DBOS's registered-workflow invoker reads its receiver: a method
+  // call (`deps.processBatch(...)`) binds `this = deps`, which the SDK rejects
+  // as "not a ConfiguredInstance". A workflow dep (production's processBatch is
+  // the processTurnBatch child workflow) only survives the call detached.
+  const { readPending, processBatch, markProcessed } = deps;
 
   return async function drainConversation(conversationId: string): Promise<number> {
     let batchesProcessed = 0;
     for (;;) {
-      let pending = await deps.readPending(conversationId);
+      let pending = await readPending(conversationId);
       if (pending.length === 0) return batchesProcessed;
 
       // Silence window: keep waiting while bubbles are still arriving, so
@@ -73,15 +79,15 @@ export function makeDrainWorkflow(deps: DrainDeps): (conversationId: string) => 
       for (;;) {
         await DBOS.sleep(silenceWindowMs);
         waitedMs += silenceWindowMs;
-        const next = await deps.readPending(conversationId);
+        const next = await readPending(conversationId);
         const stillArriving = next.length > pending.length;
         pending = next;
         if (!stillArriving || waitedMs >= maxQuietWaitMs) break;
       }
 
       for (const batch of groupIntoBatches(pending)) {
-        await deps.processBatch(batch);
-        await deps.markProcessed(batch.map((item) => item.seq));
+        await processBatch(batch);
+        await markProcessed(batch.map((item) => item.seq));
         batchesProcessed += 1;
       }
       // Loop: items that arrived while batches were processing are still

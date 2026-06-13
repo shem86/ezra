@@ -59,6 +59,18 @@
 - Use the **functional API** (`DBOS.registerWorkflow(fn)`) with *named*
   functions — registration names must be identical in every process that may
   recover the workflow.
+- **Never invoke a registered workflow as a method.** The invoker
+  `DBOS.registerWorkflow` returns reads its `this`: a property call like
+  `deps.processBatch(batch)` binds `this = deps` and the SDK throws "Attempt
+  to call a `workflow` function on an object that is not a
+  `ConfiguredInstance`". Destructure the function off the deps object first
+  (`const { processBatch } = deps; await processBatch(batch)`) so it runs as a
+  free function (`this === undefined`). This bit the prod drain (T42):
+  `processBatch` is a step in the test fixtures but the `processTurnBatch`
+  child *workflow* in production composition, and only workflows carry the
+  check — so green integration tests hid it. The queue fixture now registers
+  its `processBatch` as a workflow to guard the regression. Calling via
+  `DBOS.startWorkflow(deps.fn, …)` is fine — that path doesn't read `this`.
 - The determinism lint rule covers all three workflow forms: `@DBOS.workflow()`
   members, functions passed to `DBOS.registerWorkflow` (inline or same-file
   reference), and bodies returned from factories named `make*Workflow` — the
