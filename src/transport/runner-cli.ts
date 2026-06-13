@@ -45,9 +45,11 @@ transport.onStateChange((state) => {
 });
 transport.onMessage((message) => {
   const preview = message.text.length > 80 ? `${message.text.slice(0, 80)}…` : message.text;
-  console.log(
-    `[inbound] ${message.conversationId} ${message.senderName ?? message.senderId}: ${preview}`,
-  );
+  // senderId shown raw on purpose: it is the exact value the T42 .env vars
+  // (WA_JID_*, WA_HOUSEHOLD_CONVERSATIONS) need — names alone would hide it.
+  const sender =
+    message.senderName === null ? message.senderId : `${message.senderId} (${message.senderName})`;
+  console.log(`[inbound] chat=${message.conversationId} sender=${sender}: ${preview}`);
 });
 
 const rl = createInterface({ input: process.stdin, output: process.stdout, prompt: '> ' });
