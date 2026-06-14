@@ -52,3 +52,9 @@
 - Integration tests assume `docker compose up -d` Postgres; remember the
   dead-database failure mode reads as ECONNREFUSED, and Colima (not the code)
   is the usual suspect locally — CI is the arbiter.
+- The suite runs against `hh_assistant_test` (issue #5, above), auto-created on
+  first run; migrations are forward-only and tests own their rows, so residue
+  accumulates there by design and never touches the app DB. To wipe test state:
+  `docker exec hh-postgres psql -U hh -d postgres -c 'DROP DATABASE hh_assistant_test'`
+  (next run recreates it), or `docker compose down -v` to reset everything. The
+  app DB is never the one to reset for a test problem.
