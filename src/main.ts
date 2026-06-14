@@ -52,10 +52,12 @@ import {
   getPendingInbox,
   getPendingActionsForConversation,
   getOverduePendingActions,
+  getSentEntry,
   insertInboxItem,
   loadContext,
   markInboxProcessed,
   markReminderFired,
+  recordSend,
   saveContext,
   type InboxItem,
 } from './memory/store.js';
@@ -66,6 +68,7 @@ import { makeGoogleCalendarClient } from './tools/calendar-client.js';
 import { makeRunTool, toToolSet } from './tools/registry.js';
 import { createBaileysTransport } from './transport/baileys.js';
 import { createSessionStore } from './transport/session-store.js';
+import { deliverReply, replySendId, selectSendClass } from './transport/send-class.js';
 
 async function main(): Promise<void> {
   const config = loadProductionConfig();
@@ -208,9 +211,16 @@ async function main(): Promise<void> {
 
   // One batch → one turn → one reply. The turn id derives from the batch's
   // leading message id, so a drain replay lands on the SAME turn workflow
-  // instead of running the model twice. Replies ride in steps: send classes
-  // and sent_log-backed dedupe arrive with T43 — until then the reply path
-  // is plain at-least-once sends, the same class approval prompts declare.
+  // instead of running the model twice. The reply rides a step (T43): its send
+  // class is chosen from the lead item — a reminder firing (sender 'system') is
+  // at-least-once, a human reply is at-most-once — and `deliverReply` does the
+  // sent_log log/send ordering, keyed on a deterministic send id so a step
+  // replay lands on the same row instead of an undeduped second send.
+  const deliverReplyDeps = {
+    recordSend: (input: Parameters<typeof recordSend>[1]) => recordSend(replyDb, input),
+    getSentEntry: (key: string) => getSentEntry(replyDb, key),
+    send: (message: { conversationId: string; text: string }) => transport.send(message),
+  };
   const processTurnBatch = DBOS.registerWorkflow(
     async function processTurnBatch(batch: InboxItem[]): Promise<void> {
       const first = batch[0];
@@ -224,7 +234,8 @@ async function main(): Promise<void> {
       if (result.status === 'parked') {
         // The closing transcript message IS the approval prompt; it must go
         // through the stamping path so prompt_message_id is persisted (the
-        // quoted-reply anchor), never as a plain reply.
+        // quoted-reply anchor), never as a plain reply. At-least-once by
+        // construction: the unstamped pending row is the durable to-send marker.
         await DBOS.runStep(
           async () => {
             await sendApprovalPrompts(replyDb, transport, conversationId, registry);
@@ -237,9 +248,13 @@ async function main(): Promise<void> {
         async () => {
           const transcript = parseTurnMessages(await loadContext(replyDb, conversationId));
           const reply = transcript.filter((m) => m.role === 'assistant').at(-1);
-          if (reply !== undefined && reply.content !== '') {
-            await transport.send({ conversationId, text: reply.content });
-          }
+          if (reply === undefined || reply.content === '') return;
+          await deliverReply(deliverReplyDeps, {
+            sendClass: selectSendClass(first),
+            idempotencyKey: replySendId(first),
+            conversationId,
+            text: reply.content,
+          });
         },
         { name: 'sendReply' },
       );
