@@ -10,6 +10,16 @@
    queue ordering. **Gated on `DATABASE_URL`**: the suite is excluded from the
    vitest `include` list when the env var is absent, so unit tests run
    anywhere. CI sets it via the pgvector service container.
+   **Runs against a dedicated `<dbname>_test` database, never the app's**
+   (issue #5): you point `DATABASE_URL` at the app DB as before, but
+   `vitest.config.ts` derives the `_test` sibling on the same server and
+   overrides `DATABASE_URL` for every worker (and the fixture child processes
+   they spawn with `env: process.env`); `tests/integration/global-setup.ts`
+   creates that database once before the suite. This keeps the locked
+   single-Postgres co-location *within* the test environment while stopping
+   test-stranded workflows/reminders from poisoning a real `pnpm start`. The
+   derivation lives in `tests/integration/helpers/test-database-url.ts`
+   (idempotent: an already-`_test` URL passes through).
 3. **Eval** (`evals/`, M5+, on-demand only): model-in-the-loop decision-9
    scenarios. Never in CI.
 

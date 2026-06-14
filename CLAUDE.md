@@ -30,7 +30,10 @@ pnpm eval              # (M5) model-in-the-loop scenarios — on-demand, never C
 pnpm test:recovery     # (M3) kill-mid-flight replay gate
 ```
 
-Local integration runs: `DATABASE_URL=postgres://hh:hh@localhost:5432/hh_assistant pnpm test`.
+Local integration runs: `DATABASE_URL=postgres://hh:hh@localhost:5432/hh_assistant pnpm test`
+(the integration suite redirects itself to a dedicated `hh_assistant_test`
+database on the same server so it never poisons the app DB — issue #5; see
+`.claude/rules/testing.md`).
 Spikes run directly: `node --env-file=.env spikes/<name>.ts` (Node 22 strips types).
 
 ## Stack (locked — do not substitute)
