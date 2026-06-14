@@ -40,7 +40,9 @@ that, this box bills ~**$31/mo**
 plan: **migrate to Hetzner CX23 before the credits run out**, using
 the T44 runbook — host loss is a drilled scenario: restore base backup +
 WAL into fresh Postgres, re-pair WhatsApp (NEVER restore Baileys session),
-reconcile via sent_log + deterministic calendar ids. The existing
+reconcile via sent_log + deterministic calendar ids. The host baseline on
+the new box is one run of `infra/provision-host.sh` (see completion record
+below); T16's runtime layer + egress allowlist redeploy on top. The existing
 zero-spend budget is the tripwire: actual spend stays ~$0 while credits
 cover, so its first alert ≈ credits stopped covering. Calendar reminder for
 ~2026-10-01 recommended regardless.
@@ -73,7 +75,11 @@ dwarfs the data.
 1. First-login baseline — **done 2026-06-12** (`hh` user, key-only +
    no-root sshd, apt upgrade + unattended-upgrades, hostname
    `hh-assistant`; TZ stays UTC deliberately — reminders anchor Eastern
-   in config).
+   in config). **Codified 2026-06-12 as `infra/provision-host.sh`**
+   (idempotent, Ubuntu 24.04, AWS+Hetzner portable) so re-applying it on a
+   fresh box is one run — this is the migration tool below. The script is
+   the LOGIN/OS baseline only; the application runtime sandbox + egress
+   allowlist are T16 (`infra/` compose + host nftables).
 2. Credit expiry: **2026-10-29** (console Billing → Credits, read
    2026-06-12).
 3. Still open: calendar reminder ~2026-10-01 for the migrate-vs-pay call
