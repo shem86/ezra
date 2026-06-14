@@ -90,6 +90,36 @@ const easternTime = new Intl.DateTimeFormat('en-US', {
   hour12: false,
 });
 
+const currentTimeFormat = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/New_York',
+  weekday: 'long',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+});
+
+/**
+ * The per-turn current-time block (decision: PUSH the clock, never a pull
+ * tool). The turn model's training anchor makes it feel like "today" is
+ * mid-2025, so without this every relative time ("today", "tomorrow", "in 5
+ * minutes") lands ~11 months in the past. Mirrors Claude's own system prompt,
+ * which injects {{currentDateTime}} paired with a knowledge-cutoff line so the
+ * model distrusts its internal date sense. Rides the post-prefix dynamic slot
+ * (no cacheControl), so it never disturbs the cached prefix.
+ */
+export function renderCurrentTimePrompt(now: Date): string {
+  const parts: Record<string, string> = {};
+  for (const part of currentTimeFormat.formatToParts(now)) parts[part.type] = part.value;
+  const stamp = `${parts.weekday} ${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`;
+  return [
+    `## Current time`,
+    `The current date and time is ${stamp} (US Eastern). Your training data is frozen around early 2025, so do NOT trust your own sense of today's date — always use the value above. Resolve every relative time ("today", "tonight", "tomorrow", "in 5 minutes", "next week") against it, and always pass a full year, month, and day to tools.`,
+  ].join('\n');
+}
+
 export function renderPendingActionsDigest(
   entries: readonly PendingActionDigestEntry[],
 ): string | null {

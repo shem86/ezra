@@ -7,6 +7,7 @@
 import { generateText, type LanguageModel, type ModelMessage, type ToolSet } from 'ai';
 import type { HandleTurnDeps } from './handle-turn.js';
 import type { TurnMessage } from './context.js';
+import { renderCurrentTimePrompt } from './prompts.js';
 
 /** Per-call token accounting — feeds T31 traces and the T33 cost gate. */
 export interface ModelUsage {
@@ -25,6 +26,14 @@ export interface CallModelDeps {
   readonly tools?: ToolSet;
   /** Observability tap; must not throw (a throw fails and retries the step). */
   readonly onUsage?: (usage: ModelUsage) => void;
+  /**
+   * Clock seam (defaults to the real clock). Read inside this step, NOT in the
+   * workflow body — a completed step replays its journaled output, so the
+   * captured time is durable; an interrupted, un-journaled step re-runs with a
+   * fresh (equally valid) read. The model's training anchor makes it misjudge
+   * "now", so every turn pushes the real current time (see renderCurrentTimePrompt).
+   */
+  readonly now?: () => Date;
 }
 
 /**
@@ -33,13 +42,15 @@ export interface CallModelDeps {
  * from the same response — one object, one journaled step output, so replay
  * can never see a message without its tool ids.
  */
+const defaultNow = (): Date => new Date();
+
 export function makeCallModel(deps: CallModelDeps): HandleTurnDeps['callModel'] {
   return async function callModel(messages, options) {
     const result = await generateText({
       model: deps.model,
       // The system prompt travels as a message so cacheControl attaches (T7).
       allowSystemInMessages: true,
-      messages: toSdkMessages(deps.systemPrompt, messages, options.digest),
+      messages: toSdkMessages(deps.systemPrompt, messages, options.digest, (deps.now ?? defaultNow)()),
       ...(deps.tools === undefined ? {} : { tools: deps.tools }),
       toolChoice: options.forceFinal ? 'none' : 'auto',
     });
@@ -69,15 +80,18 @@ export function makeCallModel(deps: CallModelDeps): HandleTurnDeps['callModel'] 
  * anthropic cacheControl passthrough (T7: providerOptions cannot attach to
  * the plain `system:` option) — callers must pass `allowSystemInMessages`.
  *
- * The digest rides as a SECOND system message with no cacheControl: the
- * pinned provider folds consecutive system messages into one system array
- * where each keeps its own cache_control, so the stable block's breakpoint
- * — and its cache — survives every digest change.
+ * The current-time block and the digest ride as FURTHER system messages with
+ * no cacheControl: the pinned provider folds consecutive system messages into
+ * one system array where each keeps its own cache_control, so the stable
+ * block's breakpoint — and its cache — survives every per-turn change. The
+ * clock comes first of the dynamic blocks (the model needs "now" to read
+ * everything else), then the digest.
  */
 export function toSdkMessages(
   systemPrompt: string,
   msgs: readonly TurnMessage[],
   digest?: string | null,
+  now?: Date,
 ): ModelMessage[] {
   // Tool-result parts require the tool's name, which the transcript only
   // carries on the originating assistant call — collect ids up front so an
@@ -96,6 +110,9 @@ export function toSdkMessages(
       providerOptions: { anthropic: { cacheControl: { type: 'ephemeral' } } },
     },
   ];
+  if (now !== undefined) {
+    sdk.push({ role: 'system', content: renderCurrentTimePrompt(now) });
+  }
   if (digest != null) {
     sdk.push({ role: 'system', content: digest });
   }

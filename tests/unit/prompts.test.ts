@@ -8,6 +8,7 @@ import {
   makeProductionSystemPrompt,
   renderApprovalOutcome,
   renderApprovalPrompt,
+  renderCurrentTimePrompt,
   renderExpiryNotice,
   renderPendingActionsDigest,
   stableSystemPrompt,
@@ -58,6 +59,38 @@ describe('composeSystemPrompt', () => {
     const digest = renderPendingActionsDigest([entry()]);
     const composed = composeSystemPrompt(digest);
     expect(composed.indexOf('act-conv-1-tu_9')).toBeGreaterThan(stableSystemPrompt.length - 1);
+  });
+});
+
+// The model's training anchor leaves it thinking "today" is ~mid-2025, so
+// every relative time (today/tomorrow/in 5 minutes) lands ~11 months in the
+// past unless we PUSH the real current time each turn (mirrors how Claude's
+// own system prompt injects {{currentDateTime}} + a knowledge-cutoff line).
+describe('renderCurrentTimePrompt', () => {
+  it('renders the current instant as Eastern wall time with a weekday', () => {
+    // 2026-06-14T17:45:00Z is 13:45 EDT (UTC-4) on a Sunday.
+    const prompt = renderCurrentTimePrompt(new Date('2026-06-14T17:45:00Z'));
+    expect(prompt).toContain('2026-06-14');
+    expect(prompt).toContain('13:45');
+    expect(prompt).toMatch(/Sunday/);
+    expect(prompt).toMatch(/Eastern/);
+  });
+
+  it('applies the household Eastern offset, not server/UTC time — and tracks DST', () => {
+    // Same wall reading (13:45) from two DIFFERENT UTC instants proves the
+    // zone offset is actually applied: -4 in summer (EDT), -5 in winter (EST).
+    const summer = renderCurrentTimePrompt(new Date('2026-06-14T17:45:00Z'));
+    const winter = renderCurrentTimePrompt(new Date('2026-01-15T18:45:00Z'));
+    expect(summer).toContain('13:45');
+    expect(winter).toContain('13:45');
+    expect(winter).toContain('2026-01-15');
+  });
+
+  it('tells the model not to trust its own date sense and to resolve relative times', () => {
+    const prompt = renderCurrentTimePrompt(new Date('2026-06-14T17:45:00Z'));
+    expect(prompt).toMatch(/2025/); // names the stale training anchor
+    expect(prompt).toMatch(/tomorrow/i); // names relative resolution explicitly
+    expect(prompt).toMatch(/year/i); // demands a full y/m/d to tools
   });
 });
 
