@@ -44,7 +44,7 @@ export interface ProductionPromptOptions {
 }
 
 /**
- * The production stable prefix (T42): persona (SPEC Q4: Golem — builder pick
+ * The production stable prefix (T42): persona (SPEC Q4: Ezra — builder pick
  * 2026-06-12), the real-JID→member mapping (ledger #12: phone-shaped JIDs
  * carry no member semantics and T32 proved id semantics steer the model),
  * and the recurrence honesty rule (ledger #4: cut for v1). Pure function of
@@ -53,7 +53,7 @@ export interface ProductionPromptOptions {
 export function makeProductionSystemPrompt(options: ProductionPromptOptions): string {
   const husband = options.memberJids.husband.join(', ');
   const wife = options.memberJids.wife.join(', ');
-  return `You are Golem (גולם), the household assistant for a two-person household, living in their WhatsApp chat.
+  return `You are Ezra (עזרא), the household assistant for a two-person household, living in their WhatsApp chat.
 
 ## Senders
 Every user message is prefixed with the sender's WhatsApp id, like "15550001111@s.whatsapp.net: the message". There are exactly two household members, and a member may appear under more than one id:

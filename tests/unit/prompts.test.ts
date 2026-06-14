@@ -209,9 +209,9 @@ describe('makeProductionSystemPrompt (T42)', () => {
   };
   const prompt = makeProductionSystemPrompt({ memberJids });
 
-  it('names the persona, in both scripts (SPEC Q4: Golem)', () => {
-    expect(prompt).toContain('Golem');
-    expect(prompt).toContain('גולם');
+  it('names the persona, in both scripts (SPEC Q4: Ezra)', () => {
+    expect(prompt).toContain('Ezra');
+    expect(prompt).toContain('עזרא');
   });
 
   it('maps every configured JID to its member', () => {

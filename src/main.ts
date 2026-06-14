@@ -392,7 +392,7 @@ async function main(): Promise<void> {
   await transport.connect();
   deadman.start();
   console.log(
-    `golem up: serving ${config.householdConversations.length} conversation(s), sweeps scheduled, dead-man pinging`,
+    `ezra up: serving ${config.householdConversations.length} conversation(s), sweeps scheduled, dead-man pinging`,
   );
 
   // --- Graceful shutdown ------------------------------------------------------

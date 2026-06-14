@@ -9,6 +9,6 @@
 //
 // This is the one env WRITE in src/ — src/ops/config.ts stays the only
 // module that READS the environment.
-process.env.DBOS__VMID = `golem-${Date.now().toString(36)}-${process.pid}`;
+process.env.DBOS__VMID = `ezra-${Date.now().toString(36)}-${process.pid}`;
 
 await import('./main.js');
