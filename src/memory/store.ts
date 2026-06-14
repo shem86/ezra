@@ -256,6 +256,45 @@ export async function setPromptMessageId(
 }
 
 /**
+ * Co-commit an approval prompt's at-least-once sent_log row and its
+ * prompt_message_id stamp in ONE transaction (T43). The sent_log row is the
+ * recovery runbook's "what did we send" record; the stamp is the quoted-reply
+ * anchor (T34). Committing them together means the two can never disagree
+ * across a crash. Insert-if-absent on the key keeps a replay idempotent; the
+ * caller (sendApprovalPrompts) sends BEFORE this, so a crash in between leaves
+ * the row unstamped and the log absent — and the next pass re-sends
+ * (at-least-once). `db` must be a plain client, not already in a transaction.
+ */
+export async function recordApprovalSend(
+  db: Queryable,
+  input: {
+    idempotencyKey: string;
+    conversationId: string;
+    actionId: string;
+    promptMessageId: string;
+    body: unknown;
+  },
+): Promise<void> {
+  await db.query('BEGIN');
+  try {
+    await db.query(
+      `INSERT INTO sent_log (idempotency_key, conversation_id, delivery_class, body)
+       VALUES ($1, $2, 'at-least-once', $3::jsonb)
+       ON CONFLICT (idempotency_key) DO NOTHING`,
+      [input.idempotencyKey, input.conversationId, JSON.stringify(input.body)],
+    );
+    await db.query('UPDATE pending_actions SET prompt_message_id = $2 WHERE action_id = $1', [
+      input.actionId,
+      input.promptMessageId,
+    ]);
+    await db.query('COMMIT');
+  } catch (error) {
+    await db.query('ROLLBACK');
+    throw error;
+  }
+}
+
+/**
  * Quoted-reply binding (T35): resolve which action a quoted approval prompt
  * refers to. Deliberately status-blind — the resolver tells the user when a
  * bound action is already settled; the transition guards refuse the rest.

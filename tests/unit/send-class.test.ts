@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  approvalSendId,
   deliverReply,
   replySendId,
   selectSendClass,
@@ -50,6 +51,17 @@ describe('replySendId', () => {
     const first = replySendId({ messageId: 'remind-r1-2026-06-14T11:00:00.000Z' });
     const second = replySendId({ messageId: 'remind-r1-2026-06-21T11:00:00.000Z' });
     expect(first).not.toBe(second);
+  });
+});
+
+describe('approvalSendId', () => {
+  it('keys an approval-prompt send on its action id (at-least-once, deterministic)', () => {
+    expect(approvalSendId('act-abc')).toBe('approval-act-abc');
+    expect(approvalSendId('act-abc')).toBe(approvalSendId('act-abc'));
+  });
+
+  it('does not collide with a reply send id for the same string', () => {
+    expect(approvalSendId('x')).not.toBe(replySendId({ messageId: 'x' }));
   });
 });
 

@@ -68,6 +68,7 @@ import { makeGoogleCalendarClient } from './tools/calendar-client.js';
 import { makeRunTool, toToolSet } from './tools/registry.js';
 import { createBaileysTransport } from './transport/baileys.js';
 import { createSessionStore } from './transport/session-store.js';
+import { computeHumanSendDelay } from './transport/protocol.js';
 import { deliverReply, replySendId, selectSendClass } from './transport/send-class.js';
 
 async function main(): Promise<void> {
@@ -200,6 +201,17 @@ async function main(): Promise<void> {
   // same pattern as dev/main's post-turn reads.
   const replyDb = new Client({ connectionString: config.databaseUrl });
 
+  // Human send-jitter (T13/T43): no production message leaves at machine speed.
+  // Only ever called from inside a send STEP (never a workflow body), so the
+  // random delay + timer are journaled, not re-run on replay (dbos.md).
+  const jitteringSend = async (message: {
+    conversationId: string;
+    text: string;
+  }): Promise<{ messageId: string }> => {
+    await new Promise((resolve) => setTimeout(resolve, computeHumanSendDelay()));
+    return transport.send(message);
+  };
+
   // --- Conversation lane: inbox steps, turn batches, drain, enqueue (T21) ---
   const insertItemStep = registerTransactionalStep(dataSource, 'insertInboxItem', insertInboxItem);
   const readPendingStep = registerTransactionalStep(dataSource, 'getPendingInbox', getPendingInbox);
@@ -219,7 +231,7 @@ async function main(): Promise<void> {
   const deliverReplyDeps = {
     recordSend: (input: Parameters<typeof recordSend>[1]) => recordSend(replyDb, input),
     getSentEntry: (key: string) => getSentEntry(replyDb, key),
-    send: (message: { conversationId: string; text: string }) => transport.send(message),
+    send: jitteringSend,
   };
   const processTurnBatch = DBOS.registerWorkflow(
     async function processTurnBatch(batch: InboxItem[]): Promise<void> {
@@ -238,7 +250,9 @@ async function main(): Promise<void> {
         // construction: the unstamped pending row is the durable to-send marker.
         await DBOS.runStep(
           async () => {
-            await sendApprovalPrompts(replyDb, transport, conversationId, registry);
+            // Same human jitter as the reply path — approval prompts are
+            // conversational closing messages, not machine-speed pings.
+            await sendApprovalPrompts(replyDb, { send: jitteringSend }, conversationId, registry);
           },
           { name: 'sendApprovalPrompts' },
         );

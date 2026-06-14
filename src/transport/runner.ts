@@ -1,3 +1,4 @@
+import { computeHumanSendDelay } from './protocol.js';
 import type { Transport, TransportState } from './types.js';
 
 // Standalone transport runner core (T13): command parsing and execution,
@@ -51,15 +52,6 @@ export function parseRunnerCommand(line: string): RunnerCommand {
   }
 }
 
-// Bot-pattern hygiene: a manual test send should not leave the socket at
-// machine speed. Window mirrors human type-then-send latency.
-export const HUMAN_SEND_DELAY = { minMs: 1_500, maxMs: 4_500 } as const;
-
-export function computeHumanSendDelay(random: () => number): number {
-  return Math.floor(
-    HUMAN_SEND_DELAY.minMs + random() * (HUMAN_SEND_DELAY.maxMs - HUMAN_SEND_DELAY.minMs),
-  );
-}
 
 export interface RunnerDeps {
   transport: Transport;

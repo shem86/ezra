@@ -12,8 +12,9 @@ import { defineTool } from '../../src/tools/define-tool.ts';
 import { deriveActionId, makeRunTool, makeToolRegistry } from '../../src/tools/registry.ts';
 import { makePark } from '../../src/hitl/park.ts';
 import { sendApprovalPrompts } from '../../src/hitl/approval-prompt.ts';
-import { getPendingAction } from '../../src/memory/store.ts';
+import { getPendingAction, getSentEntry } from '../../src/memory/store.ts';
 import { createStubTransport } from '../../src/transport/stub.ts';
+import { approvalSendId } from '../../src/transport/send-class.ts';
 import type { ToolCall } from '../../src/agent/context.ts';
 
 const connectionString = process.env.DATABASE_URL ?? '';
@@ -104,6 +105,25 @@ describe('production park (T34)', () => {
     // Already-stamped actions are never re-prompted.
     expect(await sendApprovalPrompts(db, transport, conv2)).toEqual([]);
     expect(transport.sent).toHaveLength(2);
+  });
+
+  it('co-commits the sent_log row with the prompt_message_id stamp (T43, at-least-once)', async () => {
+    const conv4 = `park-log-${runId}`;
+    const callA = call({ title: 'co-commit me' });
+    await runTool(db, callA, conv4);
+    const actionId = deriveActionId(conv4, callA.id);
+
+    const transport = createStubTransport();
+    await transport.connect();
+    await sendApprovalPrompts(db, transport, conv4);
+
+    // Both halves of the co-commit landed: the at-least-once sent_log row (the
+    // runbook's "what did we send" view) and the quoted-reply anchor stamp.
+    const entry = await getSentEntry(db, approvalSendId(actionId));
+    expect(entry?.deliveryClass).toBe('at-least-once');
+    expect(entry?.conversationId).toBe(conv4);
+    const row = await getPendingAction(db, actionId);
+    expect(row?.promptMessageId).toBe('stub-sent-1'); // fresh stub, first send
   });
 
   it('schema-invalid args return an error result and park nothing', async () => {

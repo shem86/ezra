@@ -47,6 +47,19 @@ export function computeReconnectDelay(
   return Math.round(base * jitterFactor);
 }
 
+// Bot-pattern hygiene: an outbound send should not leave the socket at machine
+// speed. Window mirrors human type-then-send latency. Lives here (the pure
+// transport module) so both the manual runner and the production reply step
+// can compute it without importing the socket stack. The sleep that consumes
+// it must live in a step, never a workflow body (random + timer, dbos.md).
+export const HUMAN_SEND_DELAY = { minMs: 1_500, maxMs: 4_500 } as const;
+
+export function computeHumanSendDelay(random: () => number = Math.random): number {
+  return Math.floor(
+    HUMAN_SEND_DELAY.minMs + random() * (HUMAN_SEND_DELAY.maxMs - HUMAN_SEND_DELAY.minMs),
+  );
+}
+
 type Content = Record<string, unknown>;
 
 function asContent(value: unknown): Content | null {

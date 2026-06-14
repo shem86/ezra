@@ -6,12 +6,8 @@ import type {
   Transport,
   TransportState,
 } from '../../src/transport/types.js';
-import {
-  computeHumanSendDelay,
-  createRunner,
-  HUMAN_SEND_DELAY,
-  parseRunnerCommand,
-} from '../../src/transport/runner.js';
+import { createRunner, parseRunnerCommand } from '../../src/transport/runner.js';
+import { computeHumanSendDelay, HUMAN_SEND_DELAY } from '../../src/transport/protocol.js';
 
 function makeFakeTransport(overrides: Partial<Transport> = {}): Transport & {
   stateHandlers: Array<(s: TransportState) => void>;

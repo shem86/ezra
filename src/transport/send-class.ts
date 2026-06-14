@@ -44,6 +44,15 @@ export function replySendId(lead: { readonly messageId: string }): string {
 }
 
 /**
+ * Deterministic send id for an approval prompt (at-least-once). Keyed on the
+ * action id — the action key the architecture names for the sent-log — and
+ * namespaced so it can never collide with a reply send id.
+ */
+export function approvalSendId(actionId: string): string {
+  return `approval-${actionId}`;
+}
+
+/**
  * The sent_log primitives + transport send, injected (no module singletons —
  * conventions.md). `recordSend` is insert-if-absent on the idempotency key:
  * true only when THIS call wrote the row. Bound to the plain reply client in
