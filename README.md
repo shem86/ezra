@@ -1,6 +1,12 @@
 # hh-assistant
 
+![CI](https://github.com/shem86/hh-assistant/actions/workflows/ci.yml/badge.svg)
 ![lines of code](https://img.shields.io/badge/lines%20of%20code-6.6k-blue)
+![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)
+![Node](https://img.shields.io/badge/Node.js-22-339933?logo=node.js&logoColor=white)
+![Postgres](https://img.shields.io/badge/Postgres-pgvector-4169E1?logo=postgresql&logoColor=white)
+![DBOS](https://img.shields.io/badge/DBOS-4.19.8-0A0A0A)
+![Claude](https://img.shields.io/badge/Claude-Anthropic-D97757?logo=anthropic&logoColor=white)
 
 A WhatsApp household assistant for a two-person family group, built as a
 production-grade exercise in reliable agentic systems. It handles reminders,
