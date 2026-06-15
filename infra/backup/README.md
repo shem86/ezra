@@ -28,6 +28,7 @@ The one source of truth for the allowed S3 host lives in the egress allowlist
 | `restore.sh` | `into <container>` (restore latest base + WAL) · `drill` (self-asserting base+WAL PITR) |
 | `t44-reconcile-drill.sh` | T44 gate: runbook §4 external-effect reconciliation, real S3 + real Google, self-contained + self-cleaning |
 | `t44-calendar-effect.ts` | T44 calendar leg — drives the production calendar client (create/recreate/count/delete) |
+| `enable-replication.sh` | T45 wiring: idempotent `host replication` pg_hba line + reload so the sidecar can stream |
 | `Dockerfile` | sidecar image: pg17 client tools + aws-cli + age |
 | `docker-compose.backup.yml` | sidecar overlay for the prod stack |
 
@@ -92,16 +93,40 @@ Run on the dev Mac (Colima) against the production scripts, real S3, real age:
 
 Verdict also recorded in `docs/spike-results.md`.
 
-## Production wiring (lands at T45 deploy)
+## Production wiring (T45 deploy)
 
-`docker compose -f infra/docker-compose.prod.yml -f infra/backup/docker-compose.backup.yml up -d`
-runs the sidecar (continuous WAL). Base backups: a host cron runs
-`… run --rm backup backup.sh base` (e.g. daily 03:00).
+Bring-up, on the host after the prod stack is up:
 
-**Prerequisite — `pg_hba` for replication:** the stock pgvector image only
-trusts replication from localhost. The prod `postgres` must permit a
-replication connection from the backup user over the `internal` network
-(a `host replication <user> <internal-subnet> scram-sha-256` line + a
-replication-capable role). The drill avoids this by using its own isolated
-source over the local socket; production must configure it explicitly. This is
-the one open wiring item for T45.
+```
+# 1. enable replication for the sidecar (idempotent; re-run after a rebuild)
+infra/backup/enable-replication.sh
+# 2. start the sidecar (continuous WAL)
+docker compose -f infra/docker-compose.prod.yml \
+               -f infra/backup/docker-compose.backup.yml up -d
+# 3. base backups on a host cron, e.g. daily 03:00
+0 3 * * *  docker compose -f infra/docker-compose.prod.yml \
+           -f infra/backup/docker-compose.backup.yml run --rm backup backup.sh base
+```
+
+**The replication `pg_hba` prerequisite (`enable-replication.sh`):** the stock
+pgvector image accepts normal SQL connections from the internal network
+(`host all all all scram-sha-256` — how ezra and `backup.sh ensure-slot`
+connect) but trusts *replication* connections only from localhost, so
+`pg_basebackup`/`pg_receivewal` are refused. `enable-replication.sh` appends
+`host replication hh samenet scram-sha-256` to `pg_hba.conf` and reloads —
+`hh` is the existing superuser the sidecar already uses (replication-capable),
+`samenet` matches whatever subnet Docker assigns the internal bridge.
+`wal_level=replica` (PG17 default) already supports physical streaming. A
+least-privilege dedicated `hh_backup` role is a clean V2 hardening, not a launch
+blocker (a replication connection reads the whole cluster regardless).
+
+> **Note (validated 2026-06-15, dev Mac):** the wiring was proven end-to-end
+> against the dev postgres before the host apply — a replication connection from
+> a separate container is **refused** without the line (`no pg_hba.conf entry
+> for replication connection`) and **succeeds** after; the prod sidecar image's
+> continuous `receivewal` over TCP then shipped a complete encrypted 16 MiB WAL
+> segment to S3 that decrypted back to exactly 16777216 bytes. Also fixed en
+> route: `.dockerignore` excluded all of `infra`, so the sidecar image's
+> `COPY infra/backup/*.sh` had never built — the two scripts are now re-included.
+> The remaining step is running `enable-replication.sh` + starting the sidecar
+> **on the real host** (production DB access — ask-first).

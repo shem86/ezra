@@ -11,6 +11,14 @@ tests
 spikes
 evals
 docs
-infra
+# Keep infra out of the (app) build context for leanness, BUT the backup sidecar
+# image (infra/backup/Dockerfile, context = repo root) needs its two scripts —
+# re-include them (the nested-exception pattern: re-include the dir, then the
+# files). Without this the sidecar image fails to build (COPY: file not found).
+infra/*
+!infra/backup
+infra/backup/*
+!infra/backup/lib.sh
+!infra/backup/backup.sh
 .claude
 *.log

@@ -90,9 +90,14 @@ from the PITR pipeline (T17) onto a fresh host.
    matters most.
 7. **Re-open replication for ongoing backups** — the restored Postgres needs
    the replication `pg_hba` line for the backup sidecar (the stock pgvector
-   image only trusts replication from localhost). This is the standing T45
-   wiring item (`infra/backup/README.md` "Production wiring"); until it is in
-   place the new host is running **without** continuous WAL archiving.
+   image only trusts replication from localhost), then the sidecar restarted:
+   ```
+   infra/backup/enable-replication.sh    # idempotent; appends the line + reloads
+   docker compose -f infra/docker-compose.prod.yml \
+                  -f infra/backup/docker-compose.backup.yml up -d   # continuous WAL
+   ```
+   Until this is in place the new host runs **without** continuous WAL archiving
+   (`infra/backup/README.md` "Production wiring").
 
 ## Scenario 3 — Baileys session loss
 
