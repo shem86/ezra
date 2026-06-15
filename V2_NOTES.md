@@ -39,6 +39,21 @@ never builds the production image. Consequences and fixes:
   (`schneegans/dynamic-badges-action` is the standard recipe). Needs a gist +
   a `GIST` token secret. Until then the static number goes stale and must be
   bumped by hand.
+- **CI status badge (private-repo caveat).** The README now carries
+  `actions/workflows/ci.yml/badge.svg`. On a **private** repo it 404s for
+  anyone not authenticated with repo access — so it's blank for the public and
+  only renders for us. It starts working anonymously the moment the repo goes
+  public (§10); no action needed until then, just don't be surprised it's empty
+  in an incognito window.
+- **Test-count / coverage badges ride the same gist pipeline.** Once the LOC
+  gist workflow exists, a `tests | N` badge is nearly free (vitest already
+  reports the count — emit it to the gist in the same CI step). A `coverage |
+  N%` badge additionally needs `vitest --coverage` wired up. Both face the same
+  private-repo constraint as LOC, so fold them into the one gist workflow
+  rather than standing up more static, hand-bumped numbers. If the repo goes
+  public, **all** of these collapse to off-the-shelf dynamic services
+  (tokei.rs for LOC, the native Actions/coverage badges) and the gist
+  workaround can be deleted.
 
 ## 2. Provisioning as code (IaC)
 
@@ -124,6 +139,40 @@ never builds the production image. Consequences and fixes:
   image wiring **without** starting the real service (no WhatsApp traffic) — a
   cheap, safe pre-flight.
 - `--env-file .env` is load-bearing with `-f infra/...` (see §4).
+
+## 10. Going public — implications to evaluate first
+
+Several badge/CI workarounds above exist only because the repo is **private**
+(`shem86/hh-assistant`). Going public would dissolve most of them — but it's a
+one-way-ish door (history stays public once indexed), so audit before flipping,
+in roughly this order of risk:
+
+- **Scrub history for secrets before anything else.** Policy is never to commit
+  secrets or Baileys session state, but *verify the whole history*, not just
+  HEAD — `git log --all` + a scanner (gitleaks / trufflehog) over every commit.
+  A secret committed once and later deleted is still public in history; flipping
+  visibility publishes the entire past. If anything turns up, rotate it and
+  rewrite history (or don't go public). `.env*` is gitignored (except
+  `.env.example`) — confirm no `.env` ever slipped in.
+- **Audit for household PII.** This is a real two-person household assistant:
+  check fixtures, tests, and committed logs for real phone numbers, WhatsApp
+  JIDs, names, addresses, calendar contents, or anything personal. Code-switched
+  Hebrew/English fixtures are exactly where a real message could hide. Scrub or
+  synthesize before exposure.
+- **Add a LICENSE.** No license today ⇒ default all-rights-reserved (others
+  can view but not legally reuse). Decide intent — permissive (MIT/Apache-2.0)
+  if it's a portfolio/learning showcase, or deliberately none — *before*
+  publishing, and then the license badge becomes worth adding.
+- **Upsides that land for free when public:** GitHub Actions minutes become
+  unlimited; **branch protection becomes available on the free plan** (CLAUDE.md
+  notes it's unavailable while private — going public is the cheapest way to get
+  real merge gating instead of red-CI-by-discipline); and every badge workaround
+  in §1 collapses to off-the-shelf dynamic services.
+- **Think about the exposed attack surface.** Publishing reveals infra shape —
+  the egress allowlist, provisioning scripts, the deploy recipe. None of it is
+  secret-by-design, but skim it as an attacker would (e.g. does any sample
+  config hint at host/EIP, bucket names, internal endpoints) before it's
+  searchable.
 
 ## 11. Egress refresh: use `refresh`, not `apply`, on the timer
 
