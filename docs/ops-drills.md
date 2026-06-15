@@ -91,7 +91,7 @@ Reminder `f901c99d…` set via chat for 06:56:00Z; ezra stopped 06:53:31→06:56
   threw `transport not connected`, the workflow errored terminally, the message
   was dropped (no `sent_log` row). Launch-blocking; builder chose file-now,
   fix-before-T46. Repro: `tests/unit/send-class.test.ts` (`test.fails`).
-- **Dead-man (c):** ezra was down ~3 min (past grace), so healthchecks.io
-  should have alerted Telegram + recovered on restart — **builder to confirm
-  the alert arrived** (the external check is the only detector of a full
-  process-down; in-process socket alerts can't fire when the process is dead).
+- **Dead-man (c): PASS** — ezra was down ~3 min (past grace); **builder
+  confirmed the healthchecks.io dead-man alert arrived on Telegram and
+  recovered on restart**. The external check is the only detector of a full
+  process-down; in-process socket alerts can't fire when the process is dead.
