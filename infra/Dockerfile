@@ -13,7 +13,11 @@ FROM node:22-bookworm-slim AS build
 WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@10.33.2 --activate
 # Lockfile-first for layer caching; --frozen-lockfile fails on any drift.
-COPY package.json pnpm-lock.yaml ./
+# .npmrc is load-bearing here, not optional: it carries auto-install-peers=false,
+# which the lockfile records under settings.autoInstallPeers. Without it in the
+# build context, in-image pnpm uses its default (true) and the frozen install
+# rejects the mismatch (ERR_PNPM_LOCKFILE_CONFIG_MISMATCH).
+COPY package.json pnpm-lock.yaml .npmrc ./
 RUN pnpm install --frozen-lockfile
 COPY tsconfig.json ./
 COPY src ./src
@@ -24,8 +28,9 @@ FROM node:22-bookworm-slim AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@10.33.2 --activate
-COPY package.json pnpm-lock.yaml ./
+COPY package.json pnpm-lock.yaml .npmrc ./
 # Prod deps only — no typescript/vitest/eslint in the running image.
+# .npmrc copied for the same frozen-lockfile reason as the build stage.
 RUN pnpm install --prod --frozen-lockfile && pnpm store prune
 # Compiled output + the forward-only migrations the process applies at startup
 # (migrate.ts resolves ../../migrations relative to dist/memory — a sibling of dist/).
