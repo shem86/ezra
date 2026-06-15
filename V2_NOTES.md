@@ -114,3 +114,13 @@ never builds the production image. Consequences and fixes:
   image wiring **without** starting the real service (no WhatsApp traffic) — a
   cheap, safe pre-flight.
 - `--env-file .env` is load-bearing with `-f infra/...` (see §4).
+
+## 11. Egress refresh: use `refresh`, not `apply`, on the timer
+
+The v1 egress timer re-runs `nftables.sh apply` (delete table → re-resolve DNS →
+reload), which leaves a ~1-2s window every 15min where the table is absent and
+egress fails OPEN. The `refresh` subcommand instead flushes + re-adds only the
+nft set elements while the table/chain stay loaded — no fail-open window (a brief
+fail-CLOSED at worst). v2: timer triggers a refresh-only path; `apply` runs only
+on boot to create the table. Even better: load the ruleset atomically so there's
+no window at all.
