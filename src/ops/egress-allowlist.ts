@@ -98,18 +98,20 @@ export const egressAllowlist: readonly EgressDestination[] = [
     category: 'whatsapp',
     reason: 'Baileys web endpoints (web.whatsapp.com, …)',
   },
-  // --- Backups (T17 — provider finalized there) -----------------------------
+  // --- Backups (T17 — AWS S3, same account/region as the EC2 host) ----------
+  // Both the path-style regional endpoint and bucket virtual-host
+  // (<bucket>.s3.us-east-1.amazonaws.com) sit under this subdomains entry.
   {
-    host: 'backblazeb2.com',
+    host: 's3.us-east-1.amazonaws.com',
     subdomains: true,
     category: 'backup',
-    reason: 'Backblaze B2 backup target — slot reserved; T17 finalizes the provider',
+    reason: 'AWS S3 (us-east-1) — encrypted base backups + archived WAL (T17)',
   },
   {
-    host: 'r2.cloudflarestorage.com',
+    host: 's3.amazonaws.com',
     subdomains: true,
     category: 'backup',
-    reason: 'Cloudflare R2 backup target — slot reserved; T17 finalizes the provider',
+    reason: 'AWS S3 global endpoint fallback (bucket virtual-host) — T17 backups',
   },
 ];
 

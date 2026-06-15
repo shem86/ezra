@@ -217,3 +217,34 @@ Two real findings from the runs (both fixed in this commit):
 Minor observation, not a defect: the dev DB's lists are shared across runs
 (keyed by list name, not conversation), so re-runs accumulate items — the
 model noticed the duplicate לחם rows and offered to clean them up.
+
+---
+
+## T17 — Backup pipeline + PITR restore drill (PASS 2026-06-15)
+
+Encrypted point-in-time recovery to AWS S3 (account 001467466089, us-east-1):
+`pg_basebackup -Xstream` base + continuous `pg_receivewal` WAL archiving, each
+artifact age-encrypted client-side (asymmetric — host holds only the public
+recipient), restored into a throwaway pgvector:pg17 container via archive
+recovery. Bucket `hh-assistant-backups-001467466089`: public access blocked,
+SSE-S3, versioning, TLS-only policy, lifecycle expiry (WAL 14d / base 35d).
+
+`infra/backup/restore.sh drill` (self-contained: isolated source DB, real
+backup.sh, real S3, real age) PASSED — a **post-base** sentinel row that
+existed ONLY in archived WAL survived the restore (`restore_sentinel` = 2 rows,
+post-base row present), proving PITR rather than a snapshot.
+
+Gotchas burned in:
+- `pg_basebackup -Xstream` issues its own WAL **switch** at backup end, so a
+  post-base write lands in the *next* segment — the drill waits until that exact
+  segment is in S3 before restoring (deterministic, not a sleep race).
+- The WAL receiver must run **continuously from before the base** or a gap
+  between base-end and the first archived segment swallows writes.
+- Archive recovery **requires a `restore_command`** even when WAL is already in
+  `pg_wal`; the restore serves the staged archived segments via `cp` and the
+  base's bundled WAL is `cp -n` fallback that never shadows the archive.
+- The drill provisions its OWN isolated Postgres and drives the pg tools over
+  its local socket — no `pg_hba` edit on any shared DB. Production needs a
+  replication `pg_hba` line for the sidecar (the one open T45 wiring item).
+
+Full design + runbook + drill record: `infra/backup/README.md`.

@@ -78,6 +78,17 @@ describe('egress allowlist contents (T16)', () => {
     }
   });
 
+  it('routes backups to S3 (provider decided at T17)', () => {
+    // The backup slot was reserved generically at T16; T17 locked it to AWS S3
+    // (same account/region as the EC2 host). A bucket virtual-host URL resolves.
+    expect(isHostAllowed('hh-assistant-backups-001467466089.s3.us-east-1.amazonaws.com')).toBe(
+      true,
+    );
+    expect(egressAllowlist.some((d) => d.category === 'backup' && d.host.includes('s3'))).toBe(
+      true,
+    );
+  });
+
   it('covers the known external hosts the v1 surface dials', () => {
     // Spot-check the load-bearing ones by name so a careless edit can't drop a
     // whole service and still pass the category check with a placeholder.

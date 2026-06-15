@@ -1,0 +1,48 @@
+# Backup sidecar overlay (T17). Compose WITH the prod stack so it joins the
+# same project + networks:
+#   docker compose -f infra/docker-compose.prod.yml \
+#                  -f infra/backup/docker-compose.backup.yml up -d
+#
+# The sidecar streams WAL continuously (the RPO-critical path). Base backups
+# run on a host cron, e.g. daily:
+#   0 3 * * *  docker compose -f infra/docker-compose.prod.yml \
+#              -f infra/backup/docker-compose.backup.yml run --rm backup backup.sh base
+#
+# PREREQUISITE (production pg_hba): the prod `postgres` must permit a
+# replication connection from the backup user over the `internal` network —
+# the stock image only trusts replication from localhost. See README.md
+# "Production wiring". Until that lands (T45 deploy), the drill (isolated
+# source) is what proves the pipeline.
+
+services:
+  backup:
+    build:
+      context: ../..
+      dockerfile: infra/backup/Dockerfile
+    image: hh-assistant-backup:prod
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # BACKUP_S3_BUCKET, BACKUP_AGE_RECIPIENT, PGPASSWORD, AWS creds, … from .env.
+    env_file:
+      - ../../.env
+    environment:
+      PGHOST: postgres
+      PGUSER: hh
+      PGDATABASE: hh_assistant_prod
+      BACKUP_WAL_SPOOL: /var/lib/backup/wal-spool
+    # Unshipped WAL must survive a sidecar restart, so the spool is a volume.
+    volumes:
+      - wal-spool:/var/lib/backup/wal-spool
+    # Hardening parity with the app: non-root, no new privileges, minimal caps.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - internal # to postgres
+      - egress # to S3
+
+volumes:
+  wal-spool:
