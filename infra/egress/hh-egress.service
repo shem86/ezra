@@ -1,0 +1,16 @@
+[Unit]
+Description=hh-assistant container egress allowlist (nftables, rendered from src/ops/egress-allowlist.ts)
+Documentation=file:///home/hh/hh-assistant/infra/runtime.md
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# Re-derive the egress bridge (its name tracks the docker network id) and
+# (re)apply the default-deny ruleset, re-resolving rotating CDN IPs. Idempotent;
+# the timer re-runs it well inside the set's 1h element TTL so the allowlist
+# never expires out from under the live process (which would drop all egress).
+ExecStart=/usr/bin/env bash -c 'EG=br-$(docker network inspect hh-assistant_egress -f "{{slice .Id 0 12}}") && EGRESS_IFACE="$EG" bash /home/hh/hh-assistant/infra/egress/nftables.sh apply'
+
+[Install]
+WantedBy=multi-user.target

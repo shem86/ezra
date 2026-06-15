@@ -1,0 +1,12 @@
+[Unit]
+Description=refresh hh-assistant egress allowlist (re-resolve CDN IPs before the 1h nft set TTL)
+
+[Timer]
+# 2min after boot lets docker recreate the egress network first; then every
+# 15min — 4x margin under the set's 1h element timeout.
+OnBootSec=2min
+OnUnitActiveSec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

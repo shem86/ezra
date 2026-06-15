@@ -61,3 +61,20 @@ external secrets or real WhatsApp traffic is builder-gated.
       `pg_hba` replication line live + continuous WAL; then the real host-loss
       restore + reconciliation per `docs/recovery-runbook.md`. Closes T44.
 
+
+### On-host bring-up + drills (2026-06-15, run by Claude under builder authorization)
+
+Ezra deployed live on the host and **verified hardened**: `ReadonlyRootfs=true`,
+`User=1000:1000`, `CapDrop=[ALL]`. Builder confirmed a real message round-trip
+in the household group (code-switched reply). Drills:
+
+| # | Drill | Result |
+|---|---|---|
+| pair | First pair looped the QR | **Fixed** — `wa-session` volume was root-owned; non-root read-only-rootfs process couldn't persist creds. Dockerfile now pre-owns `/data/wa-session` as `node` (commit `71a876b`). Re-pair succeeded; `up -d` reconnects without a QR. |
+| A | `kill -9` mid-process → auto-restart → recover | **PASS.** First attempt used `docker kill` and saw no restart — **methodology error, not a bug**: `docker kill`/`stop` is an intentional API stop, which `unless-stopped` correctly does NOT auto-restart. Host-side `kill -9` of the container's process (what OOM does) → Docker auto-restarted (`restarts=1`), DBOS relaunched with a fresh executor id, recovery pass ran, reconnected without QR, "serving" in ~3s. No in-flight turn at the crash instant, so nothing to replay here; exactly-once-mid-turn stays locked by `launch-recovery.test.ts`. |
+| B | Egress allowlist apply + blocked-host | **PASS, then rolled back.** Applied on `br-d7fcb10ff338`: `example.com` blocked (timeout), `api.anthropic.com` + `g.whatsapp.net` allowed, live WhatsApp connection survived the apply. **Finding:** the nft set gives each IP a 1h TTL with no refresh, so left applied it self-empties in ~1h and starves the bot's egress. Rolled the manual table back to remove that hazard. Persistent enforcement needs a refresh timer (`infra/egress/hh-egress.{service,timer}`, in-repo) — **install pending builder authorization** (systemd persistence). |
+
+**Still to run:** sweep self-heal (needs a reminder → one household message); T14
+alert/dead-man re-pass from the host (needs eyes on the Telegram channel); the
+folded T44 restore drill (needs the backup sidecar `pg_hba` replication line +
+continuous WAL).
