@@ -95,7 +95,35 @@ Verdict also recorded in `docs/spike-results.md`.
 
 ## Production wiring (T45 deploy)
 
-Bring-up, on the host after the prod stack is up:
+### Builder prerequisites (credential custody — not automatable)
+
+Two secrets must exist on the host before the sidecar can ship anything. As of
+the 2026-06-15 host apply **neither was present** — they are the remaining gate
+to live archiving:
+
+1. **AWS credentials for the host.** The EC2 instance has **no IAM instance
+   profile** (IMDS returns 404 for the role) and no keys in `.env`, so the
+   sidecar's aws-cli reports "Unable to locate credentials." Pick one (builder /
+   AWS decision — least-privilege to `hh-assistant-backups-001467466089` only):
+   - *Instance profile (preferred for EC2):* attach an IAM role with
+     `s3:PutObject/GetObject/ListBucket/DeleteObject` on the bucket; then verify
+     the sidecar container can reach IMDS (`169.254.169.254`) — the host
+     nftables egress ruleset may need a link-local allow, or run the WAL drain
+     leg able to read instance creds.
+   - *Scoped keys:* `BACKUP_AWS_ACCESS_KEY_ID` / `BACKUP_AWS_SECRET_ACCESS_KEY`
+     in `.env` for a user limited to the bucket (simplest; rotate on leak).
+2. **Production age recipient.** `BACKUP_AGE_RECIPIENT` (public key) in `.env`;
+   the matching **private identity stays OFFLINE** (password manager), needed
+   only to restore. Generate it on a trusted machine, never on the host:
+   `age-keygen -o age.key` → put the `public key:` line in `.env`, keep
+   `age.key` offline. Without the recipient the sidecar cannot encrypt.
+
+The `host replication` pg_hba line (below) and the sidecar image build are
+already done on the host (2026-06-15).
+
+### Bring-up
+
+On the host after the prod stack is up:
 
 ```
 # 1. enable replication for the sidecar (idempotent; re-run after a rebuild)
