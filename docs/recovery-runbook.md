@@ -188,17 +188,24 @@ SELECT action_id, status, created_at, expires_at
  ORDER BY created_at DESC;
 ```
 
-## The restore drill (the T44 gate — builder-run)
+## The restore drill (the T44 gate)
 
-> **Status: OPEN — requires the real backup environment.** Unlike the T17 drill
-> (self-contained, runnable on the dev Mac against real S3), the T44 drill must
-> also create and reconcile a **real external effect**: a calendar event written
-> *after* the backup point, then restored behind, then confirmed not duplicated
-> on re-execute. That is a real Google Calendar write and real S3 — **ask-first**
-> (SPEC: real calendar writes, spending). It is run by the builder (or by Claude
-> under explicit authorization with `.env` configured), and the result is logged
-> here. The mechanisms it exercises are each already test-locked (4a/4b above);
-> the drill is the end-to-end confirmation.
+> **Status: PASS 2026-06-15** (Claude under builder authorization). Unlike the
+> T17 drill (which proves base + WAL PITR), the T44 drill also creates and
+> reconciles a **real external effect**: a calendar event written *after* the
+> backup point, then restored behind, then confirmed not duplicated on
+> re-execute. That is a real Google Calendar write and real S3 — **ask-first**
+> (SPEC: real calendar writes, spending). The mechanisms it exercises are each
+> already test-locked (4a/4b above); the drill is the end-to-end confirmation.
+>
+> Automated as `infra/backup/t44-reconcile-drill.sh` (+ the calendar leg
+> `infra/backup/t44-calendar-effect.ts`, which drives the **production**
+> `makeGoogleCalendarClient` and `deriveCalendarEventId`). Self-contained and
+> self-cleaning: an isolated source Postgres (no real DB touched), a
+> drill-scoped S3 prefix (never the production `pitr/`), an **ephemeral age
+> keypair** (the production private identity is offline and not needed — encrypt
+> and decrypt both happen in one run, the same `lib.sh` age path), and a
+> far-future calendar slot prechecked empty and deleted on exit.
 
 Procedure:
 
@@ -230,4 +237,12 @@ Procedure:
 
 | Date | Restore point | sent_log reconciliation | calendar reconciliation | Verdict |
 |---|---|---|---|---|
-| _pending_ | — | — | — | **OPEN — builder-run** |
+| 2026-06-15 | base-end (rewound behind all post-base effects) | post-base at-most-once + at-least-once rows **absent**; pre-base baseline survived (§4a) | restored-as-`approved` action (§4c) re-executed → re-derived id `hh`+sha256(action_id) → real Google **409 → folded to already-exists**; window held **exactly one** event, no duplicate (§4b) | **PASS** (`infra/backup/t44-reconcile-drill.sh`, real S3 + real Google, self-cleaned) |
+
+Run venue: dev Mac (Colima), production backup scripts + production calendar
+client, ephemeral age key, drill-scoped S3 prefix (account `001467466089`,
+us-east-1). The T17 base+WAL PITR leg was re-confirmed PASS the same day
+(`infra/backup/restore.sh drill`). The remaining production wiring — the prod
+`postgres` replication `pg_hba` line so continuous WAL archiving runs on the
+real host — is the standing T45 item (`infra/backup/README.md`); the drill
+sidesteps it via an isolated source over the local socket.

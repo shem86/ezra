@@ -248,3 +248,41 @@ Gotchas burned in:
   replication `pg_hba` line for the sidecar (the one open T45 wiring item).
 
 Full design + runbook + drill record: `infra/backup/README.md`.
+
+## T44 — Recovery-runbook external-effect reconciliation drill (PASS 2026-06-15)
+
+The T17 drill proves base+WAL PITR; T44's drill proves the **runbook §4
+reconciliation** — that effects which already left the box are not duplicated
+when the DB is restored *behind* them. Automated as
+`infra/backup/t44-reconcile-drill.sh` (+ calendar leg `t44-calendar-effect.ts`,
+which drives the **production** `makeGoogleCalendarClient` / `deriveCalendarEventId`).
+
+Timeline built and reconciled:
+- **PRE-base:** an `approved` `pending_actions` row + a baseline at-least-once
+  `sent_log` row.
+- **base backup** (real `backup.sh` → encrypted → real S3).
+- **POST-base** (the effects that "already left the box"): the action flips to
+  `executed`, an at-most-once + an at-least-once `sent_log` row land, and a
+  **real Google event** is created with id `hh`+sha256(action_id).
+- **base-only restore** (no archived WAL ⇒ recovery stops at base-end) into a
+  scratch container = the rewind.
+- **reconcile:** §4c action back to `approved` (executed flip rewound); §4a
+  post-base `sent_log` rows absent, baseline survived; §4b the restored action's
+  id re-derives identically → re-execute → real Google **409 → folded to
+  already-exists** → window holds **exactly one** event (no duplicate).
+
+Isolation: isolated source Postgres (no real DB), **drill-scoped S3 prefix**
+(never production `pitr/`), **ephemeral age keypair** (the production private
+identity stays offline — encrypt+decrypt both happen in one run, same `lib.sh`
+age path), far-future calendar slot prechecked empty + deleted on exit. Verified
+zero residue. No src/test changes — the primitives were already test-locked
+(`send-class-recovery.test.ts`, `calendar-approval.test.ts`, T41 real wire); the
+drill is the end-to-end confirmation. Drill record: `docs/recovery-runbook.md`.
+
+Gotchas burned in:
+- `docker exec` drops stdin without `-i` — a heredoc piped to `docker exec
+  psql` (no `-i`) silently runs nothing; the table-creation step needs `-i`.
+- Base-only restore (the rewind) needs **no** `restore_command`/`recovery.signal`:
+  extract the base + its bundled `-Xstream` WAL into `pg_wal` and start normally;
+  recovery reaches base-end consistency and stops there. Adding archived WAL is
+  what would roll *forward* past the rewind point (that path is the T17 drill).

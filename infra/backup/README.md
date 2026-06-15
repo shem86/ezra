@@ -25,7 +25,9 @@ The one source of truth for the allowed S3 host lives in the egress allowlist
 |---|---|
 | `lib.sh` | config, S3 helpers, age encrypt/decrypt (sourced, not run) |
 | `backup.sh` | `base` · `receivewal` (continuous) · `wal-drain` · `ensure-slot` |
-| `restore.sh` | `into <container>` (restore latest base + WAL) · `drill` (self-asserting) |
+| `restore.sh` | `into <container>` (restore latest base + WAL) · `drill` (self-asserting base+WAL PITR) |
+| `t44-reconcile-drill.sh` | T44 gate: runbook §4 external-effect reconciliation, real S3 + real Google, self-contained + self-cleaning |
+| `t44-calendar-effect.ts` | T44 calendar leg — drives the production calendar client (create/recreate/count/delete) |
 | `Dockerfile` | sidecar image: pg17 client tools + aws-cli + age |
 | `docker-compose.backup.yml` | sidecar overlay for the prod stack |
 
