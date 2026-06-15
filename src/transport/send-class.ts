@@ -99,12 +99,15 @@ type SendFn = (message: { conversationId: string; text: string }) => Promise<{ m
  * with bounded exponential backoff before propagating. Retrying a thrown send is
  * safe for BOTH classes — no message left the wire — so no duplicate risk; this
  * only ever turns a drop into a delayed delivery. `sleep` is injectable for
- * tests; the default is a real timer.
+ * tests; the default is a real timer. `onRetry` fires before each backoff so a
+ * transient stall is observable in production (the lane is blocked while it
+ * retries — a silent multi-second hold would be bad ops); default is a no-op.
  */
 export function makeResilientSend(
   send: SendFn,
   config: ResilientSendConfig = defaultResilientSendConfig,
   sleep: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  onRetry: (info: { attempt: number; delayMs: number; error: unknown }) => void = () => {},
 ): SendFn {
   return async (message) => {
     let delay = config.baseDelayMs;
@@ -113,6 +116,7 @@ export function makeResilientSend(
         return await send(message);
       } catch (error) {
         if (attempt >= config.maxAttempts || !isTransientSendError(error)) throw error;
+        onRetry({ attempt, delayMs: delay, error });
         await sleep(delay);
         delay *= config.backoffRate;
       }

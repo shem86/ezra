@@ -213,7 +213,17 @@ async function main(): Promise<void> {
   // bounded backoff. Both the reply path (deliverReplyDeps.send) and the
   // approval-prompt path (sendApprovalPrompts) flow through jitteringSend, so
   // both inherit resilience.
-  const resilientSend = makeResilientSend((message) => transport.send(message));
+  const resilientSend = makeResilientSend(
+    (message) => transport.send(message),
+    undefined,
+    undefined,
+    ({ attempt, delayMs, error }) => {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn(
+        `[send] transient failure (${reason}) on attempt ${attempt}; retrying in ${delayMs}ms`,
+      );
+    },
+  );
 
   // Human send-jitter (T13/T43): no production message leaves at machine speed.
   // Only ever called from inside a send STEP (never a workflow body), so the

@@ -265,6 +265,25 @@ describe('makeResilientSend (PROX-SEND-001)', () => {
     // 3 sleeps for 4 attempts; each strictly larger than the last.
     expect(delays).toEqual([500, 1000, 2000]);
   });
+
+  it('reports each retry to onRetry so a transient stall is observable', async () => {
+    const retries: { attempt: number; delayMs: number }[] = [];
+    const send = makeResilientSend(
+      async () => {
+        throw new Error('transport not connected');
+      },
+      { maxAttempts: 3, baseDelayMs: 500, backoffRate: 2 },
+      async () => {},
+      ({ attempt, delayMs }) => retries.push({ attempt, delayMs }),
+    );
+
+    await expect(send({ conversationId: 'c1', text: 'x' })).rejects.toThrow();
+    // One report per backoff (2 retries for 3 attempts), carrying the delay.
+    expect(retries).toEqual([
+      { attempt: 1, delayMs: 500 },
+      { attempt: 2, delayMs: 1000 },
+    ]);
+  });
 });
 
 // The end-to-end invariant the bug violated, at unit speed: a resilient send
