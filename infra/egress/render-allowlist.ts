@@ -1,7 +1,8 @@
 // infra/egress/render-allowlist.ts — emit the egress allowlist as data the
 // host firewall consumes, straight from the one source of truth in
 // src/ops/egress-allowlist.ts. Run with bare node (type-stripping, spikes
-// pattern); the host already has Node 22 as the app runtime, so nftables.sh
+// pattern); the app itself is containerized, so Node 22 is installed on the
+// host specifically for this egress tooling (T45 deploy step 0). nftables.sh
 // calls this at apply/refresh time instead of carrying a committed copy that
 // could drift.
 //

@@ -68,7 +68,18 @@ firewall resolves them into nft sets rather than pinning addresses.
 
 ## Deploy (T45 runs this on the host)
 
+All commands run from the repo root (`~/hh-assistant`) as the `hh` user.
+`--env-file .env` is **load-bearing**, not optional: with `-f infra/...` the
+compose *project directory* becomes `infra/`, so interpolation looks for
+`infra/.env` and `${POSTGRES_PASSWORD}` comes up missing. `--env-file .env`
+points interpolation back at the repo-root `.env` (the same file the ezra
+service loads via `env_file: ../.env`).
+
 ```
+# 0. host tooling (fresh box): Docker engine + compose plugin, and Node 22 for
+#    the egress render/refresh (the app is containerized — node is for tooling).
+#    add hh to the docker group so it runs docker without sudo.
+
 # 1. login/OS baseline (T15), once on a fresh box
 sudo bash infra/provision-host.sh
 
@@ -76,9 +87,10 @@ sudo bash infra/provision-host.sh
 #    DATABASE_URL/WA_SESSION_DIR are set by compose, not needed in .env.
 
 # 3. bring up the hardened process
-docker compose -f infra/docker-compose.prod.yml up -d --build
+docker compose --env-file .env -f infra/docker-compose.prod.yml up -d --build
 
-# 4. egress allowlist (find the bridge, then apply)
+# 4. egress allowlist (find the bridge, then apply). The egress bridge only
+#    exists once ezra is up (it owns the egress network).
 EG=br-$(docker network inspect hh-assistant_egress -f '{{slice .Id 0 12}}')
 sudo EGRESS_IFACE="$EG" infra/egress/nftables.sh apply
 ```
