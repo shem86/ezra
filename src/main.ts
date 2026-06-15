@@ -217,10 +217,10 @@ async function main(): Promise<void> {
     (message) => transport.send(message),
     undefined,
     undefined,
-    ({ attempt, delayMs, error }) => {
+    ({ attempt, delayMs, elapsedMs, error }) => {
       const reason = error instanceof Error ? error.message : String(error);
       console.warn(
-        `[send] transient failure (${reason}) on attempt ${attempt}; retrying in ${delayMs}ms`,
+        `[send] transient failure (${reason}) on attempt ${attempt} (elapsed ${elapsedMs}ms); retrying in ${delayMs}ms`,
       );
     },
   );

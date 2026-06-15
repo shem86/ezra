@@ -73,52 +73,74 @@ export function isTransientSendError(error: unknown): boolean {
 }
 
 export interface ResilientSendConfig {
-  /** Max send attempts including the first (>= 1). */
-  readonly maxAttempts: number;
-  /** Backoff before the first retry, ms; multiplied by `backoffRate` each retry. */
+  /**
+   * Total time to keep retrying a transient failure before giving up, ms. The
+   * budget — not an attempt count — because the thing we wait on is a
+   * wall-clock reconnect, and on this host a throttled WhatsApp reconnect (rapid
+   * restart → server-side backoff) was measured at ~84s, well past a naive
+   * few-attempts budget. Sized with margin so a realistic slow reconnect still
+   * delivers the reminder rather than dropping it.
+   */
+  readonly maxElapsedMs: number;
+  /** First backoff, ms; multiplied by `backoffRate` each retry up to `maxDelayMs`. */
   readonly baseDelayMs: number;
   readonly backoffRate: number;
+  /**
+   * Cap on a single backoff. Without it the delay grows to 32s+ and a retry can
+   * sleep clean past the moment the transport comes back (observed: transport
+   * opened 10s after the last 32s sleep started). Capping keeps the loop polling
+   * every few seconds near the reconnect, so delivery lands promptly once open.
+   */
+  readonly maxDelayMs: number;
 }
 
 /**
- * ~0.5/1/2/4/8/16/32s ≈ 63s total over 8 attempts — covers a normal
- * seconds-long reconnect window (drill: bot reconnected "seconds later"). A
- * transport down past this budget is the catastrophic case the health monitor
- * and dead-man ping (T12) surface; the send then errors the turn as before.
+ * 5-minute budget, 5s delay cap. Covers the measured ~84s throttled reconnect
+ * with ~3.5× margin while staying bounded — a transport down past 5 minutes is
+ * a genuine outage the health monitor and dead-man ping (T12) surface, and the
+ * send then errors the turn (accepted residual). Delays ramp 0.5/1/2/4s then
+ * hold at 5s. The lane is concurrency-1 and the transport is down for everyone
+ * while this waits, so blocking it costs nothing — inbound stays durably queued.
  */
 export const defaultResilientSendConfig: ResilientSendConfig = {
-  maxAttempts: 8,
+  maxElapsedMs: 300_000,
   baseDelayMs: 500,
   backoffRate: 2,
+  maxDelayMs: 5_000,
 };
 
 type SendFn = (message: { conversationId: string; text: string }) => Promise<{ messageId: string }>;
 
 /**
  * Wrap a transport send so a transient `transport not connected` is retried
- * with bounded exponential backoff before propagating. Retrying a thrown send is
- * safe for BOTH classes — no message left the wire — so no duplicate risk; this
- * only ever turns a drop into a delayed delivery. `sleep` is injectable for
- * tests; the default is a real timer. `onRetry` fires before each backoff so a
- * transient stall is observable in production (the lane is blocked while it
- * retries — a silent multi-second hold would be bad ops); default is a no-op.
+ * with capped exponential backoff until the reconnect budget is spent. Retrying
+ * a thrown send is safe for BOTH classes — no message left the wire — so no
+ * duplicate risk; this only ever turns a drop into a delayed delivery. Elapsed
+ * is tracked as the sum of slept delays (no clock read), so the loop is
+ * deterministic and unit-testable with an injected `sleep`. `onRetry` fires
+ * before each backoff so a transient stall is observable in production (the lane
+ * is blocked while it retries — a silent multi-minute hold would be bad ops);
+ * default is a no-op.
  */
 export function makeResilientSend(
   send: SendFn,
   config: ResilientSendConfig = defaultResilientSendConfig,
   sleep: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-  onRetry: (info: { attempt: number; delayMs: number; error: unknown }) => void = () => {},
+  onRetry: (info: { attempt: number; delayMs: number; elapsedMs: number; error: unknown }) => void =
+    () => {},
 ): SendFn {
   return async (message) => {
     let delay = config.baseDelayMs;
+    let elapsedMs = 0;
     for (let attempt = 1; ; attempt += 1) {
       try {
         return await send(message);
       } catch (error) {
-        if (attempt >= config.maxAttempts || !isTransientSendError(error)) throw error;
-        onRetry({ attempt, delayMs: delay, error });
+        if (!isTransientSendError(error) || elapsedMs >= config.maxElapsedMs) throw error;
+        onRetry({ attempt, delayMs: delay, elapsedMs, error });
         await sleep(delay);
-        delay *= config.backoffRate;
+        elapsedMs += delay;
+        delay = Math.min(delay * config.backoffRate, config.maxDelayMs);
       }
     }
   };

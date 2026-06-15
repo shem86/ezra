@@ -225,24 +225,26 @@ describe('makeResilientSend (PROX-SEND-001)', () => {
     expect(attempts).toBe(1); // a poison message must never spin the lane
   });
 
-  it('gives up after maxAttempts on a persistent transient failure (bounded, not infinite)', async () => {
+  it('gives up once the elapsed budget is spent (bounded, not infinite)', async () => {
     let attempts = 0;
     const send = makeResilientSend(
       async () => {
         attempts += 1;
         throw new Error('transport not connected');
       },
-      { maxAttempts: 4, baseDelayMs: 10, backoffRate: 2 },
+      // 1s budget, fixed 500ms delays: retry after 0ms elapsed and after 500ms
+      // elapsed; at 1000ms elapsed the budget is spent → throw. 3 attempts.
+      { maxElapsedMs: 1000, baseDelayMs: 500, backoffRate: 1, maxDelayMs: 500 },
       noSleep,
     );
 
     await expect(send({ conversationId: 'c1', text: 'x' })).rejects.toThrow(
       'transport not connected',
     );
-    expect(attempts).toBe(4);
+    expect(attempts).toBe(3);
   });
 
-  it('backs off with growing delays between retries, and never sleeps on first-attempt success', async () => {
+  it('caps the backoff so it keeps polling near the reconnect, and never sleeps on first-attempt success', async () => {
     const delays: number[] = [];
     const sleep = async (ms: number): Promise<void> => {
       delays.push(ms);
@@ -253,35 +255,36 @@ describe('makeResilientSend (PROX-SEND-001)', () => {
     await okSend({ conversationId: 'c1', text: 'hi' });
     expect(delays).toEqual([]);
 
-    // Persistent transient: bounded, strictly-growing backoff before each retry.
+    // Persistent transient: backoff ramps 0.5/1/2/4 then HOLDS at the 5s cap —
+    // the fix that stops a long sleep from overshooting the reconnect moment.
     const flakySend = makeResilientSend(
       async () => {
         throw new Error('transport not connected');
       },
-      { maxAttempts: 4, baseDelayMs: 500, backoffRate: 2 },
+      { maxElapsedMs: 30_000, baseDelayMs: 500, backoffRate: 2, maxDelayMs: 5_000 },
       sleep,
     );
     await expect(flakySend({ conversationId: 'c1', text: 'x' })).rejects.toThrow();
-    // 3 sleeps for 4 attempts; each strictly larger than the last.
-    expect(delays).toEqual([500, 1000, 2000]);
+    expect(delays.slice(0, 6)).toEqual([500, 1000, 2000, 4000, 5000, 5000]);
+    expect(Math.max(...delays)).toBe(5000); // never exceeds the cap
   });
 
-  it('reports each retry to onRetry so a transient stall is observable', async () => {
-    const retries: { attempt: number; delayMs: number }[] = [];
+  it('reports each retry to onRetry with running elapsed so a stall is observable', async () => {
+    const retries: { attempt: number; delayMs: number; elapsedMs: number }[] = [];
     const send = makeResilientSend(
       async () => {
         throw new Error('transport not connected');
       },
-      { maxAttempts: 3, baseDelayMs: 500, backoffRate: 2 },
+      { maxElapsedMs: 1500, baseDelayMs: 500, backoffRate: 2, maxDelayMs: 5_000 },
       async () => {},
-      ({ attempt, delayMs }) => retries.push({ attempt, delayMs }),
+      ({ attempt, delayMs, elapsedMs }) => retries.push({ attempt, delayMs, elapsedMs }),
     );
 
     await expect(send({ conversationId: 'c1', text: 'x' })).rejects.toThrow();
-    // One report per backoff (2 retries for 3 attempts), carrying the delay.
+    // Retries fire while elapsed < budget; elapsed accumulates the slept delays.
     expect(retries).toEqual([
-      { attempt: 1, delayMs: 500 },
-      { attempt: 2, delayMs: 1000 },
+      { attempt: 1, delayMs: 500, elapsedMs: 0 },
+      { attempt: 2, delayMs: 1000, elapsedMs: 500 },
     ]);
   });
 });
