@@ -27,12 +27,15 @@ exactly-once delivery + one `sent_log` row across a transient disconnect.
 
 **Why a budget, not a few attempts.** The first fix used a fixed 8-attempt/~63s
 budget. The on-host re-drill (2026-06-15, `docs/ops-drills.md`) showed the retry
-firing perfectly but the WhatsApp reconnect taking **~85s** — WhatsApp throttles
-rapid reconnections, so a restart-storm reconnect runs well over a minute. 63s
-expired ~10s before the transport opened and the reminder dropped again. The
-revised budget (5min, with a 5s delay cap so a long sleep can't overshoot the
-reconnect moment) covers the measured ~85s with ~3.5× margin. **Re-drill PASS:**
-the reminder delivered with an `at-least-once` `sent_log` row.
+firing perfectly but the reconnect on that run taking **~85s**. Reconnect time
+was measured to vary widely across restarts (~12s to ~85s); the slow tail is not
+diagnosed (plausibly WhatsApp-side reconnect handling and/or Baileys session
+resync — not proven), so the design tolerates it rather than depending on the
+cause. 63s expired ~10s before the transport opened and the reminder dropped
+again. The revised budget (5min, with a 5s delay cap so a long sleep can't
+overshoot the reconnect moment) covers the observed worst case (~85s) with
+~3.5× margin. **Re-drill PASS:** the reminder delivered with an `at-least-once`
+`sent_log` row.
 
 **Bonus self-heal (observed in the drill).** Even a reminder dropped by the old
 code self-heals: its inbox item is never marked processed (the errored drain

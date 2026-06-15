@@ -210,6 +210,33 @@ describe('makeResilientSend (PROX-SEND-001)', () => {
     expect(attempts).toBe(3);
   });
 
+  it('delivers when the transport recovers LATE but within budget (no overshoot)', async () => {
+    // The PROX-SEND-001 invariant the on-host drill exposed: the reconnect has a
+    // slow tail (~85s observed). With the DEFAULT config the loop must keep
+    // polling — capped at 5s — long enough to catch a ~85s-late recovery, and
+    // NOT give up before the 5-min budget. 20 failures with the default config
+    // is ~87.5s of elapsed retry (500+1000+2000+4000 then 5000×16), comfortably
+    // inside the 300s budget, so the 21st attempt delivers.
+    const sent: string[] = [];
+    let attempts = 0;
+    const send = makeResilientSend(
+      async ({ text }) => {
+        attempts += 1;
+        if (attempts <= 20) throw new Error('transport not connected');
+        sent.push(text);
+        return { messageId: 'wa-late' };
+      },
+      undefined, // default config: maxElapsedMs 5min, maxDelayMs 5s cap
+      async () => {}, // no real sleeping in the test
+    );
+
+    const receipt = await send({ conversationId: 'c1', text: 'reminder: trash night' });
+
+    expect(receipt.messageId).toBe('wa-late');
+    expect(sent).toEqual(['reminder: trash night']); // delivered, not dropped before budget
+    expect(attempts).toBe(21);
+  });
+
   it('does not retry a permanent error — propagates on the first attempt (ledger #15)', async () => {
     let attempts = 0;
     const send = makeResilientSend(

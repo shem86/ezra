@@ -103,11 +103,17 @@ against the rebuilt `hh-assistant:prod` image to confirm the reminder now
 delivers. Drilled twice (`docker stop` → insert an overdue reminder → `docker
 start`, racing the first sweep tick against the Baileys reconnect).
 
-**Root cause measured.** Three restarts in the window each reconnected Baileys
-in **~85s** (16:59 deploy 12s when not throttled; 17:11 and 17:14 both ~85s) —
-WhatsApp throttles rapid reconnections, and the proactive sweep fires within
-~10s of launch, so the send meets a not-yet-open transport for over a minute.
-This is the same condition that produced the original 06:56 drop.
+**What was measured (and what was NOT).** Reconnect time was **highly variable**
+across the four restarts this session: ~12s (16:59 deploy), ~84s (17:04 drill 1),
+~85s (17:11 deploy), ~20s (17:14 drill 2). The proactive sweep fires within ~10s
+of launch, so on a slow-tail reconnect the send meets a not-yet-open transport
+for over a minute — the same condition that produced the original 06:56 drop.
+**The cause of the slow tail was NOT diagnosed** — plausibly WhatsApp-side
+reconnect handling and/or Baileys session resync after a crash, but it was not
+instrumented or proven (an earlier note here wrongly stated "WhatsApp throttles
+to ~85s" as fact). The fix is designed to tolerate the slow tail regardless of
+cause rather than depend on diagnosing it: budget > observed worst case, with
+margin.
 
 - **Drill 1 (reminder `d1613bd3`, first fix — 8-attempt/63s budget): still
   dropped.** The retry log fired perfectly (attempts 1–7, 0.5→32s backoff) but
