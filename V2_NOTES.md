@@ -29,6 +29,16 @@ never builds the production image. Consequences and fixes:
   one instance), but CD should run a `migrate`-only step and gate the image
   swap on it, so a bad migration fails the deploy instead of crash-looping the
   app.
+- **Auto-update the README lines-of-code badge.** The badge is currently a
+  *static* shields.io badge (`lines of code | 6.6k`, counting `src/`) because
+  the repo is private — tokei.rs / codetabs / shields dynamic endpoints all
+  fetch over the public API and return nothing for a private repo. To make it
+  live: a CI step counts `src/` LOC on push (e.g. `git ls-files 'src/**/*.ts' |
+  xargs wc -l`, or `cloc`), writes the number to a **public gist**, and the
+  README points at a shields.io *dynamic* badge that reads the gist
+  (`schneegans/dynamic-badges-action` is the standard recipe). Needs a gist +
+  a `GIST` token secret. Until then the static number goes stale and must be
+  bumped by hand.
 
 ## 2. Provisioning as code (IaC)
 

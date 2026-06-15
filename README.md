@@ -1,5 +1,7 @@
 # hh-assistant
 
+![lines of code](https://img.shields.io/badge/lines%20of%20code-6.6k-blue)
+
 A WhatsApp household assistant for a two-person family group, built as a
 production-grade exercise in reliable agentic systems. It handles reminders,
 shared lists (groceries/todos), Google Calendar, and memory-backed household
