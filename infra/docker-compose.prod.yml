@@ -1,0 +1,87 @@
+# Production runtime sandbox (T16). The decision (CLAUDE.md / infra/host.md):
+# Docker Compose for the PROCESS sandbox + host-level nftables for egress
+# (infra/egress/nftables.sh) — Docker's own iptables churn fights host
+# nftables, so egress enforcement stays off the container layer on purpose.
+#
+# Run from the repo root:
+#   docker compose -f infra/docker-compose.prod.yml up -d --build
+# Secrets are injected at runtime from ../.env (gitignored, never in the image).
+#
+# Hardening summary:
+#  - ezra: read-only rootfs, all caps dropped, no-new-privileges, non-root;
+#    the ONLY writable surfaces are the wa-session volume and a tmpfs /tmp.
+#  - postgres: not read-only (it needs many writable paths); the sensitive
+#    surface — the data dir — is a named volume, the port is NOT published, and
+#    it sits on an internal-only network with no route to the internet.
+
+# Fixed project name so volume/network names are stable across invocations
+# (otherwise they'd take the compose file's parent dir, `infra_*`) and match
+# the `hh-assistant_egress` bridge the nftables deploy step looks up.
+name: hh-assistant
+
+services:
+  ezra:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+    image: hh-assistant:prod
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Runtime secrets (ANTHROPIC_API_KEY, VOYAGE_API_KEY, GOOGLE_SA_KEY_B64,
+    # LANGFUSE_*, ALERT_CHANNEL_*, WA_JID_*, …) — see .env.example.
+    env_file:
+      - ../.env
+    environment:
+      # Compose-internal wiring overrides anything in .env (environment wins):
+      # the app reaches Postgres over the internal network, and the session
+      # lives on the one writable app volume below.
+      DATABASE_URL: postgres://hh:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/hh_assistant_prod
+      WA_SESSION_DIR: /data/wa-session
+    # --- process sandbox ------------------------------------------------------
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    user: "1000:1000" # the image's `node` user
+    tmpfs:
+      - /tmp
+    volumes:
+      # Baileys session is the ONLY app-writable persistent surface. Never
+      # backed up / restored (SPEC "Never" — re-pair on loss).
+      - wa-session:/data/wa-session
+    networks:
+      - internal # to Postgres
+      - egress # to the internet (host nftables filters it to the allowlist)
+
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: hh-postgres-prod
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: hh
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: hh_assistant_prod
+    security_opt:
+      - no-new-privileges:true
+    # No `ports:` — the DB is never exposed to the host or the internet.
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hh -d hh_assistant_prod"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+networks:
+  internal:
+    internal: true # no route to the internet; app⇄postgres only
+  egress: {}
+
+volumes:
+  wa-session:
+  pgdata:
