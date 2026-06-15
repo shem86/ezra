@@ -156,3 +156,39 @@ describe('deliverReply — at-least-once (send-then-log)', () => {
     expect(seed.sent).toHaveLength(1);
   });
 });
+
+// PROX-SEND-001 (docs/known-issues.md) — found in the T45 on-host self-heal
+// drill. A proactive at-least-once send that meets a transiently-disconnected
+// transport on restart currently throws and errors the workflow terminally,
+// DROPPING the reminder. The at-least-once contract implies a transient send
+// failure must not drop the message. Marked test.fails until the fix lands
+// (step-level retry preferred); flips red on fix → remove .fails. If the fix
+// lands above deliverReply (the send step), relocate this repro accordingly.
+describe('deliverReply — at-least-once resilience (PROX-SEND-001, known bug)', () => {
+  it.fails('retries past a transient "transport not connected" instead of dropping', async () => {
+    const seed: Recorded = { sent: [], logged: new Set() };
+    let attempts = 0;
+    const deps: DeliverReplyDeps = {
+      recordSend: async ({ idempotencyKey }) => {
+        if (seed.logged.has(idempotencyKey)) return false;
+        seed.logged.add(idempotencyKey);
+        return true;
+      },
+      getSentEntry: async (key) => (seed.logged.has(key) ? { idempotencyKey: key } : null),
+      send: async ({ text }) => {
+        attempts += 1;
+        if (attempts < 2) throw new Error('transport not connected');
+        seed.sent.push(text);
+        return { messageId: `wa-${seed.sent.length}` };
+      },
+    };
+    const result = await deliverReply(deps, {
+      sendClass: 'at-least-once',
+      idempotencyKey: 'send-reminder-1',
+      conversationId: 'c1',
+      text: 'reminder: trash night',
+    });
+    expect(result.sent).toBe(true);
+    expect(seed.sent).toEqual(['reminder: trash night']); // delivered, not dropped
+  });
+});

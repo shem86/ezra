@@ -78,3 +78,20 @@ in the household group (code-switched reply). Drills:
 alert/dead-man re-pass from the host (needs eyes on the Telegram channel); the
 folded T44 restore drill (needs the backup sidecar `pg_hba` replication line +
 continuous WAL).
+
+#### Self-heal drill (b) + dead-man (c) — 2026-06-15
+
+Reminder `f901c99d…` set via chat for 06:56:00Z; ezra stopped 06:53:31→06:56:25
+(down across the due time), then restarted.
+
+- **Self-heal of reminder STATE: PASS** — stayed `scheduled` + overdue while
+  down, flipped to `fired` on restart (the missed tick healed).
+- **Reminder DELIVERY: FAIL → filed as PROX-SEND-001** (`docs/known-issues.md`).
+  The sweep fired the reminder before Baileys reconnected; the proactive send
+  threw `transport not connected`, the workflow errored terminally, the message
+  was dropped (no `sent_log` row). Launch-blocking; builder chose file-now,
+  fix-before-T46. Repro: `tests/unit/send-class.test.ts` (`test.fails`).
+- **Dead-man (c):** ezra was down ~3 min (past grace), so healthchecks.io
+  should have alerted Telegram + recovered on restart — **builder to confirm
+  the alert arrived** (the external check is the only detector of a full
+  process-down; in-process socket alerts can't fire when the process is dead).
