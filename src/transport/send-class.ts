@@ -52,6 +52,74 @@ export function approvalSendId(actionId: string): string {
   return `approval-${actionId}`;
 }
 
+// --- PROX-SEND-001: resilient send across a transient disconnect -------------
+// A proactive at-least-once send (reminder/nag/approval prompt) fires from the
+// scheduled sweep, which on restart can run BEFORE Baileys finishes
+// reconnecting. A bare `transport.send` then throws `transport not connected`
+// (baileys.ts) and the throw errors the whole turn workflow terminally — DBOS
+// recovers PENDING workflows, never ERROR ones — so the reminder is silently
+// dropped, the exact failure the at-least-once class exists to prevent. The
+// contract already implies a transient send failure must retry, so the
+// production send is wrapped to wait out a transient disconnect with bounded
+// backoff. Permanent/unroutable errors (a bad jid — ledger #15) are NOT matched,
+// so a poison message propagates immediately instead of spinning the lane.
+//
+// The wrapper runs INSIDE the send DBOS step (main.ts), so its backoff timers
+// are journaled exactly like the existing human jitter — no determinism concern.
+
+/** A send failure worth retrying: a transiently disconnected transport only. */
+export function isTransientSendError(error: unknown): boolean {
+  return error instanceof Error && error.message === 'transport not connected';
+}
+
+export interface ResilientSendConfig {
+  /** Max send attempts including the first (>= 1). */
+  readonly maxAttempts: number;
+  /** Backoff before the first retry, ms; multiplied by `backoffRate` each retry. */
+  readonly baseDelayMs: number;
+  readonly backoffRate: number;
+}
+
+/**
+ * ~0.5/1/2/4/8/16/32s ≈ 63s total over 8 attempts — covers a normal
+ * seconds-long reconnect window (drill: bot reconnected "seconds later"). A
+ * transport down past this budget is the catastrophic case the health monitor
+ * and dead-man ping (T12) surface; the send then errors the turn as before.
+ */
+export const defaultResilientSendConfig: ResilientSendConfig = {
+  maxAttempts: 8,
+  baseDelayMs: 500,
+  backoffRate: 2,
+};
+
+type SendFn = (message: { conversationId: string; text: string }) => Promise<{ messageId: string }>;
+
+/**
+ * Wrap a transport send so a transient `transport not connected` is retried
+ * with bounded exponential backoff before propagating. Retrying a thrown send is
+ * safe for BOTH classes — no message left the wire — so no duplicate risk; this
+ * only ever turns a drop into a delayed delivery. `sleep` is injectable for
+ * tests; the default is a real timer.
+ */
+export function makeResilientSend(
+  send: SendFn,
+  config: ResilientSendConfig = defaultResilientSendConfig,
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+): SendFn {
+  return async (message) => {
+    let delay = config.baseDelayMs;
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await send(message);
+      } catch (error) {
+        if (attempt >= config.maxAttempts || !isTransientSendError(error)) throw error;
+        await sleep(delay);
+        delay *= config.backoffRate;
+      }
+    }
+  };
+}
+
 /**
  * The sent_log primitives + transport send, injected (no module singletons —
  * conventions.md). `recordSend` is insert-if-absent on the idempotency key:

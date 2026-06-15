@@ -69,7 +69,12 @@ import { makeRunTool, toToolSet } from './tools/registry.js';
 import { createBaileysTransport } from './transport/baileys.js';
 import { createSessionStore } from './transport/session-store.js';
 import { computeHumanSendDelay } from './transport/protocol.js';
-import { deliverReply, replySendId, selectSendClass } from './transport/send-class.js';
+import {
+  deliverReply,
+  makeResilientSend,
+  replySendId,
+  selectSendClass,
+} from './transport/send-class.js';
 
 async function main(): Promise<void> {
   const config = loadProductionConfig();
@@ -201,15 +206,25 @@ async function main(): Promise<void> {
   // same pattern as dev/main's post-turn reads.
   const replyDb = new Client({ connectionString: config.databaseUrl });
 
+  // PROX-SEND-001: a proactive at-least-once send can fire from the scheduled
+  // sweep before Baileys reconnects on restart; without this the bare send
+  // throws `transport not connected` and the turn workflow errors terminally,
+  // dropping the reminder. The wrapper waits out a transient disconnect with
+  // bounded backoff. Both the reply path (deliverReplyDeps.send) and the
+  // approval-prompt path (sendApprovalPrompts) flow through jitteringSend, so
+  // both inherit resilience.
+  const resilientSend = makeResilientSend((message) => transport.send(message));
+
   // Human send-jitter (T13/T43): no production message leaves at machine speed.
   // Only ever called from inside a send STEP (never a workflow body), so the
-  // random delay + timer are journaled, not re-run on replay (dbos.md).
+  // random delay + timer are journaled, not re-run on replay (dbos.md). Jitter
+  // once, then the resilient send retries the raw send without re-jittering.
   const jitteringSend = async (message: {
     conversationId: string;
     text: string;
   }): Promise<{ messageId: string }> => {
     await new Promise((resolve) => setTimeout(resolve, computeHumanSendDelay()));
-    return transport.send(message);
+    return resilientSend(message);
   };
 
   // --- Conversation lane: inbox steps, turn batches, drain, enqueue (T21) ---

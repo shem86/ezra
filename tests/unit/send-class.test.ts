@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   approvalSendId,
   deliverReply,
+  isTransientSendError,
+  makeResilientSend,
   replySendId,
   selectSendClass,
   type DeliverReplyDeps,
@@ -158,16 +160,135 @@ describe('deliverReply — at-least-once (send-then-log)', () => {
 });
 
 // PROX-SEND-001 (docs/known-issues.md) — found in the T45 on-host self-heal
-// drill. A proactive at-least-once send that meets a transiently-disconnected
-// transport on restart currently throws and errors the workflow terminally,
-// DROPPING the reminder. The at-least-once contract implies a transient send
-// failure must not drop the message. Marked test.fails until the fix lands
-// (step-level retry preferred); flips red on fix → remove .fails. If the fix
-// lands above deliverReply (the send step), relocate this repro accordingly.
-describe('deliverReply — at-least-once resilience (PROX-SEND-001, known bug)', () => {
-  it.fails('retries past a transient "transport not connected" instead of dropping', async () => {
+// drill. A proactive at-least-once send (reminder/nag/approval prompt) fires
+// from the scheduled sweep, which on restart can run before Baileys reconnects.
+// A bare send then throws `transport not connected` and errors the whole turn
+// workflow terminally — DBOS recovers PENDING, never ERROR — so the reminder is
+// silently DROPPED, the one failure the at-least-once class exists to prevent.
+// The fix is a resilient send wrapper (makeResilientSend) that waits out a
+// transient disconnect with bounded backoff; it lands ABOVE deliverReply (on
+// the transport send), so the original deliverReply-level repro is relocated
+// here per the known-issues note.
+
+describe('isTransientSendError', () => {
+  it('matches the transport-not-connected disconnect (the one transient case)', () => {
+    expect(isTransientSendError(new Error('transport not connected'))).toBe(true);
+  });
+
+  it('rejects a permanent/unroutable-destination error — never retry a poison send', () => {
+    // Ledger #15: a bad jid must propagate immediately, not spin forever.
+    expect(isTransientSendError(new Error('bad jid: not a valid destination'))).toBe(false);
+  });
+
+  it('rejects non-Error throws', () => {
+    expect(isTransientSendError('transport not connected')).toBe(false);
+    expect(isTransientSendError(undefined)).toBe(false);
+  });
+});
+
+describe('makeResilientSend (PROX-SEND-001)', () => {
+  const noSleep = async (): Promise<void> => {};
+
+  it('retries past a transient "transport not connected" and delivers exactly once', async () => {
+    const sent: string[] = [];
+    let attempts = 0;
+    const send = makeResilientSend(
+      async ({ text }) => {
+        attempts += 1;
+        if (attempts < 3) throw new Error('transport not connected');
+        sent.push(text);
+        return { messageId: `wa-${sent.length}` };
+      },
+      undefined,
+      noSleep,
+    );
+
+    const receipt = await send({ conversationId: 'c1', text: 'reminder: trash night' });
+
+    expect(receipt.messageId).toBe('wa-1');
+    expect(sent).toEqual(['reminder: trash night']); // delivered, not dropped, not duplicated
+    expect(attempts).toBe(3);
+  });
+
+  it('does not retry a permanent error — propagates on the first attempt (ledger #15)', async () => {
+    let attempts = 0;
+    const send = makeResilientSend(
+      async () => {
+        attempts += 1;
+        throw new Error('bad jid: not a valid destination');
+      },
+      undefined,
+      noSleep,
+    );
+
+    await expect(send({ conversationId: 'c1', text: 'x' })).rejects.toThrow('bad jid');
+    expect(attempts).toBe(1); // a poison message must never spin the lane
+  });
+
+  it('gives up after maxAttempts on a persistent transient failure (bounded, not infinite)', async () => {
+    let attempts = 0;
+    const send = makeResilientSend(
+      async () => {
+        attempts += 1;
+        throw new Error('transport not connected');
+      },
+      { maxAttempts: 4, baseDelayMs: 10, backoffRate: 2 },
+      noSleep,
+    );
+
+    await expect(send({ conversationId: 'c1', text: 'x' })).rejects.toThrow(
+      'transport not connected',
+    );
+    expect(attempts).toBe(4);
+  });
+
+  it('backs off with growing delays between retries, and never sleeps on first-attempt success', async () => {
+    const delays: number[] = [];
+    const sleep = async (ms: number): Promise<void> => {
+      delays.push(ms);
+    };
+
+    // First-attempt success: no sleep at all.
+    const okSend = makeResilientSend(async () => ({ messageId: 'wa-1' }), undefined, sleep);
+    await okSend({ conversationId: 'c1', text: 'hi' });
+    expect(delays).toEqual([]);
+
+    // Persistent transient: bounded, strictly-growing backoff before each retry.
+    let attempts = 0;
+    const flakySend = makeResilientSend(
+      async () => {
+        attempts += 1;
+        throw new Error('transport not connected');
+      },
+      { maxAttempts: 4, baseDelayMs: 500, backoffRate: 2 },
+      sleep,
+    );
+    await expect(flakySend({ conversationId: 'c1', text: 'x' })).rejects.toThrow();
+    // 3 sleeps for 4 attempts; each strictly larger than the last.
+    expect(delays).toEqual([500, 1000, 2000]);
+  });
+});
+
+// The end-to-end invariant the bug violated, at unit speed: a resilient send
+// composed with deliverReply at the at-least-once class, against a
+// throw-then-recover transport, delivers exactly once and writes exactly one
+// sent_log row — not dropped, not duplicated by the in-step retry. The DBOS
+// crash-durability of these orderings is gated separately by
+// tests/integration/send-class-recovery.test.ts.
+describe('resilient send + deliverReply at-least-once across a transient disconnect', () => {
+  it('delivers the reminder exactly once with exactly one log row', async () => {
     const seed: Recorded = { sent: [], logged: new Set() };
     let attempts = 0;
+    const resilientSend = makeResilientSend(
+      async ({ text }: { conversationId: string; text: string }) => {
+        attempts += 1;
+        if (attempts < 3) throw new Error('transport not connected');
+        seed.sent.push(text);
+        return { messageId: `wa-${seed.sent.length}` };
+      },
+      undefined,
+      async () => {},
+    );
     const deps: DeliverReplyDeps = {
       recordSend: async ({ idempotencyKey }) => {
         if (seed.logged.has(idempotencyKey)) return false;
@@ -175,20 +296,18 @@ describe('deliverReply — at-least-once resilience (PROX-SEND-001, known bug)',
         return true;
       },
       getSentEntry: async (key) => (seed.logged.has(key) ? { idempotencyKey: key } : null),
-      send: async ({ text }) => {
-        attempts += 1;
-        if (attempts < 2) throw new Error('transport not connected');
-        seed.sent.push(text);
-        return { messageId: `wa-${seed.sent.length}` };
-      },
+      send: resilientSend,
     };
+
     const result = await deliverReply(deps, {
       sendClass: 'at-least-once',
       idempotencyKey: 'send-reminder-1',
       conversationId: 'c1',
       text: 'reminder: trash night',
     });
+
     expect(result.sent).toBe(true);
     expect(seed.sent).toEqual(['reminder: trash night']); // delivered, not dropped
+    expect([...seed.logged]).toEqual(['send-reminder-1']); // exactly one log row
   });
 });
