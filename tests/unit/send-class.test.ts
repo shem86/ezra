@@ -254,10 +254,8 @@ describe('makeResilientSend (PROX-SEND-001)', () => {
     expect(delays).toEqual([]);
 
     // Persistent transient: bounded, strictly-growing backoff before each retry.
-    let attempts = 0;
     const flakySend = makeResilientSend(
       async () => {
-        attempts += 1;
         throw new Error('transport not connected');
       },
       { maxAttempts: 4, baseDelayMs: 500, backoffRate: 2 },
