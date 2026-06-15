@@ -37,6 +37,14 @@ RUN pnpm install --prod --frozen-lockfile && pnpm store prune
 COPY --from=build /app/dist ./dist
 COPY migrations ./migrations
 
+# Pre-create the Baileys session mount point owned by `node`. Load-bearing: the
+# wa-session named volume mounts here, and Docker copies THIS directory's
+# ownership into an empty volume on first use. Without it the fresh volume is
+# root-owned, and the non-root (uid 1000) read-only-rootfs process cannot
+# persist the session — Baileys then loops the pairing QR forever ("logging
+# in…" never completes) because creds never save.
+RUN mkdir -p /data/wa-session && chown -R node:node /data
+
 # Drop to the stock unprivileged `node` user; the rootfs is mounted read-only
 # at runtime, so the process can only write the volumes compose grants it.
 USER node
