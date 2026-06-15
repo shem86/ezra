@@ -71,6 +71,13 @@ table inet ${TABLE} {
     # DNS so name resolution itself is never blocked by the allowlist.
     ip daddr ${RESOLVER} udp dport 53 accept
     ip daddr ${RESOLVER} tcp dport 53 accept
+    # EC2 instance metadata (IMDSv2) so the backup sidecar can fetch the
+    # least-priv S3 role's temporary credentials (T45). Link-local, HTTP only;
+    # Docker's bridge masquerade SNATs it to the instance IP so IMDS replies,
+    # and the reply returns via the established rule above. Blast radius of a
+    # compromised container reaching this is exactly the backup-bucket role —
+    # acceptable; a dedicated creds path is a V2 option (see backup/README.md).
+    ip daddr 169.254.169.254 tcp dport 80 accept
     ip daddr @allowed4 accept
     log prefix "hh-egress-drop " level warn
     drop

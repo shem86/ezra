@@ -101,17 +101,23 @@ Two secrets must exist on the host before the sidecar can ship anything. As of
 the 2026-06-15 host apply **neither was present** — they are the remaining gate
 to live archiving:
 
-1. **AWS credentials for the host.** The EC2 instance has **no IAM instance
-   profile** (IMDS returns 404 for the role) and no keys in `.env`, so the
-   sidecar's aws-cli reports "Unable to locate credentials." Pick one (builder /
-   AWS decision — least-privilege to `hh-assistant-backups-001467466089` only):
-   - *Instance profile (preferred for EC2):* attach an IAM role with
-     `s3:PutObject/GetObject/ListBucket/DeleteObject` on the bucket; then verify
-     the sidecar container can reach IMDS (`169.254.169.254`) — the host
-     nftables egress ruleset may need a link-local allow, or run the WAL drain
-     leg able to read instance creds.
-   - *Scoped keys:* `BACKUP_AWS_ACCESS_KEY_ID` / `BACKUP_AWS_SECRET_ACCESS_KEY`
-     in `.env` for a user limited to the bucket (simplest; rotate on leak).
+1. **AWS credentials for the host — instance profile (chosen 2026-06-15).** A
+   least-priv IAM role `hh-assistant-backup-ec2` (inline policy: List on
+   `hh-assistant-backups-001467466089` + Get/Put/Delete/multipart on its
+   objects) is created and **associated** with the instance, IMDS hop limit is
+   2, and the host's IMDS exposes the role. **One step remains, needs host root:**
+   the hardened egress firewall drops the container→IMDS path, so the sidecar
+   still can't read the creds until the nftables rule that allows link-local
+   `169.254.169.254:80` (now in `infra/egress/nftables.sh`) is applied:
+   ```
+   sudo systemctl restart hh-egress.service     # re-applies the rendered ruleset
+   # verify the sidecar can now assume the role:
+   docker run --rm --network hh-assistant_egress --entrypoint aws \
+     hh-assistant-backup:prod sts get-caller-identity
+   ```
+   If creds still don't resolve, Docker's bridge masquerade isn't SNATing the
+   link-local dest — add an explicit `meta` masquerade for it, or fall back to
+   scoped `BACKUP_AWS_*` keys in `.env` (no firewall change, bucket-scoped).
 2. **Production age recipient.** `BACKUP_AGE_RECIPIENT` (public key) in `.env`;
    the matching **private identity stays OFFLINE** (password manager), needed
    only to restore. Generate it on a trusted machine, never on the host:
