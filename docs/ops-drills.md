@@ -95,3 +95,46 @@ Reminder `f901c99d…` set via chat for 06:56:00Z; ezra stopped 06:53:31→06:56
   confirmed the healthchecks.io dead-man alert arrived on Telegram and
   recovered on restart**. The external check is the only detector of a full
   process-down; in-process socket alerts can't fire when the process is dead.
+
+#### PROX-SEND-001 fix re-drill — 2026-06-15 (Claude under builder authorization)
+
+After the resilient-send fix landed, re-ran the exact drop scenario on the host
+against the rebuilt `hh-assistant:prod` image to confirm the reminder now
+delivers. Drilled twice (`docker stop` → insert an overdue reminder → `docker
+start`, racing the first sweep tick against the Baileys reconnect).
+
+**Root cause measured.** Three restarts in the window each reconnected Baileys
+in **~85s** (16:59 deploy 12s when not throttled; 17:11 and 17:14 both ~85s) —
+WhatsApp throttles rapid reconnections, and the proactive sweep fires within
+~10s of launch, so the send meets a not-yet-open transport for over a minute.
+This is the same condition that produced the original 06:56 drop.
+
+- **Drill 1 (reminder `d1613bd3`, first fix — 8-attempt/63s budget): still
+  dropped.** The retry log fired perfectly (attempts 1–7, 0.5→32s backoff) but
+  the 63s budget expired ~10s *before* the transport opened, so the send still
+  threw and the turn errored. **Finding: the bounded budget was too short.**
+- **Fix revised** → budget-based (`maxElapsedMs` 5min) with a `maxDelayMs` 5s
+  cap (a 32s sleep was overshooting the reconnect moment). Rebuilt + redeployed.
+- **Drill 2 (reminder `eaeffc6f`, revised fix): PASS.** Logs show the capped
+  backoff holding at 5000ms; transport opened (~20s this run — reconnect time is
+  variable) and the send succeeded. `eaeffc6f` ended `fired` **with an
+  `at-least-once` `sent_log` row** (`send-remind-eaeffc6f-…`) — delivered, not
+  dropped. Workflow tree: `drainConversation`/`processTurnBatch`/`handleTurn`
+  all SUCCESS.
+- **Bonus — inbox-driven self-heal observed.** The two earlier dropped reminders
+  (`f901c99d` from 06:56 and `d1613bd3` from drill 1) **also delivered** on the
+  drill-2 restart: their inbox items were never marked processed (their old
+  drains errored before `markProcessed`), so the fresh `drainConversation` for
+  `eaeffc6f` swept the whole backlog (children `-3`/`-6`/`-9`) and delivered all
+  three once the transport was up. So a dropped at-least-once proactive send
+  self-heals on the next enqueue into that conversation, *provided* the transport
+  is reachable — which the resilient send now guarantees by waiting it out. The
+  4 terminal-ERROR workflows from the old code are harmless artifacts; the
+  inbox-driven re-drain redid the work. (Strengthens the T44 reconciliation
+  story.)
+- **Note:** three reminder messages (2 drill + the stale "go to sleep") landed
+  in the household test group `120363426855017212@g.us` during the drill —
+  expected, clearly labeled.
+
+**Verdict: PROX-SEND-001 fix confirmed in situ.** The remaining T45 item is the
+folded T44 restore drill (backup sidecar `pg_hba` + WAL + real S3/calendar).

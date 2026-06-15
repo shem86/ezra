@@ -11,23 +11,38 @@ launch-blocking (gated T46). Found during the T45 on-host sweep-self-heal drill
 
 **Resolution.** A pure, injectable retry wrapper around the transport send —
 `makeResilientSend` (`src/transport/send-class.ts`) — retries **only** the
-transient `transport not connected` error with bounded exponential backoff
-(default ~63s over 8 attempts, sized to cover a seconds-long reconnect), then
-propagates. It is composed into the production send in `src/main.ts`
+transient `transport not connected` error with capped exponential backoff until
+a time **budget** is spent (default `maxElapsedMs` 5min, `maxDelayMs` 5s cap),
+then propagates. It is composed into the production send in `src/main.ts`
 (`resilientSend` → `jitteringSend`), so BOTH the reply path (`deliverReply`'s
 send) and the approval-prompt path (`sendApprovalPrompts`) inherit it. The
 wrapper runs inside the send DBOS step, so its backoff timers are journaled like
-the existing human jitter (no determinism concern). It deliberately does NOT
+the existing human jitter (elapsed is the sum of slept delays — no clock read —
+so the loop stays deterministic and unit-testable). It deliberately does NOT
 match permanent/unroutable errors (a bad jid — ledger #15), so a poison message
 still propagates immediately instead of spinning the lane. The repro in
 `tests/unit/send-class.test.ts` was relocated from a `deliverReply`-level
 `it.fails` to a real `makeResilientSend` suite plus a composition test proving
 exactly-once delivery + one `sent_log` row across a transient disconnect.
 
-**Residual (accepted).** A transport down *past* the backoff budget still errors
+**Why a budget, not a few attempts.** The first fix used a fixed 8-attempt/~63s
+budget. The on-host re-drill (2026-06-15, `docs/ops-drills.md`) showed the retry
+firing perfectly but the WhatsApp reconnect taking **~85s** — WhatsApp throttles
+rapid reconnections, so a restart-storm reconnect runs well over a minute. 63s
+expired ~10s before the transport opened and the reminder dropped again. The
+revised budget (5min, with a 5s delay cap so a long sleep can't overshoot the
+reconnect moment) covers the measured ~85s with ~3.5× margin. **Re-drill PASS:**
+the reminder delivered with an `at-least-once` `sent_log` row.
+
+**Bonus self-heal (observed in the drill).** Even a reminder dropped by the old
+code self-heals: its inbox item is never marked processed (the errored drain
+never reached `markProcessed`), so the next `drainConversation` on that
+conversation partition sweeps the backlog and re-delivers it — *provided* the
+transport is reachable, which the resilient send now guarantees by waiting it
+out. (Relevant to T44 reconciliation.)
+
+**Residual (accepted).** A transport down *past* the 5-min budget still errors
 the turn — the catastrophic case the T12 health monitor + dead-man ping surface.
-The on-host re-run of the T45 self-heal drill confirming the fix in situ is
-builder/`[H]` work.
 
 ---
 
