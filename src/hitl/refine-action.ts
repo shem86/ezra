@@ -14,8 +14,21 @@ import type { ToolRegistry } from '../tools/registry.js';
 export interface RefineActionInput {
   readonly conversationId: string;
   readonly actionId: string;
-  /** The FULL replacement args object (not a patch) — validated against the tool's schema. */
+  /**
+   * The changed fields only — merged over the stored args, then validated
+   * against the tool's schema. The classifier sees the proposal's raw args, so
+   * "make it 4pm" comes back as just `{ time: '16:00' }`; merging keeps every
+   * untouched required field (e.g. a calendar event's `owner`). A complete
+   * object still works (the merge is a no-op over it) — backward compatible.
+   */
   readonly updatedArgs: unknown;
+}
+
+/** A plain JSON object, never an array — the spreadable shape for a merge. */
+function asRecord(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }
 
 export type RefineOutcome =
@@ -58,8 +71,11 @@ export function makeRefineAction<TDeps>(
       };
     }
 
-    // Zod at the boundary: classifier output never reaches the row unchecked.
-    const args = def.schema.safeParse(input.updatedArgs);
+    // Merge the patch over the stored args (the classifier sends only what
+    // changed), then Zod at the boundary: the merged result never reaches the
+    // row unchecked.
+    const merged = { ...asRecord(call.data.args), ...asRecord(input.updatedArgs) };
+    const args = def.schema.safeParse(merged);
     if (!args.success) {
       return { kind: 'invalid', actionId: action.actionId, toolName: call.data.name };
     }

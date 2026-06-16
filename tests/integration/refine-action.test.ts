@@ -88,6 +88,30 @@ describe('refineAction (T36)', () => {
     });
   });
 
+  it('merges a partial patch over the stored args (classifier sends only the change)', async () => {
+    const { conversationId, actionId } = await park('partial');
+
+    // The classifier returns ONLY the field it changes; refine must keep the
+    // untouched required fields (here `title`) by merging over the stored args.
+    const outcome = await refine(db, {
+      conversationId,
+      actionId,
+      updatedArgs: { time: '16:00' },
+    });
+
+    expect(outcome).toMatchObject({
+      kind: 'refined',
+      actionId,
+      toolName: 'propose_event',
+    });
+    const row = await getPendingAction(db, actionId);
+    expect(row).toMatchObject({
+      status: 'pending',
+      promptMessageId: null,
+      toolCall: { id: 'tu-partial', name: 'propose_event', args: { title: 'dentist', time: '16:00' } },
+    });
+  });
+
   it('a refined action approves and executes with the NEW args', async () => {
     const { conversationId, actionId } = await park('roundtrip');
     await refine(db, { conversationId, actionId, updatedArgs: { title: 'dentist', time: '16:00' } });
@@ -102,13 +126,13 @@ describe('refineAction (T36)', () => {
     expect(effects.rows).toEqual([{ item: 'dentist@16:00' }]);
   });
 
-  it('updated args that fail the tool schema leave the action untouched — never auto-deny', async () => {
+  it('a merged result that fails the tool schema leaves the action untouched — never auto-deny', async () => {
     const { conversationId, actionId } = await park('badargs');
 
     const outcome = await refine(db, {
       conversationId,
       actionId,
-      updatedArgs: { title: 'dentist' }, // missing required `time`
+      updatedArgs: { time: 1600 }, // wrong type — invalid even after merge
     });
 
     expect(outcome).toMatchObject({ kind: 'invalid', actionId, toolName: 'propose_event' });

@@ -77,6 +77,13 @@ export interface PendingActionDigestEntry {
   readonly toolName: string;
   /** Human-readable proposal line (what was asked, not raw args). */
   readonly summary: string;
+  /**
+   * Raw args as JSON — what the relatedness classifier reads to build a refine
+   * patch (it needs the field names, which the human summary hides). Absent ⇒
+   * the classifier falls back to the human summary. Never rendered into the
+   * system-prompt digest, which shows `summary` only.
+   */
+  readonly argsJson?: string;
   readonly expiresAt?: Date;
 }
 

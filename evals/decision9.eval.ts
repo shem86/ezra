@@ -143,7 +143,8 @@ describe('decision-9 scenarios (M5 gate)', () => {
     expect(eventArgs(action).time).toBe('15:00');
     const originalStamp = action.promptMessageId;
 
-    // "actually תזיז את זה ל-16:00" → Haiku refine with COMPLETE updated args.
+    // "actually תזיז את זה ל-16:00" → Haiku refine with just the changed field,
+    // merged over the stored args (owner/date kept) by refineAction.
     const refineResult = await h.runTurn(conv, s.messages[1]!);
     expect(refineResult.status, 'a refine closes the turn like a park').toBe('parked');
 

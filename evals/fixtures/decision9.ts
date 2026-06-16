@@ -59,7 +59,9 @@ export const evalScenarios: readonly EvalScenario[] = [
     name: 'abandon-by-unrelated-message',
     conversationKey: 'abandon',
     messages: [
-      { senderId: WIFE, text: 'תקבע חוג שחייה לילדים ב-21 ביוני 2026 בשעה 10:00' },
+      // "on my calendar" so the owner is unambiguous — the model proposes
+      // instead of first asking whose calendar (which would not park).
+      { senderId: WIFE, text: 'תקבע ביומן שלי חוג שחייה לילדים ב-21 ביוני 2026 בשעה 10:00' },
       // Unrelated while one action pends: classifier must leave it alone —
       // normal turn, action untouched, never silently auto-denied.
       { senderId: HUSBAND, text: 'מה יש לנו ברשימת הקניות?' },
@@ -70,8 +72,9 @@ export const evalScenarios: readonly EvalScenario[] = [
     name: 'refine-the-pending-action',
     conversationKey: 'refine',
     messages: [
-      { senderId: HUSBAND, text: 'schedule a haircut for me on June 22 2026 at 15:00' },
-      // Code-switched refine — Haiku must return COMPLETE updated args.
+      { senderId: HUSBAND, text: 'schedule a haircut for me on my calendar on June 22 2026 at 15:00' },
+      // Code-switched refine — Haiku returns just the changed field; refine
+      // merges it over the stored args (owner/date kept).
       { senderId: WIFE, text: 'actually תזיז את זה ל-16:00' },
       // Quoted approve binds to the RE-STAMPED prompt the refine re-sent.
       { senderId: HUSBAND, text: 'כן', quotesPrompt: true },
@@ -93,7 +96,7 @@ export const evalScenarios: readonly EvalScenario[] = [
     name: 'execute-once-double-approval',
     conversationKey: 'double',
     messages: [
-      { senderId: HUSBAND, text: 'book a babysitter for June 24 2026 at 18:00 please' },
+      { senderId: HUSBAND, text: 'book a babysitter on my calendar for June 24 2026 at 18:00 please' },
       // Both spouses answer back-to-back; the guard must let exactly one win.
       { senderId: HUSBAND, text: 'yes', quotesPrompt: true },
       { senderId: WIFE, text: 'כן', quotesPrompt: true },

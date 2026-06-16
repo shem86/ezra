@@ -32,7 +32,7 @@ export const classifierSystemPrompt = `You classify one WhatsApp message from a 
 Output ONLY a JSON object, nothing else:
 - {"kind":"approve"} — the message plainly consents to the proposed action as it stands.
 - {"kind":"deny"} — the message plainly rejects or cancels the proposed action.
-- {"kind":"refine","updatedArgs":{...}} — the message asks to change the proposal. updatedArgs must be the COMPLETE arguments object: start from the current proposed arguments and apply only the requested change. Keep values in the language the proposal used unless the message changes them.
+- {"kind":"refine","updatedArgs":{...}} — the message asks to change the proposal. updatedArgs holds ONLY the fields that change, using the SAME field names shown in the proposed arguments (e.g. just {"time":"16:00"}); untouched fields are kept automatically. Keep values in the language the proposal used unless the message changes them.
 - {"kind":"unrelated"} — anything else.
 
 Be conservative: a hedged or conditional answer ("yes but only if the morning is free"), a message that might be answering something other than the proposal, or a change you cannot express in the arguments is "unrelated" — the assistant will handle it as normal conversation. A wrong "approve" performs a real action; a wrong "unrelated" merely asks again.`;

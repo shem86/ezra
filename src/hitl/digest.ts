@@ -48,6 +48,9 @@ export function toDigestEntries<TDeps>(
       summary: parsed.success
         ? summarizeToolCall(registry, parsed.data.name, parsed.data.args)
         : JSON.stringify(action.toolCall),
+      // Raw args for the classifier's refine patch (field names the human
+      // summary drops); the digest renderer ignores this field.
+      argsJson: parsed.success ? JSON.stringify(parsed.data.args) : JSON.stringify(action.toolCall),
       expiresAt: action.expiresAt,
     };
   });

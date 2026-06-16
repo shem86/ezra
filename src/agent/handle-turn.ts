@@ -207,7 +207,9 @@ export function makeHandleTurnWorkflow(
         if (target === undefined) continue; // bound-and-settled, or ambiguous
         const text = extractMessageText(item);
         if (text === null) continue; // only a person's utterance classifies
-        const action = { toolName: target.toolName, summary: target.summary };
+        // The classifier reads the raw args (field names) so a refine patch
+        // names the right fields; falls back to the human summary if absent.
+        const action = { toolName: target.toolName, summary: target.argsJson ?? target.summary };
         const verdict = await DBOS.runStep(
           () =>
             relatedness.classify({ senderId: item.senderId, message: text, action, recentContext }),

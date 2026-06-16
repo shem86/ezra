@@ -55,7 +55,7 @@ describe('renderClassifierPrompt', () => {
     message: 'תזיז את זה ל-4pm',
     action: {
       toolName: 'create_calendar_event',
-      summary: '"dentist" on 2026-06-19 at 15:00 (60 min, wife\'s calendar)',
+      summary: '{"title":"dentist","date":"2026-06-19","time":"15:00","durationMin":60,"owner":"wife"}',
     },
     recentContext: 'assistant: I proposed a dentist event for 15:00.',
   };
@@ -65,7 +65,7 @@ describe('renderClassifierPrompt', () => {
     expect(prompt).toContain('תזיז את זה ל-4pm');
     expect(prompt).toContain('wife');
     expect(prompt).toContain('create_calendar_event');
-    expect(prompt).toContain('"dentist" on 2026-06-19 at 15:00 (60 min, wife\'s calendar)');
+    expect(prompt).toContain('"title":"dentist"');
     expect(prompt).toContain('assistant: I proposed a dentist event for 15:00.');
   });
 
@@ -92,10 +92,10 @@ describe('relatedness fixture set (consumed by the T38 accuracy report)', () => 
     expect(ofClass.some((f) => hebrew.test(f.message) && english.test(f.message))).toBe(true);
   });
 
-  it('the fixture action is the digest shape the classifier sees at runtime', () => {
-    // The digest renders a calendar action through the tool's summarize hook
-    // (a human line), not JSON — so this mirrors what handleTurn injects.
+  it('the fixture action is the raw-args shape the classifier sees at runtime', () => {
+    // handleTurn feeds the classifier the raw args JSON (field names), not the
+    // human digest line — so the refine patch can name the right fields.
     expect(relatednessFixtureAction.toolName).toBe('create_calendar_event');
-    expect(relatednessFixtureAction.summary).toContain('dentist');
+    expect(() => JSON.parse(relatednessFixtureAction.summary)).not.toThrow();
   });
 });
