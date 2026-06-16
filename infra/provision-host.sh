@@ -71,7 +71,10 @@ systemctl restart ssh
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get -y upgrade
-apt-get -y install unattended-upgrades
+# unattended-upgrades: OS patching. curl+jq: the egress refresh timer
+# (infra/egress/nftables.sh) needs them to load AWS's published S3 CIDR ranges —
+# S3 can't be allowlisted by DNS (T45 finding).
+apt-get -y install unattended-upgrades curl jq
 
 # --- 5. identity --------------------------------------------------------------
 # TZ stays UTC deliberately: reminders anchor to the household timezone

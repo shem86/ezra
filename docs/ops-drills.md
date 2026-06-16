@@ -144,3 +144,57 @@ margin.
 
 **Verdict: PROX-SEND-001 fix confirmed in situ.** The remaining T45 item is the
 folded T44 restore drill (backup sidecar `pg_hba` + WAL + real S3/calendar).
+
+## Egress allowlist + backup-sidecar S3 reachability (2026-06-15, host `hh@98.91.67.226`, Claude under builder authorization)
+
+Wiring the backup sidecar to S3 via the chosen **IAM instance profile** surfaced
+two real on-host blockers the dev Mac could never have shown. Both fixed; the
+T45 egress drill now PASSES both directions on the real box.
+
+- **Host access recovered without a sudo password.** `hh` was created
+  `--disabled-password` but added to the `sudo` group (`provision-host.sh`); on
+  Ubuntu `%sudo` demands a password, so `hh`'s sudo can *never* authenticate —
+  there is no password to find. The cloud-default **`ubuntu`** account (key
+  copied by provisioning, never removed) still has passwordless sudo and is the
+  working root path. Codified the permanent fix: `infra/host/sudoers-hh-ops`, a
+  scoped `NOPASSWD` drop-in for `hh` covering exactly the `hh-egress` units
+  (root shell stays unreachable). SSM was tried as an alternative — the instance
+  isn't registered (agent not installed on this baseline); the managed policy
+  attached for the attempt was **detached** afterward, role back to S3-only.
+- **Blocker 1 — IMDS path blocked by the egress firewall.** The container→IMDS
+  request (`169.254.169.254:80`) was dropped by the default-deny policed chain,
+  so the sidecar's aws-cli couldn't read the instance role. Fix (already in
+  `nftables.sh`): allow link-local `169.254.169.254:80`. Verified on-host that
+  Docker's bridge masquerade (`-s 172.19.0.0/16 ! -o br-… MASQUERADE`) SNATs the
+  link-local dest to the instance IP, so IMDS replies — creds now resolve.
+- **Blocker 2 — S3 cannot be allowlisted by DNS.** Even with creds, `s3 ls`
+  timed out: the firewall resolves the S3 hostname to a handful of IPs at apply
+  time, but S3's address pool spans several large, per-query-randomized ranges,
+  so the IP the SDK actually dialed (`52.217.116.34`, `16.15.244.232`) was never
+  in the set and got dropped. **Fix: load AWS's *published* S3 CIDRs**
+  (`ip-ranges.json`, `service=S3 region=us-east-1` → 21 prefixes) into a
+  dedicated interval set `allowed_nets4`, refreshed on the timer, last-good
+  cached at `/var/lib/hh-egress/`. A separate set is load-bearing — DNS-resolved
+  single host IPs in `allowed4` fall *inside* the CIDRs and nft rejects
+  overlapping intervals within one set (`conflicting intervals`). Verified the
+  21 CIDRs cover every IP observed (bucket resolutions + both dropped dests).
+  Security note: this widens network reach to all of S3 us-east-1; bucket
+  isolation stays enforced one layer up by the instance role (our bucket only) +
+  bucket policy (TLS-only, public-access-blocked) — IAM is the boundary, the
+  firewall is depth.
+- **Drill result (both directions):**
+  - ✅ **allowed** — `aws s3 ls s3://hh-assistant-backups-001467466089/` from a
+    container on `hh-assistant_egress`, instance-role creds, **RC=0** (empty, no
+    backups uploaded yet — auth + network path both proven).
+  - ✅ **blocked** — `1.1.1.1:443` and `93.184.216.34:443` (non-listed) both
+    `TimeoutError` (dropped). Default-deny still holds; the change did not
+    fail-open.
+  - The first deploy *did* briefly fail-open (apply deletes the table then the
+    overlapping-interval load failed → no table); caught immediately and
+    re-applied with the two-set fix after an `nft -c -f -` dry-run check passed.
+    Lesson baked in: always dry-run-check before the destructive apply.
+
+**Verdict: T45 egress drill PASS on host.** Backup sidecar can now reach S3 with
+the instance role. Remaining to make WAL archiving live: `BACKUP_AGE_RECIPIENT`
+(builder, generated offline) → start the sidecar → host-loss restore drill
+(needs the offline private key).

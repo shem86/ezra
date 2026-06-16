@@ -1,0 +1,30 @@
+# infra/host/sudoers-hh-ops — scoped passwordless sudo for the `hh` operator.
+#
+# WHY THIS EXISTS: provision-host.sh creates `hh` with --disabled-password and
+# adds it to the `sudo` group. On Ubuntu `%sudo` demands a password, so a
+# password-less account can NEVER authenticate sudo — every privileged host op
+# (re-applying the egress firewall after a compose change, etc.) dead-ends.
+# Rather than set a password (another secret to custody) we grant `hh` NOPASSWD
+# for EXACTLY the commands our runbooks need and nothing else. Root shell stays
+# unreachable from `hh`; least privilege intact.
+#
+# INSTALL (as root — via the cloud `ubuntu` account or SSM):
+#   install -m 0440 -o root -g root sudoers-hh-ops /etc/sudoers.d/hh-ops
+#   visudo -cf /etc/sudoers.d/hh-ops      # MUST pass before you trust it
+# The 0440 perms + root ownership are mandatory; sudo ignores group/other-writable
+# drop-ins. visudo -c guards against a syntax error locking sudo out entirely.
+#
+# SCOPE: the egress allowlist service/timer (infra/egress/*) is the only host
+# unit our ops touch under sudo — the backup sidecar runs via the docker group,
+# no sudo. Extend this list deliberately; do not broaden to blanket systemctl.
+
+Cmnd_Alias HH_EGRESS = /usr/bin/systemctl restart hh-egress.service, \
+                       /usr/bin/systemctl start hh-egress.service, \
+                       /usr/bin/systemctl stop hh-egress.service, \
+                       /usr/bin/systemctl status hh-egress.service, \
+                       /usr/bin/systemctl restart hh-egress.timer, \
+                       /usr/bin/systemctl start hh-egress.timer, \
+                       /usr/bin/systemctl stop hh-egress.timer, \
+                       /usr/bin/systemctl status hh-egress.timer
+
+hh ALL=(root) NOPASSWD: HH_EGRESS

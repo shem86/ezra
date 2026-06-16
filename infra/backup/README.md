@@ -97,32 +97,25 @@ Verdict also recorded in `docs/spike-results.md`.
 
 ### Builder prerequisites (credential custody — not automatable)
 
-Two secrets must exist on the host before the sidecar can ship anything. As of
-the 2026-06-15 host apply **neither was present** — they are the remaining gate
-to live archiving:
-
-1. **AWS credentials for the host — instance profile (chosen 2026-06-15).** A
-   least-priv IAM role `hh-assistant-backup-ec2` (inline policy: List on
-   `hh-assistant-backups-001467466089` + Get/Put/Delete/multipart on its
-   objects) is created and **associated** with the instance, IMDS hop limit is
-   2, and the host's IMDS exposes the role. **One step remains, needs host root:**
-   the hardened egress firewall drops the container→IMDS path, so the sidecar
-   still can't read the creds until the nftables rule that allows link-local
-   `169.254.169.254:80` (now in `infra/egress/nftables.sh`) is applied:
-   ```
-   sudo systemctl restart hh-egress.service     # re-applies the rendered ruleset
-   # verify the sidecar can now assume the role:
-   docker run --rm --network hh-assistant_egress --entrypoint aws \
-     hh-assistant-backup:prod sts get-caller-identity
-   ```
-   If creds still don't resolve, Docker's bridge masquerade isn't SNATing the
-   link-local dest — add an explicit `meta` masquerade for it, or fall back to
-   scoped `BACKUP_AWS_*` keys in `.env` (no firewall change, bucket-scoped).
-2. **Production age recipient.** `BACKUP_AGE_RECIPIENT` (public key) in `.env`;
-   the matching **private identity stays OFFLINE** (password manager), needed
-   only to restore. Generate it on a trusted machine, never on the host:
+1. **AWS credentials for the host — instance profile. ✅ DONE + verified
+   (2026-06-15).** A least-priv IAM role `hh-assistant-backup-ec2` (inline
+   policy: List on `hh-assistant-backups-001467466089` + Get/Put/Delete/
+   multipart on its objects) is created, **associated** with the instance, IMDS
+   hop limit 2. The hardened egress firewall was blocking two paths the sidecar
+   needs — both fixed in `infra/egress/nftables.sh` and applied on the host:
+   the link-local IMDS allow (`169.254.169.254:80`) and the **S3-by-published-
+   CIDR** set (S3 can't be allowlisted by DNS — see `docs/ops-drills.md`).
+   Proven end-to-end: `aws s3 ls s3://hh-assistant-backups-001467466089/` from a
+   container on `hh-assistant_egress` returns RC=0 using the instance role, and
+   a non-listed host is still dropped. **No keys in `.env` — nothing to custody
+   here.**
+2. **Production age recipient. ⛔ STILL REQUIRED — the last gate.**
+   `BACKUP_AGE_RECIPIENT` (public key) in the host `.env`; the matching
+   **private identity stays OFFLINE** (password manager), needed only to
+   restore. Generate it on a trusted machine, never on the host:
    `age-keygen -o age.key` → put the `public key:` line in `.env`, keep
-   `age.key` offline. Without the recipient the sidecar cannot encrypt.
+   `age.key` offline. Without the recipient the sidecar cannot encrypt, so it
+   cannot ship.
 
 The `host replication` pg_hba line (below) and the sidecar image build are
 already done on the host (2026-06-15).
