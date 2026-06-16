@@ -118,9 +118,13 @@ The `host replication` pg_hba line (below) and the sidecar image build are
 already done on the host (2026-06-15). **Continuous WAL archiving + the daily
 base cron are live (see Bring-up).**
 
-The only remaining T45 item is the **host-loss restore drill**, which needs the
-offline private key (`BACKUP_AGE_IDENTITY`) to decrypt — builder-run, or a
-one-time authorized use of the key in `restore.sh into <scratch>`.
+**Host-loss restore drill: PASS (2026-06-15).** `restore.sh into hh-restore`
+run on a *different* machine (the dev Mac) against the real `pitr/` backups +
+the builder's offline key reconstructed the production DB — full schema, 6
+migrations, real rows (`reminders`=3, `sent_log`=5, latest write replayed
+through WAL), promoted out of recovery. The restored superuser is `hh`, proving
+it's genuinely the production cluster. Details in `docs/ops-drills.md`. **T45
+is complete.**
 
 ### Bring-up — **LIVE on the host 2026-06-15**
 

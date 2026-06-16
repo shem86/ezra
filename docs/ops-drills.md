@@ -230,6 +230,31 @@ PITR pipeline up on the host end-to-end.
   - **Daily base cron** installed in `hh`'s crontab (03:00 UTC, `--env-file` +
     `cd` baked in), logs to `backup-base.log`.
 
-**Verdict: continuous PITR archiving LIVE on the host.** The one remaining T45
-item is the host-loss restore drill — fundamentally builder-gated (needs the
-offline `BACKUP_AGE_IDENTITY` to decrypt production backups).
+**Verdict: continuous PITR archiving LIVE on the host.**
+
+## Host-loss restore drill — PASS (2026-06-15, Claude under builder authorization)
+
+The faithful "host is gone" test: restore the **real production backups** on a
+**different machine** (the dev Mac) using the builder's offline private key —
+the host never touches it. `restore.sh into hh-restore` pulled the latest base
+(`20260616T004452Z`) + both archived WAL segments from `pitr/`, decrypted with
+`BACKUP_AGE_IDENTITY` (its derived public key verified == the deployed
+recipient), staged into a scratch `pgvector:pg17` container, ran archive
+recovery, and promoted.
+
+- `pg_is_in_recovery() = f` — recovery finished, promoted.
+- Full production schema present (9 tables); `schema_migrations` at 6 (head).
+- Real household state survived base+WAL recovery: `reminders`=3,
+  `conversation_inbox`=5, `sent_log`=5, `conversation_context`=1 (unused tables
+  empty by nature). Latest `sent_log` write `2026-06-15 17:15:37Z` replayed
+  through — proof WAL recovery carried writes, not just the base snapshot.
+- Confirmed the restored cluster is genuinely production: its superuser is `hh`
+  (the DB was `initdb`'d with `POSTGRES_USER=hh`), so the stock `postgres` role
+  doesn't exist — a generic restore would have it.
+- Teardown: scratch container removed (it held decrypted plaintext); the
+  staging mktemp is auto-removed by restore.sh. The private key stayed on the
+  builder's machine, never on the host (and is `.gitignore`d).
+
+**Verdict: T45(d) PASS — backups are restorable end-to-end. T45 complete:**
+hardened process deployed, egress allowlist enforced both directions, continuous
+PITR archiving live, and a proven host-loss restore.
