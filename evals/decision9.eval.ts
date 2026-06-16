@@ -207,6 +207,11 @@ describe('decision-9 scenarios (M5 gate)', () => {
     const s = scenario('sender-attribution');
     const conv = h.conversationIdFor(s);
 
+    // The production prompt (which the harness runs) maps the sender id to a
+    // member and instructs the model to attribute by the MEMBER LABEL, never
+    // the raw id (ledger #16) — so 'wife@wa' is stored as 'wife'.
+    const memberLabel = (senderId: string): string => senderId.replace(/@wa$/, '');
+
     const listTurn = await h.runTurn(conv, s.messages[0]!);
     expect(listTurn.status).toBe('completed');
     const itemRow = await h.db.query(
@@ -215,7 +220,9 @@ describe('decision-9 scenarios (M5 gate)', () => {
       [startedAt],
     );
     expect(itemRow.rows, 'the list item must exist').toHaveLength(1);
-    expect((itemRow.rows[0] as { added_by: string }).added_by).toBe(s.messages[0]!.senderId);
+    expect((itemRow.rows[0] as { added_by: string }).added_by).toBe(
+      memberLabel(s.messages[0]!.senderId),
+    );
 
     const reminderTurn = await h.runTurn(conv, s.messages[1]!);
     expect(reminderTurn.status).toBe('completed');
@@ -225,7 +232,7 @@ describe('decision-9 scenarios (M5 gate)', () => {
     );
     expect(reminderRow.rows, 'the reminder must exist').toHaveLength(1);
     const reminder = reminderRow.rows[0] as { created_by: string; due_at: Date };
-    expect(reminder.created_by).toBe(s.messages[1]!.senderId);
+    expect(reminder.created_by).toBe(memberLabel(s.messages[1]!.senderId));
     // Eastern wall time, June (EDT, UTC-4): 8am → 12:00Z — tz anchoring at
     // eval level, through the model's own create_reminder args.
     expect(reminder.due_at.toISOString()).toBe('2026-06-25T12:00:00.000Z');

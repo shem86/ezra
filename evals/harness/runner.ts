@@ -18,7 +18,10 @@ import { loadConfig } from '../../src/ops/config.ts';
 import { registerTransactionalStep } from '../../src/orchestration/steps.ts';
 import { makeHandleTurnWorkflow, type TurnResult } from '../../src/agent/handle-turn.ts';
 import { makeCallModel } from '../../src/agent/call-model.ts';
-import { stableSystemPrompt, type PendingActionDigestEntry } from '../../src/agent/prompts.ts';
+import {
+  makeProductionSystemPrompt,
+  type PendingActionDigestEntry,
+} from '../../src/agent/prompts.ts';
 import { makeClassifyRelatedness } from '../../src/agent/relatedness.ts';
 import {
   parseTurnMessages,
@@ -83,8 +86,14 @@ export async function composeEvalHarness(): Promise<EvalHarness> {
   const embedder = makeVoyageEmbedder({ apiKey: config.voyageApiKey });
   const toolDeps: CalendarToolDeps = { embedder, calendarClient: calendar };
   const anthropic = createAnthropic({ apiKey: config.anthropicApiKey });
+  // Run the PRODUCTION system prompt (not the dev one) so the eval gates the
+  // real launch behavior — including attribution by member label (ledger #16).
+  // The scenario sender ids map to the two members.
+  const systemPrompt = makeProductionSystemPrompt({
+    memberJids: { husband: ['husband@wa'], wife: ['wife@wa'] },
+  });
   const callModel = makeCallModel({
-    systemPrompt: stableSystemPrompt,
+    systemPrompt,
     model: anthropic(config.reasoningModelId),
     tools: toToolSet(registry),
   });
