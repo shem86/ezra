@@ -9,3 +9,4 @@ auth_state/
 baileys-session/
 .wa-session/
 *.creds.json
+age.key

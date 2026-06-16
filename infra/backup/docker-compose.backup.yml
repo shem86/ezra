@@ -4,8 +4,10 @@
 #                  -f infra/backup/docker-compose.backup.yml up -d
 #
 # The sidecar streams WAL continuously (the RPO-critical path). Base backups
-# run on a host cron, e.g. daily:
-#   0 3 * * *  docker compose -f infra/docker-compose.prod.yml \
+# run on a host cron, e.g. daily (the `cd` is load-bearing: compose interpolates
+# ${POSTGRES_PASSWORD} from the project .env, which it only finds in the CWD):
+#   0 3 * * *  cd /home/hh/hh-assistant && docker compose \
+#              -f infra/docker-compose.prod.yml \
 #              -f infra/backup/docker-compose.backup.yml run --rm backup backup.sh base
 #
 # PREREQUISITE (production pg_hba): the prod `postgres` must permit a
@@ -16,21 +18,34 @@
 
 services:
   backup:
+    # Relative paths here resolve against the PROJECT directory — `infra/`, the
+    # dir of the FIRST `-f` file (docker-compose.prod.yml) in the documented
+    # combined invocation — NOT this overlay's own dir. So these are authored
+    # relative to infra/, exactly like the prod compose (`..`, `../.env`). The
+    # earlier standalone image build (overlay alone ⇒ project dir = infra/backup/)
+    # masked this; combined, `../..`/`../../.env` overshot to /home/hh.
     build:
-      context: ../..
+      context: ..
       dockerfile: infra/backup/Dockerfile
     image: hh-assistant-backup:prod
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
-    # BACKUP_S3_BUCKET, BACKUP_AGE_RECIPIENT, PGPASSWORD, AWS creds, … from .env.
+    # BACKUP_S3_BUCKET, BACKUP_AGE_RECIPIENT (public recipient), AWS creds via
+    # the EC2 instance role (IMDS) … from .env / the instance profile.
     env_file:
-      - ../../.env
+      - ../.env
     environment:
       PGHOST: postgres
       PGUSER: hh
       PGDATABASE: hh_assistant_prod
+      # The replication connection auths as hh (pg_hba scram). Interpolate the
+      # one existing secret rather than duplicate it: compose reads
+      # ${POSTGRES_PASSWORD} from the project .env at up/run time — so any cron
+      # `run` must execute from the repo dir (or pass --env-file) for this to
+      # resolve. Keeps the password in exactly one place (POSTGRES_PASSWORD).
+      PGPASSWORD: ${POSTGRES_PASSWORD:?compose must load the project .env to interpolate PGPASSWORD}
       BACKUP_WAL_SPOOL: /var/lib/backup/wal-spool
     # Unshipped WAL must survive a sidecar restart, so the spool is a volume.
     volumes:

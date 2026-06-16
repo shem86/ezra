@@ -109,31 +109,50 @@ Verdict also recorded in `docs/spike-results.md`.
    container on `hh-assistant_egress` returns RC=0 using the instance role, and
    a non-listed host is still dropped. **No keys in `.env` — nothing to custody
    here.**
-2. **Production age recipient. ⛔ STILL REQUIRED — the last gate.**
-   `BACKUP_AGE_RECIPIENT` (public key) in the host `.env`; the matching
-   **private identity stays OFFLINE** (password manager), needed only to
-   restore. Generate it on a trusted machine, never on the host:
-   `age-keygen -o age.key` → put the `public key:` line in `.env`, keep
-   `age.key` offline. Without the recipient the sidecar cannot encrypt, so it
-   cannot ship.
+2. **Production age recipient. ✅ DONE (2026-06-15).** `BACKUP_AGE_RECIPIENT`
+   (public key, builder-generated offline) is set in the host `.env`; the
+   matching **private identity stays OFFLINE** (builder's password manager),
+   needed only to restore. The sidecar now encrypts + ships.
 
 The `host replication` pg_hba line (below) and the sidecar image build are
-already done on the host (2026-06-15).
+already done on the host (2026-06-15). **Continuous WAL archiving + the daily
+base cron are live (see Bring-up).**
 
-### Bring-up
+The only remaining T45 item is the **host-loss restore drill**, which needs the
+offline private key (`BACKUP_AGE_IDENTITY`) to decrypt — builder-run, or a
+one-time authorized use of the key in `restore.sh into <scratch>`.
 
-On the host after the prod stack is up:
+### Bring-up — **LIVE on the host 2026-06-15**
+
+`--env-file .env` and running from the repo root are **load-bearing**, not
+optional: with `-f infra/...` the compose project directory is `infra/`, so all
+relative paths (including the overlay's) and `${POSTGRES_PASSWORD}`
+interpolation only resolve against the project `.env` when you point compose at
+it. Run all of these from `/home/hh/hh-assistant`:
 
 ```
 # 1. enable replication for the sidecar (idempotent; re-run after a rebuild)
 infra/backup/enable-replication.sh
-# 2. start the sidecar (continuous WAL)
-docker compose -f infra/docker-compose.prod.yml \
-               -f infra/backup/docker-compose.backup.yml up -d
-# 3. base backups on a host cron, e.g. daily 03:00
-0 3 * * *  docker compose -f infra/docker-compose.prod.yml \
-           -f infra/backup/docker-compose.backup.yml run --rm backup backup.sh base
+# 2. start the sidecar (continuous WAL streaming + ship)
+docker compose --env-file .env -f infra/docker-compose.prod.yml \
+               -f infra/backup/docker-compose.backup.yml up -d backup
+# 3. base backups on hh's crontab — daily 03:00 UTC (installed on the host)
+0 3 * * *  cd /home/hh/hh-assistant && docker compose --env-file .env \
+           -f infra/docker-compose.prod.yml \
+           -f infra/backup/docker-compose.backup.yml \
+           run --rm backup backup.sh base >> backup-base.log 2>&1
 ```
+
+**Verified live (2026-06-15):** slot `hh_backup` created, `pg_receivewal`
+streaming (segments `…0003.age`/`…0004.age`, 16 MiB encrypted, shipped
+automatically), and a base backup landed `base.tar.gz` (4.4 MB) + `pg_wal.tar.gz`
++ `MANIFEST` under `pitr/base/<ts>/`, all age-encrypted. The sidecar's
+credentials come from the **EC2 instance role via IMDS** (no keys in `.env`);
+`PGPASSWORD` is `${POSTGRES_PASSWORD}` interpolated from `.env` (one secret, not
+duplicated). Two latent-bug fixes were needed first: the egress firewall had to
+allow IMDS + S3-by-published-CIDR (`docs/ops-drills.md`), and the overlay's
+relative paths (`context`/`env_file`) had to be authored against the project dir
+`infra/` (they overshot to `/home/hh` when combined with the prod compose).
 
 **The replication `pg_hba` prerequisite (`enable-replication.sh`):** the stock
 pgvector image accepts normal SQL connections from the internal network

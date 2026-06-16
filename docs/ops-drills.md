@@ -198,3 +198,38 @@ T45 egress drill now PASSES both directions on the real box.
 the instance role. Remaining to make WAL archiving live: `BACKUP_AGE_RECIPIENT`
 (builder, generated offline) → start the sidecar → host-loss restore drill
 (needs the offline private key).
+
+## Backup sidecar bring-up — continuous WAL archiving LIVE (2026-06-15, host, Claude under builder authorization)
+
+Builder generated the age keypair offline and provided the public recipient;
+private identity stays in their password manager (restore-only). Brought the
+PITR pipeline up on the host end-to-end.
+
+- **Config:** `BACKUP_AGE_RECIPIENT` (public) added to host `.env`; `PGPASSWORD`
+  wired as `${POSTGRES_PASSWORD}` interpolation in the compose overlay (one
+  secret, not duplicated — builder pick). AWS creds via the EC2 instance role
+  (IMDS), nothing in `.env`.
+- **Two latent compose bugs fixed first** (surfaced on the first *combined* run —
+  the drill never used the overlay, and the earlier image build used it
+  standalone, both of which masked these):
+  - The overlay's relative paths resolve against the **project directory**
+    (`infra/`, the first `-f` file's dir), not the overlay's own dir. `context:
+    ../..` and `env_file: ../../.env` overshot to `/home/hh` (build context) and
+    `/home/hh/.env` (a missing file → hard error). Fixed to `..` / `../.env`,
+    matching how the prod compose authors its paths.
+  - `--env-file .env` from the repo root is load-bearing for
+    `${POSTGRES_PASSWORD}` interpolation (same reason `runtime.md` flags it for
+    the app stack).
+- **Live result:**
+  - Sidecar `hh-assistant-backup-1` running, 0 restarts; slot `hh_backup`
+    created; `pg_receivewal` streaming.
+  - **Continuous WAL shipped automatically:** `000000010000000000000003.age`,
+    `…0004.age` — 16 MiB each, age-encrypted, in `pitr/wal/`.
+  - **Base backup** (`run --rm backup backup.sh base`): `base.tar.gz` (4.4 MB),
+    `pg_wal.tar.gz`, `MANIFEST` under `pitr/base/<ts>/`, all encrypted.
+  - **Daily base cron** installed in `hh`'s crontab (03:00 UTC, `--env-file` +
+    `cd` baked in), logs to `backup-base.log`.
+
+**Verdict: continuous PITR archiving LIVE on the host.** The one remaining T45
+item is the host-loss restore drill — fundamentally builder-gated (needs the
+offline `BACKUP_AGE_IDENTITY` to decrypt production backups).
