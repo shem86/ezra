@@ -14,10 +14,15 @@ export interface RelatednessFixture {
   readonly note?: string;
 }
 
-/** The one pending action every fixture is classified against (digest shape). */
+/**
+ * The one pending action every fixture is classified against (digest shape).
+ * The summary is the human line the calendar tool's `summarize` hook renders
+ * into the digest — what handleTurn actually shows the classifier at runtime
+ * (T46: the real create_calendar_event shape, not the old eval stand-in).
+ */
 export const relatednessFixtureAction = {
-  toolName: 'propose_event',
-  summary: '{"title":"dentist","time":"15:00"}',
+  toolName: 'create_calendar_event',
+  summary: '"dentist" on 2026-06-19 at 15:00 (60 min, wife\'s calendar)',
 } as const;
 
 export const relatednessFixtures: readonly RelatednessFixture[] = [

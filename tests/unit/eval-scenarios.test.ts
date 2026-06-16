@@ -44,14 +44,14 @@ describe('decision-9 scenario fixtures', () => {
     expect(texts.some((t) => hebrew.test(t) && english.test(t))).toBe(true);
   });
 
-  it('every approval scenario exercises propose_event; sender-attribution exercises the T27 args', () => {
+  it('every approval scenario exercises create_calendar_event; sender-attribution exercises the T27 args', () => {
     for (const scenario of evalScenarios) {
       if (scenario.name === 'sender-attribution') {
         expect(scenario.covers).toEqual(
           expect.arrayContaining(['add_list_item', 'create_reminder']),
         );
       } else {
-        expect(scenario.covers).toContain('propose_event');
+        expect(scenario.covers).toContain('create_calendar_event');
       }
     }
   });

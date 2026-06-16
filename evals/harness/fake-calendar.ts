@@ -1,47 +1,90 @@
-// T38: the in-memory calendar behind the eval-only propose_event tool. The
-// decision-9 scenarios need a confirm-before effect they can count and a
-// revalidation check they can flip (stale-action-at-execution); the real
-// calendar client is M5.5's, and reaching for the DB here would be a schema
-// change for a test double. Single eval process — in-memory is exact enough.
+// T46: the in-memory CalendarClient behind the eval registry's REAL
+// create_calendar_event tool (T40 swapped the eval-only propose_event for the
+// production tool shape). evals never touch Google — this fake implements the
+// same CalendarClient interface makeGoogleCalendarClient does, so the eval
+// drives the production tool's execute/revalidate unchanged. The decision-9
+// scenarios need a confirm-before effect they can count (entries) and a
+// revalidation check they can flip (setBusy — the stale scenario). Single
+// eval process — in-memory is exact enough; reaching for the DB would be a
+// schema change for a test double.
 
-export interface CalendarEvent {
-  readonly externalId: string;
+import type {
+  CalendarClient,
+  CalendarEventInput,
+  CalendarEventSummary,
+  CalendarOwner,
+  CalendarWindow,
+  CreateEventResult,
+} from '../../src/tools/calendar-client.ts';
+
+export interface FakeCalendarEvent {
+  readonly eventId: string;
+  readonly owner: CalendarOwner;
   readonly title: string;
-  readonly date: string;
-  readonly time: string;
+  readonly start: Date;
+  readonly end: Date;
 }
 
-export interface FakeCalendar {
+export interface FakeCalendarClient extends CalendarClient {
   /** Every event ever created, in creation order — the effect count. */
-  readonly entries: readonly CalendarEvent[];
-  isFree(date: string, time: string): boolean;
-  /** Idempotent on externalId (decision 10): false ⇒ already existed, no-op. */
-  create(event: CalendarEvent): boolean;
-  /** Occupy a slot externally — the stale scenario's manufactured conflict. */
-  setBusy(date: string, time: string): void;
+  readonly entries: readonly FakeCalendarEvent[];
+  /**
+   * Occupy a window on an owner's calendar — the stale scenario's manufactured
+   * conflict. A busy marker is not a created event (it never enters `entries`),
+   * so it blocks revalidation without polluting the effect count.
+   */
+  setBusy(owner: CalendarOwner, window: CalendarWindow): void;
 }
 
-function slotKey(date: string, time: string): string {
-  return `${date} ${time}`;
+/** Half-open overlap: [start, end) intervals intersect. */
+function intersects(a: CalendarWindow, b: CalendarWindow): boolean {
+  return a.start < b.end && b.start < a.end;
 }
 
-export function makeFakeCalendar(): FakeCalendar {
-  const entries: CalendarEvent[] = [];
-  const busy = new Set<string>();
+export function makeFakeCalendar(): FakeCalendarClient {
+  const entries: FakeCalendarEvent[] = [];
+  const busy: { owner: CalendarOwner; window: CalendarWindow }[] = [];
 
   return {
     entries,
-    isFree(date, time) {
-      if (busy.has(slotKey(date, time))) return false;
-      return !entries.some((e) => e.date === date && e.time === time);
+
+    async createEvent(input: CalendarEventInput): Promise<CreateEventResult> {
+      // Idempotent on eventId (decision 10): a replayed create finds its own
+      // deterministic id and reads as success — the recovery no-op.
+      if (entries.some((e) => e.eventId === input.eventId)) return 'already-exists';
+      entries.push({
+        eventId: input.eventId,
+        owner: input.owner,
+        title: input.title,
+        start: input.start,
+        end: input.end,
+      });
+      return 'created';
     },
-    create(event) {
-      if (entries.some((e) => e.externalId === event.externalId)) return false;
-      entries.push(event);
-      return true;
+
+    async listEvents(owner: CalendarOwner, window: CalendarWindow): Promise<CalendarEventSummary[]> {
+      return entries
+        .filter((e) => e.owner === owner && intersects(e, window))
+        .map((e) => ({
+          eventId: e.eventId,
+          title: e.title,
+          start: e.start,
+          end: e.end,
+          allDay: false,
+        }));
     },
-    setBusy(date, time) {
-      busy.add(slotKey(date, time));
+
+    async isFree(owner, window, options): Promise<boolean> {
+      const ignore = options?.ignoreEventId;
+      const conflictingEvent = entries.some(
+        (e) => e.owner === owner && e.eventId !== ignore && intersects(e, window),
+      );
+      const conflictingBusy = busy.some((b) => b.owner === owner && intersects(b.window, window));
+      return !conflictingEvent && !conflictingBusy;
+    },
+
+    setBusy(owner, window) {
+      busy.push({ owner, window });
     },
   };
 }

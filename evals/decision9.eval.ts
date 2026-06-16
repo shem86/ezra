@@ -8,7 +8,9 @@
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { evalScenarios, type EvalScenario } from './fixtures/decision9.ts';
-import { proposeEventTool } from './harness/propose-event.ts';
+import { createCalendarEventTool } from '../src/tools/calendar.ts';
+import { deriveCalendarEventId, type CalendarWindow } from '../src/tools/calendar-client.ts';
+import { wallTimeToInstant } from '../src/orchestration/tz.ts';
 import { composeEvalHarness, type EvalActionRow, type EvalHarness } from './harness/runner.ts';
 import type { TurnMessage } from '../src/agent/context.ts';
 
@@ -29,12 +31,29 @@ function scenario(name: string): EvalScenario {
   return found;
 }
 
-function eventArgs(action: EvalActionRow): { title: string; date: string; time: string } {
-  return proposeEventTool.schema.parse(action.toolCall.args);
+interface EventArgs {
+  readonly title: string;
+  readonly date: string;
+  readonly time: string;
+  readonly durationMin: number;
+  readonly owner: 'husband' | 'wife';
+}
+
+function eventArgs(action: EvalActionRow): EventArgs {
+  return createCalendarEventTool.schema.parse(action.toolCall.args);
+}
+
+/** The window the tool derives from the args — for the manufactured conflict. */
+function windowFor(args: EventArgs): CalendarWindow {
+  const [year, month, day] = args.date.split('-').map(Number);
+  const [hour, minute] = args.time.split(':').map(Number);
+  const start = wallTimeToInstant({ year: year!, month: month!, day: day!, hour: hour!, minute: minute! });
+  return { start, end: new Date(start.getTime() + args.durationMin * 60_000) };
 }
 
 function entriesFor(action: EvalActionRow): number {
-  return h.calendar.entries.filter((e) => e.externalId === `evt-${action.actionId}`).length;
+  const eventId = deriveCalendarEventId(action.actionId);
+  return h.calendar.entries.filter((e) => e.eventId === eventId).length;
 }
 
 function hitlUpdates(transcript: TurnMessage[], actionId: string): string[] {
@@ -57,7 +76,7 @@ async function park(s: EvalScenario): Promise<{ conv: string; action: EvalAction
   expect(actions).toHaveLength(1);
   const action = actions[0]!;
   expect(action.status).toBe('pending');
-  expect(action.toolCall.name).toBe('propose_event');
+  expect(action.toolCall.name).toBe('create_calendar_event');
   // Nothing executes at propose time, and the prompt got stamped.
   expect(entriesFor(action)).toBe(0);
   expect(action.promptMessageId).not.toBeNull();
@@ -144,8 +163,10 @@ describe('decision-9 scenarios (M5 gate)', () => {
     const [after] = await h.actionsFor(conv);
     expect(after!.status).toBe('executed');
     expect(entriesFor(after!)).toBe(1);
-    const entry = h.calendar.entries.find((e) => e.externalId === `evt-${after!.actionId}`);
-    expect(entry?.time).toBe('16:00');
+    const entry = h.calendar.entries.find((e) => e.eventId === deriveCalendarEventId(after!.actionId));
+    // June 22 2026 16:00 Eastern (EDT, UTC-4) → 20:00Z: the refined time
+    // anchored correctly through the model's own args.
+    expect(entry?.start.toISOString()).toBe('2026-06-22T20:00:00.000Z');
   }, 300_000);
 
   it('stale-action-at-execution: approval of a conflicted slot revalidates, refuses, and tells the user', async () => {
@@ -154,7 +175,7 @@ describe('decision-9 scenarios (M5 gate)', () => {
 
     // Manufactured conflict: the slot fills between propose and approve.
     const args = eventArgs(action);
-    h.calendar.setBusy(args.date, args.time);
+    h.calendar.setBusy(args.owner, windowFor(args));
 
     const result = await h.runTurn(conv, s.messages[1]!);
     expect(result.status).toBe('completed');

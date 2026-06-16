@@ -53,7 +53,10 @@ describe('renderClassifierPrompt', () => {
   const input = {
     senderId: 'wife',
     message: 'תזיז את זה ל-4pm',
-    action: { toolName: 'propose_event', summary: '{"title":"dentist","time":"15:00"}' },
+    action: {
+      toolName: 'create_calendar_event',
+      summary: '"dentist" on 2026-06-19 at 15:00 (60 min, wife\'s calendar)',
+    },
     recentContext: 'assistant: I proposed a dentist event for 15:00.',
   };
 
@@ -61,8 +64,8 @@ describe('renderClassifierPrompt', () => {
     const prompt = renderClassifierPrompt(input);
     expect(prompt).toContain('תזיז את זה ל-4pm');
     expect(prompt).toContain('wife');
-    expect(prompt).toContain('propose_event');
-    expect(prompt).toContain('{"title":"dentist","time":"15:00"}');
+    expect(prompt).toContain('create_calendar_event');
+    expect(prompt).toContain('"dentist" on 2026-06-19 at 15:00 (60 min, wife\'s calendar)');
     expect(prompt).toContain('assistant: I proposed a dentist event for 15:00.');
   });
 
@@ -90,7 +93,9 @@ describe('relatedness fixture set (consumed by the T38 accuracy report)', () => 
   });
 
   it('the fixture action is the digest shape the classifier sees at runtime', () => {
-    expect(relatednessFixtureAction.toolName).toBeTruthy();
-    expect(() => JSON.parse(relatednessFixtureAction.summary)).not.toThrow();
+    // The digest renders a calendar action through the tool's summarize hook
+    // (a human line), not JSON — so this mirrors what handleTurn injects.
+    expect(relatednessFixtureAction.toolName).toBe('create_calendar_event');
+    expect(relatednessFixtureAction.summary).toContain('dentist');
   });
 });

@@ -40,7 +40,7 @@ export const evalScenarios: readonly EvalScenario[] = [
       { senderId: WIFE, text: 'תקבע תור לרופא שיניים ב-19 ביוני 2026 בשעה 15:00' },
       { senderId: HUSBAND, text: 'yes', quotesPrompt: true },
     ],
-    covers: ['propose_event'],
+    covers: ['create_calendar_event'],
   },
   {
     name: 'deny',
@@ -53,7 +53,7 @@ export const evalScenarios: readonly EvalScenario[] = [
       // Non-quoted with exactly one pending — the T36 classified path.
       { senderId: WIFE, text: 'לא, אל תקבע את זה' },
     ],
-    covers: ['propose_event'],
+    covers: ['create_calendar_event'],
   },
   {
     name: 'abandon-by-unrelated-message',
@@ -64,7 +64,7 @@ export const evalScenarios: readonly EvalScenario[] = [
       // normal turn, action untouched, never silently auto-denied.
       { senderId: HUSBAND, text: 'מה יש לנו ברשימת הקניות?' },
     ],
-    covers: ['propose_event'],
+    covers: ['create_calendar_event'],
   },
   {
     name: 'refine-the-pending-action',
@@ -76,7 +76,7 @@ export const evalScenarios: readonly EvalScenario[] = [
       // Quoted approve binds to the RE-STAMPED prompt the refine re-sent.
       { senderId: HUSBAND, text: 'כן', quotesPrompt: true },
     ],
-    covers: ['propose_event'],
+    covers: ['create_calendar_event'],
   },
   {
     name: 'stale-action-at-execution',
@@ -87,7 +87,7 @@ export const evalScenarios: readonly EvalScenario[] = [
       // conflict) — approval then fails revalidation at execute time.
       { senderId: HUSBAND, text: 'ok', quotesPrompt: true },
     ],
-    covers: ['propose_event'],
+    covers: ['create_calendar_event'],
   },
   {
     name: 'execute-once-double-approval',
@@ -98,7 +98,7 @@ export const evalScenarios: readonly EvalScenario[] = [
       { senderId: HUSBAND, text: 'yes', quotesPrompt: true },
       { senderId: WIFE, text: 'כן', quotesPrompt: true },
     ],
-    covers: ['propose_event'],
+    covers: ['create_calendar_event'],
   },
   {
     name: 'sender-attribution',

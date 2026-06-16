@@ -1,7 +1,10 @@
-// T38: the eval composition — dev/main.ts's wiring with the eval registry
-// (household surface + propose_event) and a scenario driver instead of the
-// scripted day. REAL Sonnet turns, REAL Haiku classification, real Postgres,
-// stub transport. Costs money — on-demand only, never CI (testing.md).
+// T38/T46: the eval composition — dev/main.ts's wiring with the REAL v1 tool
+// registry (household surface + the production calendar tools) and a scenario
+// driver instead of the scripted day. T46 swapped the eval-only propose_event
+// for the real create_calendar_event shape; the only stand-in left is the
+// in-memory fake CalendarClient (evals never touch Google). REAL Sonnet turns,
+// REAL Haiku classification, real Postgres, stub transport. Costs money —
+// on-demand only, never CI (testing.md).
 //
 // Module-level state is banned in src/ but this is eval scaffolding (same
 // exemption as test fixtures); composition still happens inside the factory
@@ -24,7 +27,7 @@ import {
   type TurnMessage,
 } from '../../src/agent/context.ts';
 import { makePark } from '../../src/hitl/park.ts';
-import { toDigestEntries } from '../../src/hitl/digest.ts';
+import { summarizeToolCall, toDigestEntries } from '../../src/hitl/digest.ts';
 import { sendApprovalPrompts } from '../../src/hitl/approval-prompt.ts';
 import {
   makeResolveApprovalReply,
@@ -40,9 +43,10 @@ import {
 } from '../../src/memory/store.ts';
 import { makeVoyageEmbedder } from '../../src/memory/embedder.ts';
 import { makeRunTool, toToolSet } from '../../src/tools/registry.ts';
+import { makeV1ToolRegistry } from '../../src/tools/index.ts';
+import type { CalendarToolDeps } from '../../src/tools/calendar.ts';
 import { createStubTransport } from '../../src/transport/stub.ts';
-import { makeFakeCalendar, type FakeCalendar } from './fake-calendar.ts';
-import { makeEvalToolRegistry } from './propose-event.ts';
+import { makeFakeCalendar, type FakeCalendarClient } from './fake-calendar.ts';
 import type { EvalScenario, EvalScenarioMessage } from '../fixtures/decision9.ts';
 
 /** A pending_actions row as the assertions consume it — any status. */
@@ -54,7 +58,7 @@ export interface EvalActionRow {
 }
 
 export interface EvalHarness {
-  readonly calendar: FakeCalendar;
+  readonly calendar: FakeCalendarClient;
   readonly db: Client;
   conversationIdFor(scenario: EvalScenario): string;
   /**
@@ -75,9 +79,9 @@ export async function composeEvalHarness(): Promise<EvalHarness> {
   await runMigrations({ databaseUrl: config.databaseUrl });
 
   const calendar = makeFakeCalendar();
-  const registry = makeEvalToolRegistry();
+  const registry = makeV1ToolRegistry();
   const embedder = makeVoyageEmbedder({ apiKey: config.voyageApiKey });
-  const toolDeps = { embedder, calendar };
+  const toolDeps: CalendarToolDeps = { embedder, calendarClient: calendar };
   const anthropic = createAnthropic({ apiKey: config.anthropicApiKey });
   const callModel = makeCallModel({
     systemPrompt: stableSystemPrompt,
@@ -112,7 +116,7 @@ export async function composeEvalHarness(): Promise<EvalHarness> {
     dataSource,
     'loadPendingDigest',
     async (db, conversationId: string): Promise<PendingActionDigestEntry[]> =>
-      toDigestEntries(await getPendingActionsForConversation(db, conversationId)),
+      toDigestEntries(await getPendingActionsForConversation(db, conversationId), registry),
   );
   const resolveApprovalStep = registerTransactionalStep(
     dataSource,
@@ -143,6 +147,9 @@ export async function composeEvalHarness(): Promise<EvalHarness> {
         refine: refineActionStep,
       },
       callModel,
+      // One renderer for the closing prompt, the digest, and the sent prompt —
+      // keeps them byte-identical (T40), same as dev/main.ts and production.
+      summarizeProposal: (call) => summarizeToolCall(registry, call.name, call.args),
       // No compaction: scenarios are short and the eval measures decision-9
       // behavior, not summarization.
     }),
