@@ -3,6 +3,53 @@
 Tracked defects found in production/deploy that are filed for a deliberate fix
 rather than hot-patched. Each links a repro test where one exists.
 
+## LEDGER-15 — undeliverable-send poison pill wedges the concurrency-1 lane
+
+**Status: RESOLVED 2026-06-21** (T48). Severity post-launch hardening (the
+pre-launch mitigation — keeping prod off the test DB — shipped at the T42 smoke).
+Surfaced at the T42 smoke (2026-06-14) when leftover TEST reminders with fake
+conversation ids (`conv-run-…`, no `@server`) fired from the shared dev DB and
+`jidDecode` threw inside Baileys `relayMessage`.
+
+**Problem.** An **at-least-once** send (reminder/nag/approval prompt) to a
+destination the socket can never reach throws in the send step. Because the
+class never drops, the inbox item is never marked processed and the next enqueue
+re-drains the **same** poison item — so the throw repeats forever, wedging that
+conversation's concurrency-1 lane. PROX-SEND-001's resilient send deliberately
+did NOT match permanent errors (it only waits out a *transient* disconnect), so
+a genuinely unroutable destination fell through to exactly this wedge.
+
+**Resolution.** Classify the send error and give a permanent one a terminal
+path. `isPermanentSendError` (`src/transport/send-class.ts`) matches only the
+**owned**, stable `unroutable destination` signal — the same recipe as
+`transport not connected` — so an unrecognized error defaults to NOT permanent
+(ambiguity fails toward retry, never toward a silent drop). The transport
+(`src/transport/baileys.ts`) detects a structurally malformed jid
+(`isUnroutableDestination`) and throws that owned error before it reaches the
+socket. On a permanent error, the at-least-once paths — `deliverReply`
+(reminders/nags) and `sendApprovalPrompts` (approval prompts) — **dead-letter**
+it (`makeSendDeadLetter`: alert via the T12/T14 channel + host-local log; the
+household text stays off the external channel) and return WITHOUT throwing, so
+the step completes, the inbox item marks processed, and the lane is freed. The
+no-schema alert+log path was chosen over a dead-letter table (the entry decision
+in T48) to avoid a schema change. Any non-permanent failure still re-raises —
+the T12 health/dead-man case.
+
+**Repro tests.** `tests/unit/send-class.test.ts` (classifier, `deliverReply`
+dead-letter, `makeSendDeadLetter` never-throws), `tests/unit/baileys-adapter.test.ts`
+(owned-error rejection, socket never called), `tests/integration/park.test.ts`
+(approval-prompt dead-letter: action stays pending+unstamped, no `sent_log` row,
+no throw).
+
+**Residual (accepted).** A *well-formed* jid that is unroutable at runtime (a
+chat deleted/blocked) is not structurally detectable, so it stays in the
+default-transient bucket — waited out, then surfaced by the T12 health monitor —
+rather than dead-lettered. A dead-lettered approval prompt leaves its action
+pending+unstamped to TTL-expire; a new parked turn in the same conversation
+re-attempts and re-alerts (bounded by TTL, not a tight loop).
+
+---
+
 ## PROX-SEND-001 — proactive sends dropped during the restart reconnect window
 
 **Status: RESOLVED 2026-06-15** (fix option 1, refined). Severity was
@@ -19,8 +66,9 @@ send) and the approval-prompt path (`sendApprovalPrompts`) inherit it. The
 wrapper runs inside the send DBOS step, so its backoff timers are journaled like
 the existing human jitter (elapsed is the sum of slept delays — no clock read —
 so the loop stays deterministic and unit-testable). It deliberately does NOT
-match permanent/unroutable errors (a bad jid — ledger #15), so a poison message
-still propagates immediately instead of spinning the lane. The repro in
+match permanent/unroutable errors (a bad jid — ledger #15, now given a terminal
+dead-letter path in T48; see the LEDGER-15 entry above), so the resilient send
+never spins on a poison message. The repro in
 `tests/unit/send-class.test.ts` was relocated from a `deliverReply`-level
 `it.fails` to a real `makeResilientSend` suite plus a composition test proving
 exactly-once delivery + one `sent_log` row across a transient disconnect.
