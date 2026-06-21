@@ -16,9 +16,26 @@ import {
   type Queryable,
 } from '../memory/store.js';
 import type { Transport } from '../transport/types.js';
-import { approvalSendId } from '../transport/send-class.js';
+import {
+  approvalSendId,
+  isPermanentSendError,
+  type DeliverReplyDeps,
+} from '../transport/send-class.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import { toDigestEntries } from './digest.js';
+
+export interface SendApprovalPromptsOpts {
+  /**
+   * Ledger #15: dead-letter handler for a permanently undeliverable prompt (an
+   * unroutable destination). The approval prompt is at-least-once, so without
+   * this a permanent send error would throw out of the send step, leave the
+   * action unstamped, and re-drain the parked turn forever — wedging the lane.
+   * With it, the poison send is dead-lettered (alert + log) and the action is
+   * left pending+unstamped to TTL-expire, so the step completes and the lane is
+   * freed. Omitted (dev/stub) ⇒ a permanent error propagates as before.
+   */
+  readonly deadLetter?: DeliverReplyDeps['deadLetter'];
+}
 
 /**
  * Returns the action ids prompted this call, in row (created_at) order.
@@ -30,6 +47,7 @@ export async function sendApprovalPrompts<TDeps>(
   transport: Pick<Transport, 'send'>,
   conversationId: string,
   registry?: ToolRegistry<TDeps>,
+  opts: SendApprovalPromptsOpts = {},
 ): Promise<string[]> {
   const pending = await getPendingActionsForConversation(db, conversationId);
   const unstamped = pending.filter((action) => action.promptMessageId === null);
@@ -41,7 +59,25 @@ export async function sendApprovalPrompts<TDeps>(
     // Send-then-log (at-least-once): send first, then co-commit the sent_log
     // row and the prompt_message_id stamp. A crash between leaves the row
     // unstamped and the log absent, so the next pass re-sends.
-    const receipt = await transport.send({ conversationId, text });
+    let receipt: { messageId: string };
+    try {
+      receipt = await transport.send({ conversationId, text });
+    } catch (error) {
+      // Ledger #15: a permanently unroutable destination must not wedge the
+      // lane. Dead-letter it and skip the stamp (the row stays pending+unstamped
+      // and TTL-expires); any other error re-raises for DBOS recovery.
+      if (isPermanentSendError(error) && opts.deadLetter) {
+        await opts.deadLetter({
+          idempotencyKey: approvalSendId(action.actionId),
+          conversationId,
+          deliveryClass: 'at-least-once',
+          body: { text },
+          error,
+        });
+        continue;
+      }
+      throw error;
+    }
     await recordApprovalSend(db, {
       idempotencyKey: approvalSendId(action.actionId),
       conversationId,

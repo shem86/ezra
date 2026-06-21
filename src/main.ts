@@ -293,7 +293,9 @@ async function main(): Promise<void> {
           async () => {
             // Same human jitter as the reply path — approval prompts are
             // conversational closing messages, not machine-speed pings.
-            await sendApprovalPrompts(replyDb, { send: jitteringSend }, conversationId, registry);
+            await sendApprovalPrompts(replyDb, { send: jitteringSend }, conversationId, registry, {
+              deadLetter: deadLetterSend,
+            });
           },
           { name: 'sendApprovalPrompts' },
         );

@@ -5,6 +5,7 @@ import {
   type AuthenticationState,
 } from 'baileys';
 import { markAgentText } from './agent-marker.js';
+import { isUnroutableDestination, unroutableDestinationError } from './send-class.js';
 import type { SessionStore } from './session-store.js';
 import type {
   InboundMessage,
@@ -277,6 +278,13 @@ export function createBaileysTransport(deps: BaileysTransportDeps): Transport {
       const socket = sock;
       if (!socket || state !== 'open') {
         throw new Error('transport not connected');
+      }
+      // Ledger #15: a structurally unroutable jid would make Baileys jidDecode
+      // throw an unstable internal error deep in relayMessage; reject it up front
+      // with the OWNED permanent error so the at-least-once reply path classifies
+      // it and dead-letters it, instead of retrying/re-draining a poison send.
+      if (isUnroutableDestination(message.conversationId)) {
+        throw unroutableDestinationError(message.conversationId);
       }
       let timer: ReturnType<typeof setTimeout> | undefined;
       const timeout = new Promise<never>((_, reject) => {

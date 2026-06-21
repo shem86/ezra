@@ -14,7 +14,7 @@ import { makePark } from '../../src/hitl/park.ts';
 import { sendApprovalPrompts } from '../../src/hitl/approval-prompt.ts';
 import { getPendingAction, getSentEntry } from '../../src/memory/store.ts';
 import { createStubTransport } from '../../src/transport/stub.ts';
-import { approvalSendId } from '../../src/transport/send-class.ts';
+import { approvalSendId, unroutableDestinationError } from '../../src/transport/send-class.ts';
 import type { ToolCall } from '../../src/agent/context.ts';
 
 const connectionString = process.env.DATABASE_URL ?? '';
@@ -105,6 +105,45 @@ describe('production park (T34)', () => {
     // Already-stamped actions are never re-prompted.
     expect(await sendApprovalPrompts(db, transport, conv2)).toEqual([]);
     expect(transport.sent).toHaveLength(2);
+  });
+
+  it('dead-letters a permanently undeliverable approval prompt instead of throwing (ledger #15)', async () => {
+    // The approval prompt is at-least-once too, so an unroutable destination
+    // would otherwise throw out of the send step and re-drain the parked turn
+    // forever, wedging the lane. Instead it is dead-lettered and the action is
+    // left pending+unstamped (no sent_log row), so the step completes — lane
+    // freed — and the action TTL-expires rather than spinning.
+    const convDead = `park-deadletter-${runId}`;
+    const callA = call({ title: 'poison destination' });
+    await runTool(db, callA, convDead);
+    const actionId = deriveActionId(convDead, callA.id);
+
+    const deadLettered: { idempotencyKey: string; reason: string }[] = [];
+    const throwingTransport = {
+      send: async (): Promise<{ messageId: string }> => {
+        throw unroutableDestinationError(convDead);
+      },
+    };
+
+    const prompted = await sendApprovalPrompts(db, throwingTransport, convDead, undefined, {
+      deadLetter: async ({ idempotencyKey, error }) => {
+        deadLettered.push({
+          idempotencyKey,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      },
+    });
+
+    expect(prompted).toEqual([]); // nothing was successfully prompted
+    expect(deadLettered).toEqual([
+      { idempotencyKey: approvalSendId(actionId), reason: `unroutable destination: ${convDead}` },
+    ]);
+    // The action stays pending and unstamped (no quoted-reply anchor), and no
+    // at-least-once sent_log row was written — it never left the box.
+    const row = await getPendingAction(db, actionId);
+    expect(row?.status).toBe('pending');
+    expect(row?.promptMessageId).toBeNull();
+    expect(await getSentEntry(db, approvalSendId(actionId))).toBeNull();
   });
 
   it('co-commits the sent_log row with the prompt_message_id stamp (T43, at-least-once)', async () => {

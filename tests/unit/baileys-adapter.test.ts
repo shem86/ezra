@@ -360,4 +360,20 @@ describe('baileys adapter: messages', () => {
       h.transport.send({ conversationId: 'x@s.whatsapp.net', text: 'hi' }),
     ).rejects.toThrow(/not connected/i);
   });
+
+  it('rejects a structurally unroutable destination with the owned permanent error (ledger #15)', async () => {
+    // A malformed jid (no @server) made Baileys jidDecode throw an unstable
+    // internal error in the T42 smoke; the adapter now rejects it with the OWNED
+    // `unroutable destination` error (the same recipe as `transport not
+    // connected`), which the at-least-once reply path dead-letters instead of
+    // letting it re-drain and wedge the lane forever. The send never reaches the
+    // socket.
+    const h = harness();
+    await connectOpen(h);
+
+    await expect(
+      h.transport.send({ conversationId: 'conv-run-7f3a-no-server', text: 'reminder' }),
+    ).rejects.toThrow(/unroutable destination/i);
+    expect(h.sockets[0]!.sendMessage).not.toHaveBeenCalled();
+  });
 });
