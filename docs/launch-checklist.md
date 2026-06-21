@@ -7,7 +7,7 @@ Convention: ✅ closed with evidence · ⏳ open, builder-gated (how-to-close
 stated). Evidence links point at the task note in `TASKS.md`, a `docs/` record,
 or a test/suite that locks the behavior.
 
-Last swept: 2026-06-18.
+Last swept: 2026-06-21.
 
 ---
 
@@ -134,32 +134,44 @@ Last swept: 2026-06-18.
   tokens visible in Langfuse). 5× volume ≈ $8/mo (`TASKS.md` T33;
   `docs/spike-results.md`).
 
-- [ ] ⏳ **Real-traffic cost re-check ≤ $30/mo against live Langfuse traces.**
-  **Status:** builder-gated — needs the production Langfuse project pulled for
-  real household traffic since the T42 live launch (2026-06-14). I cannot
-  access the production Langfuse project from here.
-  **Why low-risk:** the structural cost drivers are unchanged from the T33 gate
-  that passed 18× under ceiling — every turn is Sonnet-only (ADR-0003, no tier
-  switch), the stable cache prefix is byte-identical between dev and production
-  (proven at T42 slice 2), and cache reads were confirmed nonzero on every
-  generation in the dev runs. Two real-traffic factors T33 did not script —
-  compaction firings and proactive (reminder) turns — add cost; both are
-  bounded and small relative to the 18× margin.
-  **How to close:** in the production Langfuse project, sum input
-  (cache-read/write split) + output tokens over a representative real-traffic
-  window, price at current published Sonnet rates ($3/$15 per MTok, $3.75 cache
-  write, $0.30 cache read), normalize to a 30-day month, and confirm ≤ $30 with
-  cache-read tokens visibly nonzero. Record the number here. If it ever fails,
-  the named lever is reintroducing a cheap turn tier at the `deps.callModel`
-  seam (ADR-0003) — a contingency, not a precondition.
+- [x] ✅ **Real-traffic cost re-check ≤ $30/mo against live Langfuse traces.**
+  **Evidence:** pulled all **234 `callModel` generations** from the production
+  Langfuse project (read-only `/api/public/observations`, summed `usageDetails`)
+  over the live window **2026-06-12 → 2026-06-15 (3.15 days)**:
+
+  | | tokens |
+  |---|---|
+  | input (total, incl. cache) | 762,133 |
+  | └ cache reads | 596,567 (**78%**) |
+  | └ cache writes | 112,878 |
+  | └ uncached | 52,688 |
+  | output | 11,547 |
+
+  **Prompt caching verified active on live traffic: 78% of input tokens were
+  cache reads** (T33 dev measured 85%) — the SPEC "caching active / cache-read
+  tokens visible" requirement, confirmed on real traces, not dev. **Cost:
+  cache-aware $8.89/mo; conservative (caching priced as if OFF, all input at
+  full $3/MTok) $23.42/mo** — both under the $30 ceiling at Sonnet 4.6 rates
+  ($3/$15 per MTok, $3.75 cache write, $0.30 cache read).
+  **Caveat (makes the pass stronger):** the window is **test-dominated** —
+  234 gen / 3.15 days ≈ **74/day vs T33's realistic ~18/day**, so it over-states
+  volume ~4× (mostly the T42 smoke + T47 clock-bug debugging bursts). At genuine
+  household volume the same per-turn economics give ≈ $2/mo cache-aware, ≈ $6/mo
+  with caching off. The box is closed on the conservative bound: *even at ~4×
+  realistic volume with zero cache credit, spend stays under $30.*
+  **Post-launch hygiene (not a gate):** re-confirm against a few weeks of
+  organic-only traffic once it accrues. If it ever fails, the named lever is
+  reintroducing a cheap turn tier at the `deps.callModel` seam (ADR-0003).
 
 ---
 
 ## Summary
 
-**21 of 22 SPEC success-criteria boxes are closed with evidence.** The single
-open box — the real-traffic cost re-check — is builder-gated on production
-Langfuse access; the scripted-day cost gate it extends passed 18× under the
-ceiling and the cost structure is unchanged. Every other Phase-0, functional,
-and reliability criterion is closed by a test, drill, or live-host
-verification.
+**All 22 SPEC success-criteria boxes are closed with evidence.** Phase-0,
+functional, reliability, and cost are each closed by a test, drill, or
+live-traffic verification. The last box — the real-traffic cost re-check —
+closed 2026-06-21 against 234 live Langfuse generations: caching verified
+active (78% cache reads) and spend under $30/mo even on the conservative
+zero-cache bound at ~4× realistic volume. **The launch checklist is
+complete.** One non-gating post-launch item remains noted: re-confirm cost
+against organic-only traffic once a few weeks of it accrue.
