@@ -103,6 +103,15 @@ describe('egress allowlist contents (T16)', () => {
       expect(isHostAllowed(host), `not allowed: ${host}`).toBe(true);
     }
   });
+
+  it('allows the WhatsApp media CDN under *.fbcdn.net (2026-06-17 incident)', () => {
+    // WhatsApp serves media from Meta's fbcdn.net CDN, NOT whatsapp.net. The
+    // 17:42 EDT "service down" alert traced to the host firewall dropping
+    // Baileys' connection to whatsapp-cdn-shv-01-iad3.fbcdn.net (31.13.66.56)
+    // because fbcdn.net was absent here — a runtime-resolved host the src
+    // literal scan below can never see, so this name-check is the only guard.
+    expect(isHostAllowed('whatsapp-cdn-shv-01-iad3.fbcdn.net')).toBe(true);
+  });
 });
 
 describe('allowlist covers every outbound host literal in src (anti-drift)', () => {

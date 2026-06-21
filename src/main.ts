@@ -92,7 +92,17 @@ async function main(): Promise<void> {
     chatId: config.alertChannelChatId,
   });
   const health = createHealthMonitor({ alertChannel });
-  const deadman = createDeadmanPinger({ pingUrl: config.deadmanPingUrl });
+  const deadman = createDeadmanPinger({
+    pingUrl: config.deadmanPingUrl,
+    // A missed ping is exactly what the external dead-man exists to catch, but
+    // until now ezra swallowed the failure silently — so when healthchecks.io
+    // fired "service down" there was no in-process trace of why (2026-06-17).
+    // Log it: a [deadman] burst in ezra's own logs now pins the window.
+    onPingError: (error) => {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn(`[deadman] ping failed: ${reason}`);
+    },
+  });
 
   // --- Model + tools (identical wiring to dev/main; prompt is the T42 one) --
   const anthropic = createAnthropic({ apiKey: config.anthropicApiKey });

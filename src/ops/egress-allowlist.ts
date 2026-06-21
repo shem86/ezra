@@ -98,6 +98,19 @@ export const egressAllowlist: readonly EgressDestination[] = [
     category: 'whatsapp',
     reason: 'Baileys web endpoints (web.whatsapp.com, …)',
   },
+  {
+    // 2026-06-17 incident: WhatsApp serves media (images/video) from Meta's
+    // fbcdn.net CDN, which is neither whatsapp.net nor whatsapp.com. Without
+    // this, a media fetch hits the default-deny firewall, the drop wedges
+    // Baileys into a reconnect, and the dead-man trips a "service down" alert.
+    // Runtime-resolved (whatsapp-cdn-shv-NN-<pop>.fbcdn.net) so it never shows
+    // up as a src literal — the drift scan can't catch its absence; the named
+    // test in egress-allowlist.test.ts is the guard.
+    host: 'fbcdn.net',
+    subdomains: true,
+    category: 'whatsapp',
+    reason: 'WhatsApp media CDN (whatsapp-cdn-*.fbcdn.net) — image/video downloads (2026-06-17)',
+  },
   // --- Backups (T17 — AWS S3, same account/region as the EC2 host) ----------
   // Both the path-style regional endpoint and bucket virtual-host
   // (<bucket>.s3.us-east-1.amazonaws.com) sit under this subdomains entry.
