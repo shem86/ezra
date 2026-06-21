@@ -72,6 +72,7 @@ import { computeHumanSendDelay } from './transport/protocol.js';
 import {
   deliverReply,
   makeResilientSend,
+  makeSendDeadLetter,
   replySendId,
   selectSendClass,
 } from './transport/send-class.js';
@@ -263,10 +264,15 @@ async function main(): Promise<void> {
   // at-least-once, a human reply is at-most-once — and `deliverReply` does the
   // sent_log log/send ordering, keyed on a deterministic send id so a step
   // replay lands on the same row instead of an undeduped second send.
+  // Ledger #15: a permanently undeliverable at-least-once send (an unroutable
+  // destination) is dead-lettered — alerted + logged — instead of throwing, so
+  // a poison message can't re-drain and wedge the conversation's lane forever.
+  const deadLetterSend = makeSendDeadLetter({ alert: (text) => alertChannel.sendAlert(text) });
   const deliverReplyDeps = {
     recordSend: (input: Parameters<typeof recordSend>[1]) => recordSend(replyDb, input),
     getSentEntry: (key: string) => getSentEntry(replyDb, key),
     send: jitteringSend,
+    deadLetter: deadLetterSend,
   };
   const processTurnBatch = DBOS.registerWorkflow(
     async function processTurnBatch(batch: InboxItem[]): Promise<void> {

@@ -192,6 +192,48 @@ export function makeResilientSend(
   };
 }
 
+export interface SendDeadLetterDeps {
+  /** Loud, operator-facing notice (the T12/T14 alert channel). Best-effort. */
+  readonly alert: (text: string) => Promise<void>;
+  /** Host-local log sink; defaults to console.error. */
+  readonly log?: (line: string) => void;
+}
+
+/**
+ * Build the dead-letter handler the production reply path injects into
+ * `deliverReply` (ledger #15). On a permanently undeliverable at-least-once
+ * send it fires an alert with the operational facts — destination, class,
+ * reason, send key — so a dropped reminder is loud, and logs the lost message
+ * body to the host-local log. The household message TEXT is deliberately kept
+ * OUT of the external alert channel (Telegram) — only the local log carries it,
+ * so household content never leaves the box just because a send failed.
+ *
+ * It NEVER throws: it is the lane-freeing path, so an alert-channel failure is
+ * caught and logged rather than allowed to re-wedge the concurrency-1 lane.
+ */
+export function makeSendDeadLetter(deps: SendDeadLetterDeps): DeliverReplyDeps['deadLetter'] {
+  const log = deps.log ?? ((line: string) => console.error(line));
+  return async ({ idempotencyKey, conversationId, deliveryClass, body, error }) => {
+    const reason = error instanceof Error ? error.message : String(error);
+    const text =
+      typeof (body as { text?: unknown }).text === 'string'
+        ? (body as { text: string }).text
+        : JSON.stringify(body);
+    log(
+      `[dead-letter] undeliverable ${deliveryClass} send to ${conversationId} (${reason}); key=${idempotencyKey} :: ${text}`,
+    );
+    try {
+      await deps.alert(
+        `⚠️ hh-assistant: undeliverable ${deliveryClass} message\n` +
+          `to: ${conversationId}\nreason: ${reason}\nsend key: ${idempotencyKey}`,
+      );
+    } catch (alertError) {
+      const detail = alertError instanceof Error ? alertError.message : String(alertError);
+      log(`[dead-letter] alert failed (${detail}) — message dropped, freeing the lane anyway`);
+    }
+  };
+}
+
 /**
  * The sent_log primitives + transport send, injected (no module singletons —
  * conventions.md). `recordSend` is insert-if-absent on the idempotency key:
@@ -211,6 +253,20 @@ export interface DeliverReplyDeps {
     conversationId: string;
     text: string;
   }) => Promise<{ messageId: string }>;
+  /**
+   * Ledger #15: route a PERMANENTLY undeliverable at-least-once send (an
+   * unroutable destination — `isPermanentSendError`) here instead of throwing.
+   * Records it loudly (alert + log) so a dropped reminder is never silent, and
+   * — by NOT throwing — lets the turn step complete so the inbox item marks
+   * processed and the poison message can't re-drain and wedge the lane forever.
+   */
+  readonly deadLetter: (input: {
+    idempotencyKey: string;
+    conversationId: string;
+    deliveryClass: DeliveryClass;
+    body: unknown;
+    error: unknown;
+  }) => Promise<void>;
 }
 
 export interface DeliverReplyArgs {
@@ -235,7 +291,7 @@ export interface DeliverReplyArgs {
 export async function deliverReply(
   deps: DeliverReplyDeps,
   args: DeliverReplyArgs,
-): Promise<{ sent: boolean }> {
+): Promise<{ sent: boolean; deadLettered?: boolean }> {
   const { sendClass, idempotencyKey, conversationId, text } = args;
 
   if (sendClass === 'at-most-once') {
@@ -246,12 +302,35 @@ export async function deliverReply(
       body: { text },
     });
     if (!won) return { sent: false };
+    // No dead-lettering here: at-most-once is claim-then-send, so the tombstone
+    // already stops a re-send on replay — a permanent failure self-heals after
+    // one retry and never wedges the lane (ledger #15 is the at-least-once case).
     await deps.send({ conversationId, text });
     return { sent: true };
   }
 
   if (await deps.getSentEntry(idempotencyKey)) return { sent: false };
-  await deps.send({ conversationId, text });
+  try {
+    await deps.send({ conversationId, text });
+  } catch (error) {
+    // Ledger #15: a permanently unroutable destination would otherwise throw out
+    // of this step, leave the inbox item unprocessed, and re-drain forever —
+    // wedging the lane. Dead-letter it (alert + log) and return WITHOUT throwing
+    // so the step completes and the lane is freed. Any other failure (a transient
+    // disconnect whose resilient-send budget was spent on a genuine outage)
+    // re-raises: DBOS keeps the turn PENDING for recovery — the T12 health case.
+    if (isPermanentSendError(error)) {
+      await deps.deadLetter({
+        idempotencyKey,
+        conversationId,
+        deliveryClass: sendClass,
+        body: { text },
+        error,
+      });
+      return { sent: false, deadLettered: true };
+    }
+    throw error;
+  }
   await deps.recordSend({
     idempotencyKey,
     conversationId,

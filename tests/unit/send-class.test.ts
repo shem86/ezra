@@ -6,6 +6,7 @@ import {
   isTransientSendError,
   isUnroutableDestination,
   makeResilientSend,
+  makeSendDeadLetter,
   replySendId,
   selectSendClass,
   unroutableDestinationError,
@@ -77,9 +78,10 @@ describe('approvalSendId', () => {
 interface Recorded {
   sent: string[];
   logged: Set<string>;
+  deadLettered: { idempotencyKey: string; text: string; reason: string }[];
 }
 
-function fakeDeps(seed: Recorded, opts: { sendThrows?: boolean } = {}): DeliverReplyDeps {
+function fakeDeps(seed: Recorded, opts: { sendThrows?: boolean; sendError?: Error } = {}): DeliverReplyDeps {
   return {
     recordSend: async ({ idempotencyKey }) => {
       if (seed.logged.has(idempotencyKey)) return false;
@@ -88,16 +90,28 @@ function fakeDeps(seed: Recorded, opts: { sendThrows?: boolean } = {}): DeliverR
     },
     getSentEntry: async (key) => (seed.logged.has(key) ? { idempotencyKey: key } : null),
     send: async ({ text }) => {
+      if (opts.sendError) throw opts.sendError;
       if (opts.sendThrows) throw new Error('wire down');
       seed.sent.push(text);
       return { messageId: `wa-${seed.sent.length}` };
     },
+    deadLetter: async ({ idempotencyKey, body, error }) => {
+      seed.deadLettered.push({
+        idempotencyKey,
+        text: (body as { text: string }).text,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    },
   };
+}
+
+function freshSeed(over: Partial<Recorded> = {}): Recorded {
+  return { sent: [], logged: new Set(), deadLettered: [], ...over };
 }
 
 describe('deliverReply — at-most-once (log-then-send)', () => {
   it('claims the log row, then sends', async () => {
-    const seed: Recorded = { sent: [], logged: new Set() };
+    const seed = freshSeed();
     const result = await deliverReply(fakeDeps(seed), {
       sendClass: 'at-most-once',
       idempotencyKey: 'send-1',
@@ -110,7 +124,7 @@ describe('deliverReply — at-most-once (log-then-send)', () => {
   });
 
   it('skips the send when the claim was already taken (replay after crash)', async () => {
-    const seed: Recorded = { sent: [], logged: new Set(['send-1']) };
+    const seed = freshSeed({ logged: new Set(['send-1']) });
     const result = await deliverReply(fakeDeps(seed), {
       sendClass: 'at-most-once',
       idempotencyKey: 'send-1',
@@ -124,7 +138,7 @@ describe('deliverReply — at-most-once (log-then-send)', () => {
 
 describe('deliverReply — at-least-once (send-then-log)', () => {
   it('sends, then logs', async () => {
-    const seed: Recorded = { sent: [], logged: new Set() };
+    const seed = freshSeed();
     const result = await deliverReply(fakeDeps(seed), {
       sendClass: 'at-least-once',
       idempotencyKey: 'send-r1',
@@ -138,7 +152,7 @@ describe('deliverReply — at-least-once (send-then-log)', () => {
 
   it('re-sends on replay when the log never committed (the accepted duplicate)', async () => {
     // Models a crash after send, before the log row: the log is still absent.
-    const seed: Recorded = { sent: ['reminder: trash night'], logged: new Set() };
+    const seed = freshSeed({ sent: ['reminder: trash night'] });
     const result = await deliverReply(fakeDeps(seed), {
       sendClass: 'at-least-once',
       idempotencyKey: 'send-r1',
@@ -150,7 +164,7 @@ describe('deliverReply — at-least-once (send-then-log)', () => {
   });
 
   it('skips the re-send once the log row is present', async () => {
-    const seed: Recorded = { sent: ['reminder: trash night'], logged: new Set(['send-r1']) };
+    const seed = freshSeed({ sent: ['reminder: trash night'], logged: new Set(['send-r1']) });
     const result = await deliverReply(fakeDeps(seed), {
       sendClass: 'at-least-once',
       idempotencyKey: 'send-r1',
@@ -159,6 +173,119 @@ describe('deliverReply — at-least-once (send-then-log)', () => {
     });
     expect(result.sent).toBe(false);
     expect(seed.sent).toHaveLength(1);
+  });
+});
+
+// Ledger #15 / T48: a permanent (unroutable-destination) failure on an
+// at-least-once send must NOT throw out of deliverReply — a throw errors the
+// turn workflow, the inbox item never marks processed, and the next enqueue
+// re-drains the same poison item, wedging the concurrency-1 lane forever.
+// Instead it is dead-lettered (alert + log via the injected handler) and the
+// step completes, so the lane is freed and the poison message is loud, not lost.
+describe('deliverReply — permanent failure on at-least-once (ledger #15)', () => {
+  it('dead-letters an unroutable-destination send instead of throwing, freeing the lane', async () => {
+    const seed = freshSeed();
+    const result = await deliverReply(
+      fakeDeps(seed, { sendError: unroutableDestinationError('conv-run-7f3a') }),
+      {
+        sendClass: 'at-least-once',
+        idempotencyKey: 'send-r1',
+        conversationId: 'conv-run-7f3a',
+        text: 'reminder: trash night',
+      },
+    );
+
+    expect(result.sent).toBe(false);
+    expect(result.deadLettered).toBe(true);
+    expect(seed.sent).toEqual([]); // never delivered
+    expect(seed.logged.has('send-r1')).toBe(false); // never logged as sent
+    expect(seed.deadLettered).toEqual([
+      {
+        idempotencyKey: 'send-r1',
+        text: 'reminder: trash night',
+        reason: 'unroutable destination: conv-run-7f3a',
+      },
+    ]);
+  });
+
+  it('re-raises a transient/genuine-outage failure — that is the T12 health case, never dead-lettered', async () => {
+    // A non-permanent throw escaping deliverReply (e.g. the resilient send's
+    // budget spent on a real multi-minute outage) must still error the turn so
+    // DBOS keeps the work PENDING for recovery — not silently dropped.
+    const seed = freshSeed();
+    await expect(
+      deliverReply(fakeDeps(seed, { sendError: new Error('transport not connected') }), {
+        sendClass: 'at-least-once',
+        idempotencyKey: 'send-r1',
+        conversationId: 'c1',
+        text: 'reminder: trash night',
+      }),
+    ).rejects.toThrow('transport not connected');
+    expect(seed.deadLettered).toEqual([]); // a transient error is never dead-lettered
+  });
+
+  it('does NOT dead-letter the at-most-once class — a permanent failure there propagates (scoped to at-least-once)', async () => {
+    // At-most-once is claim-then-send: the claim tombstone already prevents a
+    // re-send on replay, so it self-heals after one retry and never wedges the
+    // lane — dead-lettering is the at-least-once class's concern only.
+    const seed = freshSeed();
+    await expect(
+      deliverReply(fakeDeps(seed, { sendError: unroutableDestinationError('conv-run-7f3a') }), {
+        sendClass: 'at-most-once',
+        idempotencyKey: 'send-1',
+        conversationId: 'conv-run-7f3a',
+        text: 'ok done',
+      }),
+    ).rejects.toThrow('unroutable destination');
+    expect(seed.deadLettered).toEqual([]);
+  });
+});
+
+// The production dead-letter handler: alert (loud, so a dropped reminder is
+// never silent) + local log. It must NEVER throw — it is the lane-freeing path,
+// so a failing alert channel cannot be allowed to re-wedge the lane.
+describe('makeSendDeadLetter (ledger #15)', () => {
+  const deadLetterInput = {
+    idempotencyKey: 'send-r1',
+    conversationId: 'conv-run-7f3a',
+    deliveryClass: 'at-least-once' as const,
+    body: { text: 'reminder: trash night' },
+    error: unroutableDestinationError('conv-run-7f3a'),
+  };
+
+  it('alerts with the operational facts and logs the lost message locally', async () => {
+    const alerts: string[] = [];
+    const logs: string[] = [];
+    const deadLetter = makeSendDeadLetter({
+      alert: async (text) => {
+        alerts.push(text);
+      },
+      log: (line) => logs.push(line),
+    });
+
+    await deadLetter(deadLetterInput);
+
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toContain('conv-run-7f3a'); // who
+    expect(alerts[0]).toContain('unroutable destination'); // why
+    expect(alerts[0]).toContain('send-r1'); // which send (for manual re-send)
+    // The household message text stays OUT of the external alert channel; it is
+    // available in the host-local log only.
+    expect(alerts[0]).not.toContain('trash night');
+    expect(logs.join('\n')).toContain('trash night');
+  });
+
+  it('never throws when the alert channel fails — the lane must still be freed', async () => {
+    const logs: string[] = [];
+    const deadLetter = makeSendDeadLetter({
+      alert: async () => {
+        throw new Error('telegram alert failed: HTTP 500');
+      },
+      log: (line) => logs.push(line),
+    });
+
+    await expect(deadLetter(deadLetterInput)).resolves.toBeUndefined();
+    expect(logs.join('\n')).toContain('alert failed');
   });
 });
 
@@ -382,7 +509,7 @@ describe('makeResilientSend (PROX-SEND-001)', () => {
 // tests/integration/send-class-recovery.test.ts.
 describe('resilient send + deliverReply at-least-once across a transient disconnect', () => {
   it('delivers the reminder exactly once with exactly one log row', async () => {
-    const seed: Recorded = { sent: [], logged: new Set() };
+    const seed = freshSeed();
     let attempts = 0;
     const resilientSend = makeResilientSend(
       async ({ text }: { conversationId: string; text: string }) => {
@@ -402,6 +529,9 @@ describe('resilient send + deliverReply at-least-once across a transient disconn
       },
       getSentEntry: async (key) => (seed.logged.has(key) ? { idempotencyKey: key } : null),
       send: resilientSend,
+      deadLetter: async () => {
+        throw new Error('should not dead-letter a transient disconnect');
+      },
     };
 
     const result = await deliverReply(deps, {
