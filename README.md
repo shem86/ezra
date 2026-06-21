@@ -7,6 +7,7 @@
 ![Postgres](https://img.shields.io/badge/Postgres-pgvector-4169E1?logo=postgresql&logoColor=white)
 ![DBOS](https://img.shields.io/badge/DBOS-4.19.8-0A0A0A)
 ![Claude](https://img.shields.io/badge/Claude-Anthropic-D97757?logo=anthropic&logoColor=white)
+![Vercel AI SDK](https://img.shields.io/badge/Vercel%20AI%20SDK-Core-000000?logo=vercel&logoColor=white)
 
 A WhatsApp household assistant for a two-person family group, built as a
 production-grade exercise in reliable agentic systems. It handles reminders,
