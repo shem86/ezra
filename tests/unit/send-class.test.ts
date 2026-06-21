@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   approvalSendId,
   deliverReply,
+  isPermanentSendError,
   isTransientSendError,
+  isUnroutableDestination,
   makeResilientSend,
   replySendId,
   selectSendClass,
+  unroutableDestinationError,
   type DeliverReplyDeps,
 } from '../../src/transport/send-class.ts';
 
@@ -183,6 +186,61 @@ describe('isTransientSendError', () => {
   it('rejects non-Error throws', () => {
     expect(isTransientSendError('transport not connected')).toBe(false);
     expect(isTransientSendError(undefined)).toBe(false);
+  });
+});
+
+// Ledger #15 / T48: an at-least-once send to a structurally unroutable
+// destination (a malformed jid with no @server — the T42 smoke's leftover
+// `conv-run-…` ids made jidDecode throw inside Baileys relayMessage) is a poison
+// pill. The transport detects the bad shape and throws an OWNED, stable error —
+// the same recipe PROX-SEND-001 uses for `transport not connected` — so the
+// classifier never has to guess from Baileys' fragile internal error text.
+describe('isUnroutableDestination', () => {
+  it('accepts a real @lid jid as routable', () => {
+    expect(isUnroutableDestination('232155984703662@lid')).toBe(false);
+  });
+
+  it('accepts a real @s.whatsapp.net jid and a @g.us group as routable', () => {
+    expect(isUnroutableDestination('15551234567@s.whatsapp.net')).toBe(false);
+    expect(isUnroutableDestination('15551234567-1600000000@g.us')).toBe(false);
+  });
+
+  it('rejects a test/leftover id with no @server (the T42 smoke poison pill)', () => {
+    expect(isUnroutableDestination('conv-run-7f3a-2026-06-14')).toBe(true);
+  });
+
+  it('rejects empty / half-formed jids (missing user or server)', () => {
+    expect(isUnroutableDestination('')).toBe(true);
+    expect(isUnroutableDestination('@s.whatsapp.net')).toBe(true);
+    expect(isUnroutableDestination('15551234567@')).toBe(true);
+  });
+});
+
+describe('isPermanentSendError', () => {
+  it('matches the owned unroutable-destination error (never retry, dead-letter it)', () => {
+    expect(isPermanentSendError(unroutableDestinationError('conv-run-abc'))).toBe(true);
+  });
+
+  it('rejects the transient transport-not-connected disconnect', () => {
+    // Default-to-transient: a disconnect must be waited out, never dead-lettered.
+    expect(isPermanentSendError(new Error('transport not connected'))).toBe(false);
+  });
+
+  it('rejects a send timeout — could be transient network, so never dead-letter it', () => {
+    expect(isPermanentSendError(new Error('sendMessage timed out after 60000ms'))).toBe(false);
+  });
+
+  it('rejects an unrecognized error — ambiguity fails toward retry, not toward drop', () => {
+    expect(isPermanentSendError(new Error('something weird from baileys'))).toBe(false);
+    expect(isPermanentSendError('unroutable destination')).toBe(false);
+    expect(isPermanentSendError(undefined)).toBe(false);
+  });
+
+  it('is mutually exclusive with isTransientSendError on both owned signals', () => {
+    const permanent = unroutableDestinationError('bad');
+    const transient = new Error('transport not connected');
+    expect(isPermanentSendError(permanent) && isTransientSendError(permanent)).toBe(false);
+    expect(isPermanentSendError(transient) && isTransientSendError(transient)).toBe(false);
   });
 });
 

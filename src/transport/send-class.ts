@@ -72,6 +72,52 @@ export function isTransientSendError(error: unknown): boolean {
   return error instanceof Error && error.message === 'transport not connected';
 }
 
+// --- Ledger #15 / T48: undeliverable-send poison pill ------------------------
+// An at-least-once send (reminder/nag/approval prompt) to a destination the
+// socket can never reach throws in the send step. Because the at-least-once
+// class never drops, the inbox item is never marked processed and the next
+// enqueue re-drains the same poison item — wedging the conversation's
+// concurrency-1 lane forever. The fix classifies such a send error as PERMANENT
+// (dead-letter + alert, never retry) versus the PROX-SEND-001 transient case
+// (wait out the reconnect). The structural malformed-jid case — the exact T42
+// smoke failure, where leftover `conv-run-…` ids with no `@server` made Baileys
+// `jidDecode` throw — is detected at the transport with `isUnroutableDestination`
+// and surfaced as an OWNED, stable error (the same recipe as `transport not
+// connected`), so the classifier never has to guess from Baileys' fragile
+// internal error text.
+
+const PERMANENT_SEND_ERROR_PREFIX = 'unroutable destination';
+
+/**
+ * A structurally unroutable WhatsApp jid: empty, missing the `@`, or missing
+ * either the user or server half. A valid jid is `<user>@<server>` (e.g.
+ * `15551234567@s.whatsapp.net`, `…@lid`, `…@g.us`). This is a deterministic
+ * poison detector — it does not (and cannot) tell whether a well-formed jid is
+ * a live chat; a deleted/blocked chat surfaces only as a runtime send failure
+ * and stays in the default-transient bucket (waited out, then the T12 health
+ * monitor's job), per the "ambiguity fails toward retry" rule.
+ */
+export function isUnroutableDestination(jid: string): boolean {
+  const at = jid.indexOf('@');
+  return at <= 0 || at === jid.length - 1;
+}
+
+/** The owned, stable permanent-send error for an unroutable destination. */
+export function unroutableDestinationError(jid: string): Error {
+  return new Error(`${PERMANENT_SEND_ERROR_PREFIX}: ${jid}`);
+}
+
+/**
+ * A send failure that can NEVER succeed on retry — a structurally unroutable
+ * destination. Matches only the owned `unroutable destination` signal: an
+ * unrecognized error defaults to NOT permanent, because a wrongly-permanent
+ * verdict drops a reminder (the blast-radius failure this project defends
+ * against), so ambiguity must fail toward retry, not toward a silent drop.
+ */
+export function isPermanentSendError(error: unknown): boolean {
+  return error instanceof Error && error.message.startsWith(PERMANENT_SEND_ERROR_PREFIX);
+}
+
 export interface ResilientSendConfig {
   /**
    * Total time to keep retrying a transient failure before giving up, ms. The
