@@ -21,9 +21,12 @@ hardened cloud host against the real WhatsApp group.
 The hard part of a household agent is not the model — it's that this class of
 system **fails quietly at its edges**, and the consequence of a silent failure
 is a person who stops getting reminders and tells you about it before your logs
-do. So the engineering is spread across five boundaries where these systems
-tend to fail without a crash, plus the cross-cutting concerns of cost and
-operability. The LLM is the easy 10%.
+do. So the work is distributed-systems engineering plus the agent-specific
+disciplines: a hand-built **harness** that owns the agent loop in durable code,
+deliberate **context engineering** to keep the model cheap and correct, and
+**eval engineering** to test something nondeterministic. It spreads across five
+boundaries where these systems fail without a crash, plus cost and operability
+as cross-cutting concerns. The LLM is the easy 10%.
 
 ### 1. The ingestion boundary — durable capture before ack
 
@@ -36,10 +39,15 @@ in the window where most naive agents drop it.
 
 The agent is not a long-lived process holding a conversation; it's a sequence
 of short-lived **durable turns** orchestrated by [DBOS](https://www.dbos.dev/)
-on one Postgres. Every structured-state write happens in a DBOS transactional
-step, so the write and its journal checkpoint **co-commit in one Postgres
-transaction** — that co-commit *is* the exactly-once guarantee. Crash recovery
-replays the journal instead of re-running completed steps. A custom ESLint rule
+on one Postgres. A deliberate harness decision sits underneath this: the agent
+loop is owned by durable workflow code, **not the AI SDK** — the SDK `ToolSet`
+is projected with *no* `execute` functions, so every tool runs as a journaled
+DBOS step rather than an SDK-driven call. The loop itself is therefore
+recoverable, not just the writes inside it. Every structured-state write happens
+in a DBOS transactional step, so the write and its journal checkpoint
+**co-commit in one Postgres transaction** — that co-commit *is* the exactly-once
+guarantee. Crash recovery replays the journal instead of re-running completed
+steps. A custom ESLint rule
 (`hh/no-nondeterminism-in-workflow`, CI-failing) bans clock reads, randomness,
 and env access inside workflow bodies so replay stays deterministic. Proven by
 a kill-mid-flight recovery suite (`pnpm test:recovery`) that SIGKILLs a child
@@ -102,6 +110,19 @@ plus an external dead-man ping.
   an unlisted host turns CI red — and it renders the host's default-deny
   nftables ruleset. The runtime is a non-root, read-only-rootfs,
   `cap_drop: [ALL]` container.
+
+### Testing a nondeterministic agent
+
+The deterministic core (workflows, idempotency, recovery) is held by a normal
+integration suite against real Postgres, including the kill-mid-flight recovery
+gate. The *model-in-the-loop* behaviour gets its own harness (`pnpm eval`,
+on-demand, never CI): the five decision-9 approval scenarios — approve-after-
+delay, deny, abandon, refine, stale-at-execution — plus execute-once under
+double approval, each asserting on **resulting state (row status, effect counts,
+the injected context message), never on reply wording**. The relatedness
+classifier carries a separate accuracy dashboard (24/24 across Hebrew / English /
+code-switched fixtures, report-only). State-based assertions are what makes a
+nondeterministic agent gateable at all.
 
 > One detail that delighted me: the model had **no clock**. Its training anchor
 > made "today" feel like mid-2025, so "remind me in 5 minutes" resolved 11
