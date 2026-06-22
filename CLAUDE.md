@@ -5,15 +5,21 @@ lists, Google Calendar, household Q&A. Dual goal: production-grade
 agentic-systems learning and daily utility. **Reliability beats sophistication
 in every v1 trade-off.**
 
+**v1 is LIVE in production with real users and data** — changes carry real
+blast radius; the ask-first / never boundaries below are operative, not
+theoretical. Current state and post-launch backlog: `TASKS.md` frontier note +
+`docs/known-issues.md`.
+
 ## Source-of-truth documents (read before changing anything)
 
 | Doc | Owns | Status |
 |---|---|---|
 | `household-ai-agent-architecture-v3_5.md` | *Why* — locked decisions 1–11 | LOCKED |
 | `SPEC.md` | *Building* — scope, conventions, boundaries | APPROVED 2026-06-09 |
-| `PLAN.md` | Milestones M0–M6 + verification gates | APPROVED 2026-06-09 |
-| `TASKS.md` | Per-session tasks + live progress checkboxes | APPROVED; M0+M1 done |
-| `docs/spike-results.md` | Spike verdicts, pinned versions, gotchas | T7/T8/T28-wire PASS, T10 closed |
+| `PLAN.md` | Milestones M0–M6 + verification gates | M0–M6 COMPLETE |
+| `TASKS.md` | Per-session tasks + live progress checkboxes | ALL DONE (T1–T48); v1 live 2026-06-21 |
+| `docs/spike-results.md` | Spike verdicts, pinned versions, gotchas | all spikes closed (PASS) |
+| `docs/known-issues.md` | Deferred-decisions ledger + post-launch backlog | LIVE |
 
 Where docs overlap: architecture wins on rationale, SPEC wins on
 implementation detail. Update `TASKS.md` checkboxes as tasks complete.
@@ -25,9 +31,17 @@ docker compose up -d   # dev DB: ONE Postgres with pgvector (journal+state co-lo
 pnpm build             # tsc, strict
 pnpm test              # vitest; integration suite only runs when DATABASE_URL is set
 pnpm lint              # eslint incl. custom DBOS-determinism rule (CI-failing)
-pnpm dev               # (M3+) agent against dev DB, transport stubbed
-pnpm eval              # (M5) model-in-the-loop scenarios — on-demand, never CI
-pnpm test:recovery     # (M3) kill-mid-flight replay gate
+pnpm dev               # agent against dev DB, transport stubbed
+pnpm eval              # model-in-the-loop scenarios — on-demand, never CI
+pnpm test:recovery     # kill-mid-flight + launch-recovery replay gate
+```
+
+Production / ops:
+```
+pnpm start             # production entry (dist/start.js) — launch recipe in dbos.md
+pnpm migrate           # forward-only schema migrations
+pnpm pair              # one-time Baileys pairing (writes session state — never commit it)
+pnpm transport         # standalone transport runner
 ```
 
 Local integration runs: `DATABASE_URL=postgres://hh:hh@localhost:5432/hh_assistant pnpm test`
@@ -43,7 +57,7 @@ execution) · single Postgres + pgvector · Vercel AI SDK Core + Claude
 (Sonnet-class turn reasoning, single-tier v1 — ADR-0003; Haiku-class for
 cheap classification; prompt caching verified through
 passthrough) · Voyage embeddings (voyage-4-lite, zero-dep fetch client —
-ADR-0002) · Baileys (M2+) · Langfuse tracing · Vitest · ESLint flat config.
+ADR-0002) · Baileys (WhatsApp transport) · Langfuse tracing · Vitest · ESLint flat config.
 
 ## Hard boundaries (full list in SPEC.md)
 
@@ -74,3 +88,9 @@ ADR-0002) · Baileys (M2+) · Langfuse tracing · Vitest · ESLint flat config.
   red CI as merge-blocking by discipline.
 - Household: mixed Hebrew + English (fixtures must cover code-switching);
   timezone Eastern — reminders anchor to it, never server time.
+- **Production:** live on an AWS EC2 host (Docker Compose: app + co-located
+  `hh_assistant_prod` Postgres), egress allowlisted both directions via host
+  nftables, encrypted PITR (base + continuous WAL) to S3. Host access and the
+  host-loss restore drill are in `docs/recovery-runbook.md` /
+  `docs/ops-drills.md`. The dev Mac is **not** prod — never point a local run at
+  the prod DB.
