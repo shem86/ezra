@@ -183,3 +183,55 @@ nft set elements while the table/chain stay loaded — no fail-open window (a br
 fail-CLOSED at worst). v2: timer triggers a refresh-only path; `apply` runs only
 on boot to create the table. Even better: load the ruleset atomically so there's
 no window at all.
+
+## 12. AI / agent guardrails — gaps in the model layer
+
+v1's guardrails are strong on durability (determinism lint + recovery replay),
+the tool layer (risk tiers, confirm-before with execute-time revalidation, the
+fire-and-fold park), and the credential boundary. The *model* layer is thinner.
+Ranked against this project's actual threat model — two trusted members on a
+burner number — so "low-risk today" is stated where it's true, along with the
+trajectory that changes it.
+
+- **No runtime cost/spend ceiling — the one genuinely-missing control for the
+  system as it stands today.** `maxRounds=8` caps a single turn's model calls,
+  but nothing caps *cumulative* spend: no daily token budget, no dollar ceiling,
+  no circuit breaker on the metered Console key. A debounce storm, a runaway
+  compaction, or just a chatty day has no kill-switch — the blast radius is a
+  surprise bill. Asymmetric with how much the architecture already cares about
+  cost (prompt-caching is gated, yet there's no runtime backstop). Cheap to
+  close: a per-day token/cost counter in structured state with a hard stop +
+  alert to the monitoring channel. Do this first.
+- **No prompt-injection / untrusted-content fencing.** WhatsApp message text,
+  recalled history, semantic-memory hits, and the digest all reach the model as
+  authoritative — no provenance separation, no "this is data, not instructions"
+  boundary anywhere. Low-risk while both senders are trusted, but that ends the
+  moment the tool surface grows: **calendar invites, forwarded messages, and
+  pasted list items are third-party content**, and the M5 household-Q&A / any
+  web path injects fully untrusted text. Design the data/instruction boundary
+  *before* calendar + Q&A land, not as a retrofit after.
+- **Memory-poisoning is unguarded.** `set_fact` writes flow back into later
+  turns via `recall` and the digest, with no validation on the recall path — a
+  crafted fact value persists and re-enters context (a self-injection vector).
+  Same trust caveat and same "gets worse as the surface grows" trajectory as the
+  injection gap; treat them as one workstream.
+- **No output moderation before send.** Nothing inspects the assistant's text
+  between the model and WhatsApp. Acceptable for a trusted group — flagged only
+  to record that the count is zero, not minimal.
+- **Relatedness classifier is guarded only by an offline eval.** The
+  architecture explicitly accepts the refine-vs-unrelated error modes for v1
+  with eval coverage as the control — but that's an *offline* guard; a
+  misclassification can still mis-route an approval at runtime. v2: consider a
+  runtime confidence threshold that falls back to "ask the user which prompt you
+  mean" rather than acting on a low-confidence classification.
+- **HITL machinery is built but unexercised in production.** All eight v1 tools
+  are `autonomous`; `notify-after` is unused and `confirm-before` +
+  revalidation only gets real coverage when calendar arrives. The guardrail
+  exists and is integration-tested, but its production behaviour (revalidation,
+  execute-once, TTL expiry) is unproven on real traffic — fold a deliberate
+  soak of the park/resume path into the calendar rollout.
+
+Deliberately **out of scope, not gaps** (recorded so they aren't re-litigated):
+per-member authorization (shared household by design — "no secrecy between
+them"), transport warming / number provisioning, and real-traffic / real-model
+testing in CI (excluded by policy).
