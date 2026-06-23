@@ -67,9 +67,12 @@ never builds the production image. Consequences and fixes:
 > imported all 17 resources with **0 replacements / 0 destroys** (additive
 > management tags only; instance 🔒 protected, NOT replaced — same original launch
 > time, EIP intact, Baileys/pgdata untouched). Post-apply preview = 21 unchanged
-> (empty-diff gate met). scratch create-graph plans 10 from zero. **Remaining:** a
-> private-repo deploy key for a real scratch full-chain `up`. See
-> `infra/pulumi/README.md`.
+> (empty-diff gate met). **scratch create path PROVEN end-to-end:** a billable
+> `pulumi up` ran cloud-init's full chain (Docker/Node → deploy-key SSH clone of
+> the private repo → provision-host → SSM synthetic secret → GHCR private pull →
+> compose up) to a running ezra (DBOS launched, 0 restarts) at the WhatsApp-
+> pairing ceiling, then `destroy`ed. Three fresh-box cloud-init bugs found+fixed
+> (/run/sshd, /home/hh ownership, gpg --batch). See `infra/pulumi/README.md`.
 
 - The instance, EIP, security group, IAM user, and S3 backup bucket were all
   created by hand via AWS CLI (T15/T17). v2: Terraform or Pulumi — one `apply`,

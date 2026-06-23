@@ -20,9 +20,16 @@ ESLint scope (`eslint.config.js` ignores `infra/pulumi/`). Does not touch
   2026-06-13 launch time, EIP still attached, Baileys/pgdata untouched). A
   post-apply `pulumi preview` shows **21 unchanged** — the empty-diff gate is met;
   prod is now fully under IaC management.
-- **scratch create-graph VALIDATED:** `pulumi preview` plans 10 resources to
-  create from zero (default-VPC subnet + latest-Ubuntu-AMI lookups resolve). A
-  billable `pulumi up` is deferred and needs the private-repo deploy key (below).
+- **scratch create path PROVEN end-to-end (2026-06-23):** a billable `pulumi up`
+  stood up a fresh box; cloud-init ran the full chain — Docker/Node install →
+  **read-only deploy-key SSH clone of the private repo** → `provision-host.sh`
+  baseline → synthetic secret from SSM → **GHCR private-image pull** → `compose
+  up`. ezra came up with **0 restarts** (DBOS migrations applied, "DBOS
+  launched!", conversation queue registered), sitting at the WhatsApp-pairing
+  wait — the expected ceiling. Box then `pulumi destroy`ed (10 deleted, instance
+  terminated). Three real fresh-box cloud-init bugs were found + fixed:
+  `/run/sshd` missing in early boot, `/home/hh` left root-owned by the
+  pre-user-creation clone, and a non-`--batch` gpg keyring step.
 
 ## Two stacks
 
@@ -63,19 +70,22 @@ pulumi up                 # adopted resources are 🔒 protected against replace
 ## Prove the create path (scratch)
 
 ```bash
-pulumi stack select scratch
-pulumi preview            # validated: 10 resources to create from zero
-pulumi up                 # BILLABLE (t3a.medium). NEEDS the deploy key below.
-pulumi destroy && pulumi stack rm scratch
+pulumi stack init scratch
+pulumi up                 # BILLABLE (t3a.medium). Boots to a running ezra.
+pulumi destroy --yes && pulumi stack rm scratch --yes
 ```
 
-**Open gap for a real scratch `up`:** the repo is **private**, so cloud-init's
-`git clone` needs a read-only deploy key. Wire it like the SSM secret: add a
-repo deploy key, store its private half in SSM (`/hh-assistant/deploy-key`), and
-have `cloud-init/user-data.yaml.tmpl` fetch it (the clone step is already marked
-with this caveat). Until then a scratch box provisions the cloud resources but
-cloud-init stops at the clone. The create *graph* is proven; the full-chain
-on-box bootstrap needs this one seam.
+The private-repo clone is wired: cloud-init fetches a read-only **deploy key**
+from SSM (`ezra:deployKeyParam` → `/hh-assistant/deploy-key`) and clones over
+SSH. Scratch secrets are synthetic and live at `/hh-assistant/scratch-env`
+(deliberately separate from the prod `/hh-assistant/env` name). Standing infra
+left in place for future scratch runs: the repo deploy key `ezra-scratch-bootstrap`
+and the two SSM params — remove them if you want zero standing surface.
+
+**Ceiling:** the box reaches a running ezra (Postgres healthy, DBOS launched,
+queue registered) and then waits at WhatsApp pairing — inherently interactive,
+and the single household number can't be double-paired. That is the expected
+stop, not a failure.
 
 ## Secrets delivery (§3)
 

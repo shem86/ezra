@@ -37,13 +37,14 @@ write_files:
       SECRETS_PARAM="@@SECRETS_PARAM@@"
       AGE_KEY_PARAM="@@AGE_KEY_PARAM@@"
       SOPS_ENV_FILE="@@SOPS_ENV_FILE@@"
+      DEPLOY_KEY_PARAM="@@DEPLOY_KEY_PARAM@@"
       REPO_DIR=/home/hh/hh-assistant
 
       # --- 1. host tooling: Docker engine + compose plugin, aws-cli, Node 22 ----
       log "installing docker engine + compose plugin"
       install -m 0755 -d /etc/apt/keyrings
       curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
-        | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+        | gpg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg  # --batch --yes: re-run safe (no TTY overwrite prompt)
       chmod a+r /etc/apt/keyrings/docker.gpg
       . /etc/os-release
       echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu ${VERSION_CODENAME} stable" \
@@ -64,21 +65,39 @@ write_files:
       fi
       corepack enable || true
 
-      # --- 2. clone the repo at the pinned ref (read-only; public clone over https)
-      # NOTE: a PRIVATE repo needs a read-only deploy key here. For the throwaway
-      # this assumes the repo is reachable; wire the deploy key the same way as
-      # the secret below if/when needed.
-      log "cloning ${REPO_URL}@${REPO_REF}"
+      # --- 2. clone the repo at the pinned ref ---------------------------------
+      # Private repo: fetch a read-only deploy key from SSM (instance role) and
+      # clone over SSH. Without DEPLOY_KEY_PARAM, fall back to an https clone
+      # (works only for a public repo).
+      CLONE_URL="${REPO_URL}"
+      if [[ -n "${DEPLOY_KEY_PARAM}" ]]; then
+        log "fetching read-only deploy key from SSM"
+        install -d -m 700 /root/.ssh
+        aws ssm get-parameter --name "${DEPLOY_KEY_PARAM}" --with-decryption \
+          --region "${AWS_REGION}" --query Parameter.Value --output text > /root/.ssh/deploy_key
+        chmod 600 /root/.ssh/deploy_key
+        export GIT_SSH_COMMAND="ssh -i /root/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+        # https://github.com/owner/repo.git -> git@github.com:owner/repo.git
+        CLONE_URL="$(printf '%s' "${REPO_URL}" | sed -E 's#https://github.com/#git@github.com:#')"
+      fi
+      log "cloning ${CLONE_URL}@${REPO_REF}"
       if [[ ! -d "${REPO_DIR}/.git" ]]; then
-        git clone "${REPO_URL}" "${REPO_DIR}"
+        git clone "${CLONE_URL}" "${REPO_DIR}"
       fi
       git -C "${REPO_DIR}" fetch --tags --prune origin
       git -C "${REPO_DIR}" checkout --force "${REPO_REF}"
 
       # --- 3. login/OS baseline: the hh user, SSH lockdown, patching, hostname ---
+      # provision-host.sh runs `sshd -t`, which needs the privilege-separation
+      # dir; it isn't present in cloud-init's early-boot context, so create it.
+      mkdir -p /run/sshd
       log "running provision-host.sh (login/OS baseline)"
       bash "${REPO_DIR}/infra/provision-host.sh"
-      chown -R hh:hh "${REPO_DIR}"
+      # The clone (stage 2) created /home/hh as root BEFORE provision-host added
+      # the hh user, so adduser left /home/hh root-owned ("home dir already
+      # exists, not touching"). Chown the whole home, not just the repo, or hh
+      # can't write ~/.docker (the GHCR login below) etc.
+      chown -R hh:hh /home/hh
 
       # --- 4. sudoers drop-in + egress systemd unit/timer ----------------------
       log "installing sudoers drop-in + egress unit/timer"

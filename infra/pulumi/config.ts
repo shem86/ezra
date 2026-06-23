@@ -49,6 +49,7 @@ export interface EnvConfig {
   secretsParam: string; // secretsMode=ssm: SSM SecureString holding the env's .env
   ageKeyParam?: string; // secretsMode=sops: SSM SecureString holding the SOPS age key
   sopsEnvFile?: string; // secretsMode=sops: repo-relative path to .env.<env>.enc
+  deployKeyParam?: string; // SSM SecureString w/ a read-only repo deploy key (private-repo clone)
 
   // adopt-prod: maps a resource key (see host-environment.ts `imp`) to its live
   // AWS id. Present ⇒ that resource is brought into state via the `import`
@@ -94,6 +95,7 @@ export function loadEnvConfig(): EnvConfig {
     secretsParam: c.get("secretsParam") ?? "/hh-assistant/env",
     ageKeyParam: c.get("ageKeyParam"),
     sopsEnvFile: c.get("sopsEnvFile"),
+    deployKeyParam: c.get("deployKeyParam"),
 
     importIds: c.getObject<Record<string, string>>("importIds"),
   };

@@ -20,6 +20,7 @@ export function renderUserData(cfg: EnvConfig): string {
     SECRETS_PARAM: cfg.secretsParam,
     AGE_KEY_PARAM: cfg.ageKeyParam ?? "",
     SOPS_ENV_FILE: cfg.sopsEnvFile ?? "",
+    DEPLOY_KEY_PARAM: cfg.deployKeyParam ?? "",
   };
   return tmpl.replace(/@@(\w+)@@/g, (_m, k: string) => {
     if (!(k in subs)) throw new Error(`cloud-init template references unknown placeholder @@${k}@@`);
