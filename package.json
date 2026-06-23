@@ -16,6 +16,7 @@
     "dev": "tsc && node --env-file=.env dist/dev/main.js",
     "start": "tsc && node --env-file=.env dist/start.js",
     "migrate": "tsc && node --env-file=.env dist/memory/migrate-cli.js",
+    "release": "bash infra/deploy/release.sh",
     "pair": "tsc && node --env-file-if-exists=.env dist/transport/pair-cli.js",
     "transport": "tsc && node --env-file-if-exists=.env dist/transport/runner-cli.js"
   },

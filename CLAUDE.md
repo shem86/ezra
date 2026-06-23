@@ -137,14 +137,19 @@ swap; forward-only, so image-swap rollback reverts the app, **not** the schema)
 → `up -d` → healthcheck (wait for the `ezra up:` marker — real startup ~60s,
 180s timeout) → **auto-rollback** to the prior tag on failure.
 
-Cut a release: `git tag vX.Y.Z && git push origin vX.Y.Z`, **wait for the image
-build to go green**, then `gh release create vX.Y.Z` (publishing fires the
-deploy — sequencing matters: the deploy doesn't wait for the image). Only cut
-releases off **green `main`** (branch protection is unavailable while private —
-the CD gate is discipline). Redeploy or roll a known tag via Actions → Deploy →
-Run workflow (`workflow_dispatch`). PAT rotation is just `aws ssm put-parameter
---overwrite`; the next deploy picks it up, no host touch. Steady-state health is
-the hc-ping dead-man (`src/ops/deadman.ts`), not the pipeline.
+Cut a release — one push-button command from green `main`: **`pnpm release
+vX.Y.Z`** (`infra/deploy/release.sh`). It guards (must be on a clean main that
+matches origin, tag must be new), tags+pushes, **blocks on the CI image build
+going green**, then `gh release create`s — which fires the deploy — and follows
+it to its outcome. The blocking step is the point: the deploy doesn't wait for
+the image, so publishing by hand risks deploying a tag whose image isn't in GHCR
+yet. A `-rc.N` suffix cuts a prerelease (still fires the deploy — an rc dry-run).
+Only cut off **green `main`** (branch protection is unavailable while private —
+the CD gate is discipline). Redeploy or roll an already-released tag via Actions
+→ Deploy → Run workflow (`workflow_dispatch` with the `tag`), **not** `pnpm
+release`. PAT rotation is just `aws ssm put-parameter --overwrite`; the next
+deploy picks it up, no host touch. Steady-state health is the hc-ping dead-man
+(`src/ops/deadman.ts`), not the pipeline.
 
 ## Environment notes
 

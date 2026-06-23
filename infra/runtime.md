@@ -129,6 +129,15 @@ schema) → `up -d` → healthcheck (wait for the `ezra up:` launch marker, no
 crash-loop) → **auto-rollback** to the prior tag on failure. The deploy can be
 re-run manually via the workflow's `workflow_dispatch` input.
 
+**Cutting a release** is one command from green `main`: **`pnpm release vX.Y.Z`**
+(`infra/deploy/release.sh`). It guards (clean main matching origin, new tag),
+`git tag`s + pushes, **blocks until the CI image build for the tag goes green**
+(so GHCR has the image before we publish — the deploy doesn't wait for it),
+`gh release create`s to fire the deploy, then follows the deploy run to its
+outcome. A `-rc.N` suffix cuts a `--prerelease` (still fires the deploy — an rc
+dry-run). Redeploying or rolling an **already-released** tag is the
+`workflow_dispatch` path above, not `pnpm release`.
+
 ### One-time prerequisites (provisioned outside the repo)
 
 | Prereq | Where | Notes |
