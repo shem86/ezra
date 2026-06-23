@@ -20,12 +20,13 @@
 #   REPO_DIR           repo root holding .env + infra/ (default: ~/hh-assistant)
 #   GHCR_USER/GHCR_PAT optional; if set, `docker login ghcr.io` runs first.
 #                      Omit when the host already holds a persistent GHCR login.
-#   HEALTH_TIMEOUT     seconds to wait for the launch marker (default: 90)
+#   HEALTH_TIMEOUT     seconds to wait for the launch marker (default: 180 —
+#                      real startup is ~60s: WhatsApp connect + DBOS launch/recovery)
 set -euo pipefail
 
 EZRA_TAG="${EZRA_TAG:?set EZRA_TAG to the image tag to deploy}"
 REPO_DIR="${REPO_DIR:-$HOME/hh-assistant}"
-HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-90}"
+HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-180}"
 IMAGE="ghcr.io/shem86/hh-assistant"
 
 cd "$REPO_DIR"
