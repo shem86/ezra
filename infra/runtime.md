@@ -134,10 +134,36 @@ re-run manually via the workflow's `workflow_dispatch` input.
 | Prereq | Where | Notes |
 |---|---|---|
 | AWS IAM role for GitHub OIDC | repo variable `AWS_DEPLOY_ROLE_ARN` | trust the repo's OIDC subject; allow `ssm:SendCommand` on `i-0a7e9f4767666ac9e` + `ssm:GetCommandInvocation` |
-| Instance profile on the host | EC2 `i-0a7e9f4767666ac9e` | `AmazonSSMManagedInstanceCore` (SSM agent) + `ssm:GetParameter`/KMS-decrypt for the PAT param. §3 has an IAM *user* (backups) — the *instance role* may be new; verify/create |
-| GHCR read PAT | SSM Parameter Store `/hh-assistant/ghcr-pat` (SecureString) | `read:packages`; the on-host `docker login`. CI's `GITHUB_TOKEN` covers the push side automatically |
+| Instance profile on the host | EC2 `i-0a7e9f4767666ac9e` | The instance already carries the `hh-assistant-backup-ec2` profile (one per instance), so SSM perms were added to **that existing role** — `AmazonSSMManagedInstanceCore` + an inline `hh-read-ghcr-param` (`ssm:GetParameter` on `/hh-assistant/*` + scoped `kms:Decrypt`). The backup S3 policy is untouched. |
+| GHCR read PAT | SSM Parameter Store `/hh-assistant/ghcr-pat` (SecureString) | A **classic** PAT with `read:packages` — fine-grained PATs have no Packages permission for *user-owned* packages (org-owned only). The on-host `docker login` uses it; CI's `GITHUB_TOKEN` covers the push side automatically. See rotation below. |
 | Host git checkout + read-only fetch | `/home/hh/hh-assistant` | the SSM step `git checkout`s the release ref so compose/script match the image; private repo needs a read-only deploy token/key for `git fetch` |
 
 Steady-state post-deploy regressions (a process that wedges after the gate
 passes) are caught by the hc-ping.com **dead-man** (`src/ops/deadman.ts`), not
 this pipeline. A proper HTTP `/health` readiness endpoint is a clean follow-up.
+
+### Rotating the GHCR PAT
+
+The pull token (`/hh-assistant/ghcr-pat`) is a classic `read:packages` PAT and
+expires (90-day default). Expiry fails **loud and at deploy time** — the next
+deploy's `docker pull` errors, `on-host-deploy.sh` exits non-zero, the workflow
+goes red, and the **running container keeps serving** (no swap). It is never a
+silent production outage, so a bounded expiry is preferred over a non-expiring
+token. To rotate (proactively, or after a red deploy blamed on auth):
+
+1. GitHub → Settings → Developer settings → **Tokens (classic)** → regenerate
+   (or new) with scope **`read:packages`** only.
+2. Overwrite the SSM parameter (keep the token out of shell history):
+   ```
+   read -rs T   # if your shell is interactive; else paste inline once
+   aws ssm put-parameter --region us-east-1 --name /hh-assistant/ghcr-pat \
+     --type SecureString --value "$T" --overwrite
+   unset T
+   ```
+3. No host or workflow change is needed — the next deploy reads the new value.
+   Verify length without printing the secret:
+   `aws ssm get-parameter --name /hh-assistant/ghcr-pat --region us-east-1 --with-decryption --query 'Parameter.Value' --output text | wc -c`
+
+A classic `read:packages` token can read *all* packages the account sees; the
+only way to a per-package-scoped token is to move the image to a GitHub **org**
+and use a fine-grained org PAT (then update `IMAGE`/`GHCR_USER` everywhere).
