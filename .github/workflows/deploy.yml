@@ -55,7 +55,10 @@ jobs:
           # GHCR PAT from Parameter Store via the instance role, then run the
           # deploy. Heredoc keeps it a single SSM command document line.
           REMOTE=$(cat <<REMOTE_EOF
-          set -euo pipefail
+          # SSM AWS-RunShellScript executes this under /bin/sh (dash), not bash —
+          # so POSIX only here: `set -eu`, NOT `set -euo pipefail` (dash rejects
+          # pipefail). The real logic runs under bash via on-host-deploy.sh below.
+          set -eu
           cd /home/hh/hh-assistant
           sudo -u hh git fetch --tags --prune origin
           sudo -u hh git checkout --force "${RELEASE_REF}"
