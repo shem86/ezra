@@ -58,12 +58,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       # Immutable tags: :sha-<short> always; :main on the main branch; the
       # semver + :latest pair only on a v* release tag.
       - id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.IMAGE }}
           tags: |
@@ -76,7 +76,7 @@ jobs:
       # :ci-smoke ref the smokes target. GHA layer cache keeps this well under
       # the 10-min budget (§ CI optimization). push:false here — we push the
       # metadata tags explicitly below, so :ci-smoke never reaches the registry.
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           file: infra/Dockerfile
@@ -130,7 +130,7 @@ jobs:
       # Push only the metadata tags (never :ci-smoke), and only off a PR.
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
