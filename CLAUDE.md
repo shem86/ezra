@@ -1,96 +1,136 @@
-# hh-assistant
+# CLAUDE.md
 
-WhatsApp household assistant for two users (builder + wife): reminders, shared
-lists, Google Calendar, household Q&A. Dual goal: production-grade
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+WhatsApp household assistant ("ezra") for two users (builder + wife): reminders,
+shared lists, Google Calendar, household Q&A. Dual goal: production-grade
 agentic-systems learning and daily utility. **Reliability beats sophistication
-in every v1 trade-off.**
-
-**v1 is LIVE in production with real users and data** — changes carry real
-blast radius; the ask-first / never boundaries below are operative, not
-theoretical. Current state and post-launch backlog: `TASKS.md` frontier note +
-`docs/known-issues.md`.
+in every v1 trade-off.** v1 is built and launched (M0–M6 complete, all SPEC
+success criteria verified — `docs/launch-checklist.md`); the system runs on an
+AWS EC2 host. Work now is operation, hardening, and v2 (`V2_NOTES.md`).
 
 ## Source-of-truth documents (read before changing anything)
 
 | Doc | Owns | Status |
 |---|---|---|
 | `household-ai-agent-architecture-v3_5.md` | *Why* — locked decisions 1–11 | LOCKED |
-| `SPEC.md` | *Building* — scope, conventions, boundaries | APPROVED 2026-06-09 |
-| `PLAN.md` | Milestones M0–M6 + verification gates | M0–M6 COMPLETE |
-| `TASKS.md` | Per-session tasks + live progress checkboxes | ALL DONE (T1–T48); v1 live 2026-06-21 |
-| `docs/spike-results.md` | Spike verdicts, pinned versions, gotchas | all spikes closed (PASS) |
-| `docs/known-issues.md` | Deferred-decisions ledger + post-launch backlog | LIVE |
+| `SPEC.md` | *Building* — scope, conventions, boundaries | APPROVED |
+| `PLAN.md` | Milestones M0–M6 + verification gates | DONE |
+| `TASKS.md` | Per-task ledger + live progress checkboxes | M0–M6 complete |
+| `docs/spike-results.md` | Spike verdicts, pinned versions, gotchas | reference |
+| `docs/launch-checklist.md` · `docs/recovery-runbook.md` · `docs/ops-drills.md` | Launch/ops runbooks | reference |
+| `docs/adr-000*.md` | Reversed/locked decisions (router removed, Voyage, service-account calendar) | reference |
 
 Where docs overlap: architecture wins on rationale, SPEC wins on
-implementation detail. Update `TASKS.md` checkboxes as tasks complete.
+implementation detail. `TASKS.md` carries a per-task trail (the "T-numbers" in
+commit messages and code comments index into it) — read the relevant T-entry
+before changing the code it describes; it records *why* the code is shaped the
+way it is and what already bit us.
 
 ## Commands
 
 ```
 docker compose up -d   # dev DB: ONE Postgres with pgvector (journal+state co-located)
 pnpm build             # tsc, strict
-pnpm test              # vitest; integration suite only runs when DATABASE_URL is set
+pnpm test              # vitest run; integration suite only runs when DATABASE_URL is set
+pnpm test:recovery     # kill-mid-flight replay gate (named integration files; CI runs it after test)
 pnpm lint              # eslint incl. custom DBOS-determinism rule (CI-failing)
-pnpm dev               # agent against dev DB, transport stubbed
 pnpm eval              # model-in-the-loop scenarios — on-demand, never CI
-pnpm test:recovery     # kill-mid-flight + launch-recovery replay gate
+pnpm dev               # scripted-day composition against dev DB, transport+model stubbed
 ```
 
-Production / ops:
+Run a single test file / case:
+`DATABASE_URL=postgres://hh:hh@localhost:5432/hh_assistant pnpm test tests/integration/queue.test.ts`
+(append `-t "name"` to filter by test name). The integration suite redirects
+itself to a dedicated `hh_assistant_test` database on the same server so it
+never poisons the app DB (issue #5; `.claude/rules/testing.md`). Unit tests run
+with no DB. Spikes run directly: `node --env-file=.env spikes/<name>.ts`
+(Node 22 strips types).
+
+Production / operational entries (REAL traffic — never CI, never tests):
 ```
-pnpm start             # production entry (dist/start.js) — launch recipe in dbos.md
-pnpm migrate           # forward-only schema migrations
-pnpm pair              # one-time Baileys pairing (writes session state — never commit it)
-pnpm transport         # standalone transport runner
+pnpm start             # the production spine (src/start.ts → src/main.ts)
+pnpm migrate           # apply forward-only SQL migrations (repo-root migrations/)
+pnpm pair              # one-time Baileys QR pairing
+pnpm transport         # standalone transport runner (Baileys + ops, no LLM/DB) for drills
 ```
 
-Local integration runs: `DATABASE_URL=postgres://hh:hh@localhost:5432/hh_assistant pnpm test`
-(the integration suite redirects itself to a dedicated `hh_assistant_test`
-database on the same server so it never poisons the app DB — issue #5; see
-`.claude/rules/testing.md`).
-Spikes run directly: `node --env-file=.env spikes/<name>.ts` (Node 22 strips types).
+## Architecture — the production spine
 
-## Stack (locked — do not substitute)
+One process, composed by **dependency injection** with no module-level
+singletons. Read these together to see the whole:
 
-Node 22 / TypeScript strict / pnpm exact pins · DBOS 4.19.8 (durable
-execution) · single Postgres + pgvector · Vercel AI SDK Core + Claude
-(Sonnet-class turn reasoning, single-tier v1 — ADR-0003; Haiku-class for
-cheap classification; prompt caching verified through
-passthrough) · Voyage embeddings (voyage-4-lite, zero-dep fetch client —
-ADR-0002) · Baileys (WhatsApp transport) · Langfuse tracing · Vitest · ESLint flat config.
+- **`src/start.ts`** — sets a per-generation `DBOS__VMID` **before** the SDK is
+  imported (the one env *write* in `src/`), then loads `main.ts`. This makes
+  launch-time auto-recovery a no-op and dodges the 4.19.x datasource-init race
+  (see `.claude/rules/dbos.md`).
+- **`src/main.ts`** — THE composing caller: builds Config → model/tools/embedder
+  → registers transactional steps, the `handleTurn` workflow, the conversation
+  lane (ingest → debounced concurrency-1 queue → drain → turn → reply), both
+  scheduled sweeps (reminders, HITL expiry), and ops (health alerts, dead-man).
+  DBOS registration order is load-bearing: datasource + workflows + scheduled
+  **before** `DBOS.launch()`, queue registration **after**. `src/dev/main.ts` is
+  the same wiring with a scripted day instead of the real socket.
+
+Message flow: Baileys inbound → **ingestion** (allowlist, echo-filter,
+durable-enqueue-*before*-ack) → **conversation queue** (per-conversation
+partition, consumer-side debounce groups a burst into one turn) → **`handleTurn`**
+workflow (load context → model rounds with tool calls → persist; compaction at
+threshold; every `tool_use` gets a `tool_result`) → **reply** out a send step
+with a declared delivery class against `sent_log`.
+
+Module layout (`SPEC.md` "Project Structure", tests mirror under `tests/`):
+`src/transport` (Baileys, send classes, sent-log) · `src/orchestration`
+(workflows, queue, debounce, scheduled, recovery, steps) · `src/agent`
+(handleTurn, call-model, prompts, compaction, context, relatedness) · `src/tools`
+(defineTool: Zod schema + risk tier + idempotency + revalidation; lists,
+reminders, facts, recall, calendar) · `src/memory` (structured store +
+migrations + pgvector semantic store + embedder) · `src/hitl` (pending_actions,
+park/fire-and-fold, approval binding, expiry) · `src/ops` (config, health,
+alerts, dead-man, tracing, egress-allowlist).
+
+`infra/` holds host provisioning, the hardened Docker Compose prod runtime, the
+nftables egress allowlist (mirrors `src/ops/egress-allowlist.ts`, drift-tested),
+and the PITR backup/restore pipeline.
 
 ## Hard boundaries (full list in SPEC.md)
 
 - **Always:** `pnpm lint && pnpm test` before commit · every structured-state
-  write goes through a DBOS transactional step · every external effect has an
-  idempotency key or declared delivery class · every `tool_use` gets a
-  `tool_result` · exact-pin every dependency.
+  write goes through a DBOS datasource transaction (never a plain step/raw
+  query) · every external effect has an idempotency key or declared delivery
+  class · every `tool_use` gets a `tool_result` · exact-pin every dependency.
 - **Ask first:** new dependencies (WhatsApp-adjacent ⇒ full transitive
   review) · DB schema changes · risk-tier/delivery-class changes · real
   WhatsApp traffic · spending money.
 - **Never:** commit secrets or Baileys session state · auto-execute a
   confirm-before tool · let operational credentials (API keys, OAuth tokens,
   Baileys state) into prompts/traces/semantic store · restore Baileys session
-  from backup · weaken a failing test or lint rule to pass CI.
+  from backup (re-pair on loss) · weaken a failing test or lint rule to pass CI.
 
-## Detailed rules (`.claude/rules/`)
+## Detailed rules (`.claude/rules/`) — read these
 
-- `dbos.md` — durable-execution rules + DBOS 4.19.x version-specific gotchas
-- `conventions.md` — TS/code style, module layout, config access, tooling quirks
-- `testing.md` — test taxonomy, what runs where, recovery-test patterns
+- `dbos.md` — durable-execution invariants + DBOS 4.19.x version-specific
+  gotchas (determinism, registration order, recovery, the `this`/workflow trap).
+- `conventions.md` — TS/code style (strict, Zod at boundaries, no default
+  exports, DI via `deps`, `src/ops/config.ts` is the ONLY env reader), module
+  layout, and tooling quirks (NodeNext `.js` specifiers, type-stripping, the
+  flat ESLint config).
+- `testing.md` — test taxonomy (unit / integration / eval), what runs where,
+  the `hh_assistant_test` redirection, and recovery-test patterns.
 
 ## Environment notes
 
+- Stack (locked — do not substitute): Node 22 / TypeScript 6 strict / pnpm
+  exact pins · DBOS 4.19.8 (durable execution) · single Postgres + pgvector ·
+  Vercel AI SDK Core + Claude (Sonnet-class turns, Haiku-class for
+  classification — tiered turn routing was removed, ADR-0003) · Voyage
+  embeddings (zero-dep client, ADR-0002) · Baileys · Langfuse tracing · Vitest.
 - Dev Mac containers run via Colima (occasionally flaky); **CI (Linux) is the
-  arbiter** for anything container-dependent.
-- GitHub: `shem86/hh-assistant` (private). CI = build+lint+test with pgvector
-  service container. Branch protection unavailable on the free plan — treat
-  red CI as merge-blocking by discipline.
+  arbiter** for anything container-dependent. Dead-database failures read as
+  ECONNREFUSED — Colima is the usual local suspect, not the code.
+- GitHub `shem86/hh-assistant` (private). CI = build+lint+test+recovery with a
+  pgvector service container. Branch protection unavailable on the free plan —
+  treat red CI as merge-blocking by discipline.
 - Household: mixed Hebrew + English (fixtures must cover code-switching);
-  timezone Eastern — reminders anchor to it, never server time.
-- **Production:** live on an AWS EC2 host (Docker Compose: app + co-located
-  `hh_assistant_prod` Postgres), egress allowlisted both directions via host
-  nftables, encrypted PITR (base + continuous WAL) to S3. Host access and the
-  host-loss restore drill are in `docs/recovery-runbook.md` /
-  `docs/ops-drills.md`. The dev Mac is **not** prod — never point a local run at
-  the prod DB.
+  timezone Eastern — reminders/compaction anchor to it, never server time.
+- Prod host root is via `ssh ubuntu@98.91.67.226` (the `hh` user can't sudo).
