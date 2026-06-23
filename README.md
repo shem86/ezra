@@ -16,120 +16,64 @@ reminders, shared lists (groceries/todos), Google Calendar, and memory-backed
 household Q&A — in mixed Hebrew and English. It is **live**, running on a
 hardened cloud host against the real WhatsApp group.
 
-## What's actually interesting here
+## What's interesting here
 
-The hard part of a household agent is not the model — it's that this class of
-system **fails quietly at its edges**, and the consequence of a silent failure
-is a person who stops getting reminders and tells you about it before your logs
-do. So the work is distributed-systems engineering plus the agent-specific
-disciplines: a hand-built **harness** that owns the agent loop in durable code,
-deliberate **context engineering** to keep the model cheap and correct, and
-**eval engineering** to test something nondeterministic. It spreads across five
-boundaries where these systems fail without a crash, plus cost and operability
-as cross-cutting concerns. The LLM is the easy 10%.
+The hard part of a household agent isn't the model — it's that this class of
+system **fails quietly at its edges**, and a silent failure means a person stops
+getting reminders and tells you before your logs do. So the work is
+distributed-systems engineering plus the agent-specific disciplines: a hand-built
+**harness** that owns the agent loop in durable code, **context engineering** to
+keep the model cheap and correct, and **eval engineering** to test something
+nondeterministic. The LLM is the easy 10%.
 
-### 1. The ingestion boundary — durable capture before ack
+It comes down to five edges where these systems fail without ever crashing:
 
-An inbound WhatsApp message is **durably enqueued before it is acknowledged**.
-A crash between receive and enqueue replays from WhatsApp's offline redelivery;
-`ingestWorkflowId` dedupe makes that redelivery safe. The message is never lost
-in the window where most naive agents drop it.
+- **Ingestion** — an inbound message is durably enqueued *before* it's acked, so
+  a crash in that window replays from WhatsApp's offline redelivery, and dedupe
+  makes the replay safe. Nothing is lost where naive agents drop it.
+- **Durable execution** — turns are short-lived durable workflows on
+  [DBOS](https://www.dbos.dev/). The agent loop is owned by workflow code, *not
+  the AI SDK* — tools run as journaled steps, not SDK calls — so the loop itself
+  is recoverable, and each state write co-commits with its journal checkpoint in
+  one Postgres transaction (exactly-once). A kill-mid-flight suite SIGKILLs a
+  turn and proves identical output, every effect once.
+- **The human boundary** — risky actions (calendar writes) *park* instead of
+  executing and fold the turn closed; a quoted-reply approval resumes them in a
+  fresh turn, revalidated right before the write, and both spouses saying "yes"
+  executes once. Approve/deny is decided by deterministic Hebrew/English
+  keywords — no model in the decision.
+- **External effects** — every effect is idempotent; calendar events get a
+  deterministic id, so a replayed create folds Google's 409 to success instead
+  of double-booking. Outbound messages are classified at-least-once vs
+  at-most-once against a send log.
+- **Recovery & liveness** — encrypted point-in-time backups to S3 with
+  asymmetric keys (the host can't decrypt its own backups); restore
+  reconciliation is mechanical, not judgment. Liveness rides an independent
+  alert channel that doesn't depend on the socket it watches.
 
-### 2. Durable execution — exactly-once, surviving `kill -9`
+Two concerns run across all of it:
 
-The agent is not a long-lived process holding a conversation; it's a sequence
-of short-lived **durable turns** orchestrated by [DBOS](https://www.dbos.dev/)
-on one Postgres. A deliberate harness decision sits underneath this: the agent
-loop is owned by durable workflow code, **not the AI SDK** — the SDK `ToolSet`
-is projected with *no* `execute` functions, so every tool runs as a journaled
-DBOS step rather than an SDK-driven call. The loop itself is therefore
-recoverable, not just the writes inside it. Every structured-state write happens
-in a DBOS transactional step, so the write and its journal checkpoint
-**co-commit in one Postgres transaction** — that co-commit *is* the exactly-once
-guarantee. Crash recovery replays the journal instead of re-running completed
-steps. A custom ESLint rule
-(`hh/no-nondeterminism-in-workflow`, CI-failing) bans clock reads, randomness,
-and env access inside workflow bodies so replay stays deterministic. Proven by
-a kill-mid-flight recovery suite (`pnpm test:recovery`) that SIGKILLs a child
-process mid-turn and asserts identical output with every effect count == 1.
+- **Cost is measured, not hoped for.** A byte-stable cache prefix keeps **78% of
+  live input tokens as cache reads**, holding spend to **~$9/mo** — under budget
+  even priced as if caching were off. ([One decision](docs/adr-0003-remove-turn-router.md)
+  even *removed* a cheap/expensive model router once measurement showed it
+  forfeited the cache for no real saving.)
+- **Credentials never reach the model — by construction and by CI.** Secrets
+  never enter prompts, traces, or the vector store, and the egress allowlist is
+  unit-tested: a dependency that dials an unlisted host turns CI red. The runtime
+  is a non-root, read-only-rootfs container.
 
-### 3. The human boundary — non-blocking human-in-the-loop
+Testing something nondeterministic gets its own answer: the deterministic core
+runs through an integration suite (including the recovery gate), while the
+model-in-the-loop behaviour runs through an on-demand eval harness whose approval
+scenarios assert on **resulting state, never reply wording** — which is what
+makes a nondeterministic agent gateable at all.
 
-Risky actions (calendar writes — third-party-visible) never auto-execute. They
-**park** as `pending_actions` rows with an approval prompt and fold the turn
-closed — no blocked process, no held lock. A quoted-reply approval binds to the
-action via the persisted prompt message id and resumes it in a *fresh turn
-through the same lane*, **revalidated at execute time** (the slot is re-checked
-free right before the write). The approved→executed claim is a single-winner
-co-commit with the effect, so both spouses answering "yes" back-to-back
-executes exactly once. Approve/deny is decided by **deterministic Hebrew/English
-keyword sets — no model in the approval decision**; a Haiku-class relatedness
-classifier only routes the ambiguous middle (refine / unrelated / approve-deny)
-while an action pends, and a TTL sweep gently expires unanswered ones.
-
-### 4. The external-service boundary — idempotency everywhere
-
-Every external effect carries an idempotency key derived from
-`(workflowID, stepNumber)`. Calendar events use a **deterministic id**
-(`hh` + SHA-256 of the action id), so a recovery replay re-creating an event
-hits Google's 409 and folds it to success — no duplicate booking. Outbound
-messages are **classified**: at-least-once (reminders, nags, approval prompts —
-send-then-log) or at-most-once (conversational echoes — log-then-send), tracked
-against a `sent_log`; a permanent unroutable-destination error dead-letters with
-an alert instead of wedging the concurrency-1 lane forever.
-
-### 5. The recovery & failure-detection boundaries — restore is mechanical, not heroic
-
-State is backed up as **client-side-encrypted point-in-time-recovery** (base
-backups + continuous WAL) to S3, using **asymmetric age encryption** — the host
-holds only the public recipient, so a host compromise can't decrypt existing
-backups; the private key lives offline, restore-only. After a restore,
-reconciliation is mechanical: `sent_log` answers "what did we already send" and
-deterministic calendar ids answer "what did we already create" (re-execute →
-409 → already-exists). A documented runbook + a self-contained restore drill
-prove it. Liveness is watched by an **independent** channel: a Telegram
-down-alert on a path that does not depend on the WhatsApp socket it monitors,
-plus an external dead-man ping.
-
-### Cross-cutting: cost discipline & a real security posture
-
-- **Prompt caching is engineered, not hoped for.** The system prompt is a
-  byte-stable cache prefix; per-turn dynamic state (the pending-actions digest,
-  the pushed wall-clock) appends strictly *after* it. On live traffic, **78% of
-  input tokens are cache reads**, holding cost to **~$9/mo** (and under the
-  $30/mo ceiling even priced as if caching were off). The cost gate is
-  measured, not assumed —
-  [ADR-0003](docs/adr-0003-remove-turn-router.md) even *removed* a tiered
-  cheap/expensive router once measurement showed it forfeited the cache for no
-  real saving.
-- **Credentials never reach the model — by construction and by CI.** API keys,
-  OAuth tokens, and the Baileys session never enter prompts, traces, or the
-  semantic store; tools receive authenticated clients via `deps`, never raw
-  secrets, and a test sweeps emitted traces for any secret value. The egress
-  allowlist is a **unit-tested source of truth** — a new dependency that dials
-  an unlisted host turns CI red — and it renders the host's default-deny
-  nftables ruleset. The runtime is a non-root, read-only-rootfs,
-  `cap_drop: [ALL]` container.
-
-### Testing a nondeterministic agent
-
-The deterministic core (workflows, idempotency, recovery) is held by a normal
-integration suite against real Postgres, including the kill-mid-flight recovery
-gate. The *model-in-the-loop* behaviour gets its own harness (`pnpm eval`,
-on-demand, never CI): the five decision-9 approval scenarios — approve-after-
-delay, deny, abandon, refine, stale-at-execution — plus execute-once under
-double approval, each asserting on **resulting state (row status, effect counts,
-the injected context message), never on reply wording**. The relatedness
-classifier carries a separate accuracy dashboard (24/24 across Hebrew / English /
-code-switched fixtures, report-only). State-based assertions are what makes a
-nondeterministic agent gateable at all.
-
-> One detail that delighted me: the model had **no clock**. Its training anchor
-> made "today" feel like mid-2025, so "remind me in 5 minutes" resolved 11
-> months into the past and fired instantly — a silent success. The fix
-> ([T47](TASKS.md)) pushes the real Eastern wall-time into every turn as a
-> post-prefix system block (cache-safe), mirroring how Claude's own system
-> prompt injects `{{currentDateTime}}`.
+> A favourite bug: the model had **no clock**. Its training anchor made "today"
+> feel like mid-2025, so "remind me in 5 minutes" resolved months into the past
+> and fired instantly — a silent success. The fix pushes real wall-time into
+> every turn (cache-safe), the way Claude's own system prompt injects the
+> current date.
 
 ## How it works
 
@@ -173,7 +117,7 @@ criterion with evidence.
 | M2.5 — Host + encrypted backups | verified restore | ✅ done |
 | M3 — Durable core | `pnpm test:recovery` green | ✅ done |
 | M4 — Reasoning layer | all tools exercised, cost ≤ $30/mo | ✅ done (~$9/mo) |
-| M5 — HITL approval flows | five decision-9 eval scenarios pass | ✅ done (8/8) |
+| M5 — HITL approval flows | five approval scenarios pass | ✅ done (8/8) |
 | M5.5 — Calendar | real-wire round-trip gate | ✅ done |
 | M6 — Wire-up and launch | SPEC success checklist swept | ✅ **live** |
 
@@ -223,7 +167,7 @@ eslint-rules/       custom rule: no nondeterminism in workflow bodies
 spikes/             de-risking + real-wire smoke scripts
 infra/              host provisioning, hardened compose, egress nftables, backups
 tests/              unit + integration (integration gated on DATABASE_URL)
-evals/              model-in-the-loop decision-9 scenarios (on-demand)
+evals/              model-in-the-loop approval scenarios (on-demand)
 docs/               ADRs, spike results, runbooks, drill logs, launch checklist
 ```
 
@@ -243,8 +187,8 @@ docs/               ADRs, spike results, runbooks, drill logs, launch checklist
 | [`CLAUDE.md`](CLAUDE.md) + `.claude/rules/` | Working agreements for AI-assisted sessions |
 
 Build history lives in [`PLAN.md`](PLAN.md) (milestones M0–M6) and
-[`TASKS.md`](TASKS.md) (the dependency-ordered task ledger with per-task
-done-notes and the deferred-decisions ledger).
+[`TASKS.md`](TASKS.md) (the dependency-ordered task list with per-task
+done-notes).
 
 ## Stack
 
