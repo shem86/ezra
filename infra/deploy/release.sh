@@ -39,6 +39,27 @@ fi
 PRERELEASE_FLAG=""
 [[ "$VERSION" == *-* ]] && PRERELEASE_FLAG="--prerelease"
 
+# Poll a workflow run to completion, echoing its conclusion. We do NOT use
+# `gh run watch`: it dies on a single transient API error (a momentary keyring
+# 401 once aborted a real release mid-build), which must not fail a release when
+# the build itself is fine. This tolerates a run of transient read failures and
+# only gives up if gh is unreachable for ~100s straight.
+wait_run() { # $1 = run databaseId → stdout: conclusion ("success"/"failure"/…)
+  local id="$1" st misses=0
+  while :; do
+    if ! st="$(gh run view "$id" --json status --jq .status 2>/dev/null)" || [[ -z "$st" ]]; then
+      misses=$((misses + 1))
+      (( misses >= 20 )) && { echo "error: lost contact with gh watching run $id" >&2; return 1; }
+      sleep 5; continue
+    fi
+    misses=0
+    [[ "$st" == "completed" ]] && break
+    printf '    run %s: %s\n' "$id" "$st" >&2
+    sleep 10
+  done
+  gh run view "$id" --json conclusion --jq .conclusion 2>/dev/null || echo ""
+}
+
 # --- guards: clean, up-to-date main; tag is new ------------------------------
 branch="$(git rev-parse --abbrev-ref HEAD)"
 [[ "$branch" == "main" ]] \
@@ -69,7 +90,9 @@ done
 [[ -n "$run_id" ]] \
   || { echo "error: no CI run found for $VERSION after 60s — check Actions; the tag is pushed, so publish manually once green: gh release create $VERSION $PRERELEASE_FLAG" >&2; exit 1; }
 echo "    watching CI run $run_id (Ctrl-C is safe — the tag is already pushed)"
-gh run watch "$run_id" --exit-status --compact
+ci_concl="$(wait_run "$run_id")"
+[[ "$ci_concl" == "success" ]] \
+  || { echo "error: CI run $run_id ended '$ci_concl' — NOT publishing (the image may not be in GHCR). Fix and re-cut, or publish manually once a green build for $VERSION exists." >&2; exit 1; }
 
 # --- publish the release → fires the deploy ----------------------------------
 echo "==> CI green; publishing release $VERSION (this fires the SSM deploy)"
@@ -80,14 +103,17 @@ gh release create "$VERSION" --generate-notes --title "$VERSION" $PRERELEASE_FLA
 echo "==> released $VERSION — following the deploy"
 deploy_id=""
 for _ in $(seq 1 30); do
-  deploy_id="$(gh run list --workflow "$DEPLOY_WORKFLOW" --event release \
-    --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || true)"
-  [[ -n "$deploy_id" ]] && break
+  # Filter to the run whose head_branch is THIS tag — don't grab a stale deploy.
+  deploy_id="$(gh run list --workflow "$DEPLOY_WORKFLOW" --event release --limit 5 \
+    --json databaseId,headBranch --jq 'map(select(.headBranch=="'"$VERSION"'"))[0].databaseId' 2>/dev/null || true)"
+  [[ -n "$deploy_id" && "$deploy_id" != "null" ]] && break
   sleep 2
 done
-if [[ -n "$deploy_id" ]]; then
-  gh run watch "$deploy_id" --exit-status --compact
-  echo "==> $VERSION is live."
+if [[ -n "$deploy_id" && "$deploy_id" != "null" ]]; then
+  dep_concl="$(wait_run "$deploy_id")"
+  [[ "$dep_concl" == "success" ]] \
+    && echo "==> $VERSION is live." \
+    || { echo "error: deploy run $deploy_id ended '$dep_concl' — check Actions → Deploy (auto-rollback may have restored the prior tag)." >&2; exit 1; }
 else
   echo "    (couldn't resolve the deploy run — track it in Actions → Deploy)"
 fi
