@@ -55,6 +55,27 @@ itself is the easy 10%.
 > every turn (cache-safe), the way Claude's own system prompt injects the
 > current date.
 
+### Guardrails
+
+The agent acts on a shared household's behalf, so what it's *allowed* to do is
+constrained by construction, not by asking the prompt nicely:
+
+- **Risk-tiered tools.** Every tool declares a tier — autonomous (reversible,
+  household-internal), notify-after, or confirm-before. Anything
+  third-party-visible (calendar writes) is confirm-before and **cannot
+  auto-execute**: it parks for human approval, enforced in code, not left to the
+  model's judgment.
+- **Scoped to one conversation.** Ingestion rejects any chat that isn't the
+  allowlisted household group — the agent never answers strangers, and no outside
+  message can drive a tool.
+- **Schema-validated I/O.** Zod validates every inbound message, tool argument,
+  and model output; a malformed or hallucinated tool call becomes an error result
+  the loop handles, never an exception or an unintended side effect.
+- **Bounded and conservative by default.** The loop is capped with a forced final
+  answer (no runaway tool calls), and ambiguous safety calls fail toward the safe
+  side — an unclear approval re-asks rather than acting, an unclassifiable send
+  retries rather than silently dropping a reminder.
+
 ### Measurement & evaluation
 
 Testing a nondeterministic agent needs more than unit tests:
