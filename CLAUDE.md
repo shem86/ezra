@@ -118,6 +118,34 @@ and the PITR backup/restore pipeline.
 - `testing.md` — test taxonomy (unit / integration / eval), what runs where,
   the `hh_assistant_test` redirection, and recovery-test patterns.
 
+## Deploying (CI/CD) — full detail + one-time prereqs in `infra/runtime.md`
+
+CI (`.github/workflows/ci.yml`) builds the prod image (`infra/Dockerfile`), runs
+the two config smokes (compose-config + `loadProductionConfig` in the real
+image), and pushes immutable tags to `ghcr.io/shem86/hh-assistant` —
+`:sha-<short>`+`:main` on a main push, `:<version>`+`:latest` on a `v*` tag. PRs
+build+smoke but **never push**.
+
+CD (`.github/workflows/deploy.yml`) deploys on a **published GitHub release**
+(or `workflow_dispatch` with a `tag` input) over AWS SSM — no inbound SSH. It
+OIDC-assumes `AWS_DEPLOY_ROLE_ARN`, then SSM-runs
+`infra/deploy/on-host-deploy.sh` on `i-0a7e9f4767666ac9e`, which: checkout the
+release ref → self-fetch the GHCR PAT from SSM Parameter Store
+(`/hh-assistant/ghcr-pat`; host has aws-cli + the instance role) → `docker
+login` → pull → **migrate-gate** (migrations run on the new image *before* the
+swap; forward-only, so image-swap rollback reverts the app, **not** the schema)
+→ `up -d` → healthcheck (wait for the `ezra up:` marker — real startup ~60s,
+180s timeout) → **auto-rollback** to the prior tag on failure.
+
+Cut a release: `git tag vX.Y.Z && git push origin vX.Y.Z`, **wait for the image
+build to go green**, then `gh release create vX.Y.Z` (publishing fires the
+deploy — sequencing matters: the deploy doesn't wait for the image). Only cut
+releases off **green `main`** (branch protection is unavailable while private —
+the CD gate is discipline). Redeploy or roll a known tag via Actions → Deploy →
+Run workflow (`workflow_dispatch`). PAT rotation is just `aws ssm put-parameter
+--overwrite`; the next deploy picks it up, no host touch. Steady-state health is
+the hc-ping dead-man (`src/ops/deadman.ts`), not the pipeline.
+
 ## Environment notes
 
 - Stack (locked — do not substitute): Node 22 / TypeScript 6 strict / pnpm
@@ -129,8 +157,9 @@ and the PITR backup/restore pipeline.
   arbiter** for anything container-dependent. Dead-database failures read as
   ECONNREFUSED — Colima is the usual local suspect, not the code.
 - GitHub `shem86/hh-assistant` (private). CI = build+lint+test+recovery with a
-  pgvector service container. Branch protection unavailable on the free plan —
-  treat red CI as merge-blocking by discipline.
+  pgvector service container, **plus prod-image build/smoke/push to GHCR**; CD
+  deploys on release over SSM (see Deploying). Branch protection unavailable on
+  the free plan — treat red CI as merge-blocking by discipline.
 - Household: mixed Hebrew + English (fixtures must cover code-switching);
   timezone Eastern — reminders/compaction anchor to it, never server time.
 - Prod host root is via `ssh ubuntu@98.91.67.226` (the `hh` user can't sudo).
