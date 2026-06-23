@@ -1,0 +1,16 @@
+[Unit]
+Description=hh-assistant egress allowlist REFRESH (re-resolve CDN IPs into the live nft sets)
+Documentation=file:///home/hh/hh-assistant/infra/runtime.md
+# refresh only flushes + re-adds the nft set ELEMENTS while the table/chain stay
+# loaded (V2_NOTES §11) — no fail-open window, unlike `apply` which deletes the
+# table first. It therefore requires the table to already exist, so it is
+# ordered after the boot-time apply (hh-egress.service); at periodic firings the
+# table persists in the kernel and this just re-resolves the rotating IPs.
+After=docker.service hh-egress.service
+Wants=hh-egress.service
+
+[Service]
+Type=oneshot
+# Same bridge re-derivation as the apply unit (the name tracks the docker
+# network id), then `refresh` instead of `apply`.
+ExecStart=/usr/bin/env bash -c 'EG=br-$(docker network inspect hh-assistant_egress -f "{{slice .Id 0 12}}") && EGRESS_IFACE="$EG" bash /home/hh/hh-assistant/infra/egress/nftables.sh refresh'

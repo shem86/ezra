@@ -18,10 +18,16 @@
 # unit our ops touch under sudo — the backup sidecar runs via the docker group,
 # no sudo. Extend this list deliberately; do not broaden to blanket systemctl.
 
+# The boot-time apply unit (hh-egress.service), the timer-driven refresh unit
+# (hh-egress-refresh.service, V2_NOTES §11), and the timer itself.
 Cmnd_Alias HH_EGRESS = /usr/bin/systemctl restart hh-egress.service, \
                        /usr/bin/systemctl start hh-egress.service, \
                        /usr/bin/systemctl stop hh-egress.service, \
                        /usr/bin/systemctl status hh-egress.service, \
+                       /usr/bin/systemctl restart hh-egress-refresh.service, \
+                       /usr/bin/systemctl start hh-egress-refresh.service, \
+                       /usr/bin/systemctl stop hh-egress-refresh.service, \
+                       /usr/bin/systemctl status hh-egress-refresh.service, \
                        /usr/bin/systemctl restart hh-egress.timer, \
                        /usr/bin/systemctl start hh-egress.timer, \
                        /usr/bin/systemctl stop hh-egress.timer, \
