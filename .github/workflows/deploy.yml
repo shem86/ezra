@@ -59,22 +59,18 @@ jobs:
           # so POSIX only here: `set -eu`, NOT `set -euo pipefail` (dash rejects
           # pipefail). The real logic runs under bash via on-host-deploy.sh below.
           set -eu
+          # The official AWS CLI v2 installer symlinks to /usr/local/bin; make
+          # sure it's on PATH under the SSM agent's minimal shell environment.
+          export PATH="/usr/local/bin:\$PATH"
           cd /home/hh/hh-assistant
           sudo -u hh git fetch --tags --prune origin
           sudo -u hh git checkout --force "${RELEASE_REF}"
-          # Fetch a fresh GHCR PAT from Parameter Store IF the AWS CLI is on the
-          # host; otherwise fall back to the host's existing \`docker login\`
-          # (on-host-deploy.sh skips its own login when GHCR_PAT is unset). Once
-          # the AWS CLI is installed on the box, this auto-upgrades to the
-          # self-fetching path with no workflow change.
-          if command -v aws >/dev/null 2>&1; then
-            GHCR_PAT=\$(aws ssm get-parameter --name "${GHCR_PAT_PARAM}" --with-decryption --region "${AWS_REGION}" --query Parameter.Value --output text)
-            sudo -u hh env EZRA_TAG="${EZRA_TAG}" GHCR_USER="${GHCR_USER}" GHCR_PAT="\$GHCR_PAT" \
-              bash infra/deploy/on-host-deploy.sh
-          else
-            sudo -u hh env EZRA_TAG="${EZRA_TAG}" \
-              bash infra/deploy/on-host-deploy.sh
-          fi
+          # Self-fetch a fresh GHCR PAT from Parameter Store via the instance
+          # role, then deploy. on-host-deploy.sh logs in with it — no reliance on
+          # any persisted host login, so PAT rotation is just an SSM overwrite.
+          GHCR_PAT=\$(aws ssm get-parameter --name "${GHCR_PAT_PARAM}" --with-decryption --region "${AWS_REGION}" --query Parameter.Value --output text)
+          sudo -u hh env EZRA_TAG="${EZRA_TAG}" GHCR_USER="${GHCR_USER}" GHCR_PAT="\$GHCR_PAT" \
+            bash infra/deploy/on-host-deploy.sh
           REMOTE_EOF
           )
 
