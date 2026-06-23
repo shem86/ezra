@@ -103,7 +103,12 @@ write_files:
       log "installing sudoers drop-in + egress unit/timer"
       install -m 0440 -o root -g root "${REPO_DIR}/infra/host/sudoers-hh-ops" /etc/sudoers.d/hh-ops
       visudo -cf /etc/sudoers.d/hh-ops
-      install -m 0644 "${REPO_DIR}/infra/egress/hh-egress.service" /etc/systemd/system/hh-egress.service
+      # Install EVERY egress unit the repo ships, not a hardcoded pair: main
+      # carries the apply/refresh split (V2_NOTES §11) where hh-egress.timer has
+      # Unit=hh-egress-refresh.service — install only the apply unit and the
+      # timer refuses to start ("trigger unit not loaded"). The glob picks up
+      # hh-egress.service + hh-egress-refresh.service (and any future siblings).
+      install -m 0644 "${REPO_DIR}"/infra/egress/hh-egress*.service /etc/systemd/system/
       install -m 0644 "${REPO_DIR}/infra/egress/hh-egress.timer" /etc/systemd/system/hh-egress.timer
       systemctl daemon-reload
       usermod -aG docker hh
@@ -140,8 +145,13 @@ write_files:
       sudo -u hh env EZRA_TAG="${EZRA_TAG}" \
         docker compose --env-file "${REPO_DIR}/.env" -f "${REPO_DIR}/infra/docker-compose.prod.yml" up -d
       sudo -u hh bash "${REPO_DIR}/infra/backup/enable-replication.sh" || log "replication wiring skipped/failed (non-fatal for first boot)"
-      systemctl enable --now hh-egress.timer
+      # Boot-time apply FIRST (creates the nft table), THEN enable+start the
+      # timer: its triggered refresh unit is After=hh-egress.service and only
+      # swaps set elements on an already-loaded table, so the table must exist
+      # before the timer's immediate (OnBootSec-already-elapsed + Persistent)
+      # first firing.
       systemctl start hh-egress.service || true
+      systemctl enable --now hh-egress.timer
 
       log "full-chain bootstrap complete — ezra is up; remaining manual step: WhatsApp pairing (pnpm pair)"
 

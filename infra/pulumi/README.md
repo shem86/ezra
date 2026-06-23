@@ -27,9 +27,16 @@ ESLint scope (`eslint.config.js` ignores `infra/pulumi/`). Does not touch
   up`. ezra came up with **0 restarts** (DBOS migrations applied, "DBOS
   launched!", conversation queue registered), sitting at the WhatsApp-pairing
   wait — the expected ceiling. Box then `pulumi destroy`ed (10 deleted, instance
-  terminated). Three real fresh-box cloud-init bugs were found + fixed:
-  `/run/sshd` missing in early boot, `/home/hh` left root-owned by the
-  pre-user-creation clone, and a non-`--batch` gpg keyring step.
+  terminated). Four real fresh-box cloud-init bugs were found + fixed along the
+  way — see **[Fresh-box cloud-init gotchas](#fresh-box-cloud-init-gotchas)**.
+- **Clean unattended re-run (2026-06-23):** after the egress fix, a fresh
+  `pulumi up` booted start-to-finish with **no manual intervention** —
+  `cloud-init status: done` (`errors: []`), **0 `Job failed`** lines, **0 failed
+  systemd units**, `hh-egress.timer` **active + enabled** firing
+  `hh-egress-refresh.service` on its 15-min cadence (nft table loaded), ezra
+  running with **0 restarts** (DBOS launched, queue registered). Box destroyed.
+  This is the genuinely-clean run; the create path is now proven via the
+  template itself, not patched-in steps.
 
 ## Two stacks
 
@@ -86,6 +93,30 @@ and the two SSM params — remove them if you want zero standing surface.
 queue registered) and then waits at WhatsApp pairing — inherently interactive,
 and the single household number can't be double-paired. That is the expected
 stop, not a failure.
+
+## Fresh-box cloud-init gotchas
+
+Things that don't show up adopting an already-built box but bite a genuine
+zero-state boot — all fixed in `cloud-init/user-data.yaml.tmpl`, kept here so a
+future provider port (Hetzner) doesn't relearn them:
+
+1. **`/run/sshd` missing in early boot** → `provision-host.sh`'s `sshd -t`
+   validation fails. Bootstrap `mkdir -p /run/sshd` before calling it.
+2. **`/home/hh` left root-owned** — the repo clone runs before the `hh` user
+   exists, so `hh` can't write `~/.docker` (the GHCR login). `chown -R hh:hh
+   /home/hh`, not just the repo dir.
+3. **gpg keyring step prompts on re-run** — dearmor must be `gpg --batch --yes`
+   or an unattended re-run blocks on the overwrite TTY prompt.
+4. **Egress timer triggers a *different* unit than it installs.** `main` carries
+   the apply/refresh split (V2_NOTES §11): `hh-egress.timer` has
+   `Unit=hh-egress-refresh.service`, a separate unit from the boot-time
+   `hh-egress.service`. Installing only `hh-egress.service` leaves the timer
+   unable to start ("trigger unit not loaded") — it ends up enabled-but-inactive,
+   so the 15-min re-resolve never runs and the nft set's 1h element TTL expires
+   egress out from under the live process. Fix: glob-install **every**
+   `hh-egress*.service`, and `systemctl start hh-egress.service` (boot apply,
+   creates the table) **before** `enable --now hh-egress.timer` (whose refresh
+   unit is `After=hh-egress.service` and needs the table loaded).
 
 ## Secrets delivery (§3)
 
