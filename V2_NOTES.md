@@ -81,8 +81,12 @@ built the production image. **Both gaps are now closed** (PRs #8–#10,
 > `pulumi up` ran cloud-init's full chain (Docker/Node → deploy-key SSH clone of
 > the private repo → provision-host → SSM synthetic secret → GHCR private pull →
 > compose up) to a running ezra (DBOS launched, 0 restarts) at the WhatsApp-
-> pairing ceiling, then `destroy`ed. Three fresh-box cloud-init bugs found+fixed
-> (/run/sshd, /home/hh ownership, gpg --batch). See `infra/pulumi/README.md`.
+> pairing ceiling, then `destroy`ed. **Re-proven by a clean unattended boot of
+> the fixed template (2026-06-23):** cloud-init done/errors:[], 0 failed units,
+> egress timer active on cadence, ezra 0 restarts — no manual touch. Four
+> fresh-box cloud-init bugs found+fixed (/run/sshd, /home/hh ownership, gpg
+> --batch, and the egress timer triggering the §11 refresh unit the bootstrap
+> didn't install). See **Fresh-box cloud-init gotchas** in `infra/pulumi/README.md`.
 
 - The instance, EIP, security group, IAM user, and S3 backup bucket were all
   created by hand via AWS CLI (T15/T17) — plus the §1 deploy additions (the
