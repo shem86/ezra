@@ -18,62 +18,90 @@ hardened cloud host against the real WhatsApp group.
 
 ## What's interesting here
 
-The hard part of a household agent isn't the model — it's that this class of
-system **fails quietly at its edges**, and a silent failure means a person stops
-getting reminders and tells you before your logs do. So the work is
-distributed-systems engineering plus the agent-specific disciplines: a hand-built
-**harness** that owns the agent loop in durable code, **context engineering** to
-keep the model cheap and correct, and **eval engineering** to test something
-nondeterministic. The LLM is the easy 10%.
+This is, first, an exercise in **AI architecture and engineering** — how you
+actually build a production-grade LLM agent: the harness around the model, the
+context you feed it, how you evaluate something nondeterministic, and the
+discipline that keeps all of it honest. And because it's a *live* tool a second
+person depends on, it's also a study in **durable execution and reliability** —
+an agent that fails silently is worse than one that crashes loudly. The LLM
+itself is the easy 10%.
 
-It comes down to five edges where these systems fail without ever crashing:
+### Building the agent
 
-- **Ingestion** — an inbound message is durably enqueued *before* it's acked, so
-  a crash in that window replays from WhatsApp's offline redelivery, and dedupe
-  makes the replay safe. Nothing is lost where naive agents drop it.
-- **Durable execution** — turns are short-lived durable workflows on
-  [DBOS](https://www.dbos.dev/). The agent loop is owned by workflow code, *not
-  the AI SDK* — tools run as journaled steps, not SDK calls — so the loop itself
-  is recoverable, and each state write co-commits with its journal checkpoint in
-  one Postgres transaction (exactly-once). A kill-mid-flight suite SIGKILLs a
-  turn and proves identical output, every effect once.
-- **The human boundary** — risky actions (calendar writes) *park* instead of
-  executing and fold the turn closed; a quoted-reply approval resumes them in a
-  fresh turn, revalidated right before the write, and both spouses saying "yes"
-  executes once. Approve/deny is decided by deterministic Hebrew/English
-  keywords — no model in the decision.
-- **External effects** — every effect is idempotent; calendar events get a
-  deterministic id, so a replayed create folds Google's 409 to success instead
-  of double-booking. Outbound messages are classified at-least-once vs
-  at-most-once against a send log.
-- **Recovery & liveness** — encrypted point-in-time backups to S3 with
-  asymmetric keys (the host can't decrypt its own backups); restore
-  reconciliation is mechanical, not judgment. Liveness rides an independent
-  alert channel that doesn't depend on the socket it watches.
-
-Two concerns run across all of it:
-
-- **Cost is measured, not hoped for.** A byte-stable cache prefix keeps **78% of
-  live input tokens as cache reads**, holding spend to **~$9/mo** — under budget
-  even priced as if caching were off. ([One decision](docs/adr-0003-remove-turn-router.md)
-  even *removed* a cheap/expensive model router once measurement showed it
-  forfeited the cache for no real saving.)
-- **Credentials never reach the model — by construction and by CI.** Secrets
-  never enter prompts, traces, or the vector store, and the egress allowlist is
-  unit-tested: a dependency that dials an unlisted host turns CI red. The runtime
-  is a non-root, read-only-rootfs container.
-
-Testing something nondeterministic gets its own answer: the deterministic core
-runs through an integration suite (including the recovery gate), while the
-model-in-the-loop behaviour runs through an on-demand eval harness whose approval
-scenarios assert on **resulting state, never reply wording** — which is what
-makes a nondeterministic agent gateable at all.
+- **A harness, not a framework.** The agent loop is owned by durable workflow
+  code, *not the AI SDK* — tools run as journaled steps, not SDK-driven calls —
+  so the orchestration is mine to reason about and recover. Tools are defined
+  through one typed registry (Zod schema, risk tier, idempotency key,
+  revalidation hook), and the loop guarantees every `tool_use` is answered and
+  bounds its own rounds.
+- **Human-in-the-loop, non-blocking.** Risky actions (calendar writes) *park*
+  instead of executing and fold the turn closed; a quoted-reply approval resumes
+  them in a fresh turn, re-checked right before the write and executed exactly
+  once even if both people approve at once. Approve/deny is decided by
+  deterministic Hebrew/English keywords — **no model in the decision** — and a
+  small classifier only routes the ambiguous middle (refine / unrelated).
+- **Context management.** A byte-stable system-prompt prefix lets prompt caching
+  work; per-turn dynamic state (a pending-actions digest, the current wall-clock)
+  appends strictly after it. Long transcripts compact into an embedded summary
+  that keeps open commitments verbatim, and history is recalled pull-only through
+  a vector-search tool.
+- **Engineering discipline.** Strict TypeScript, Zod at every boundary,
+  dependency injection over singletons, exact-pinned dependencies, and a custom
+  lint rule that fails CI on nondeterminism inside a workflow body.
 
 > A favourite bug: the model had **no clock**. Its training anchor made "today"
 > feel like mid-2025, so "remind me in 5 minutes" resolved months into the past
 > and fired instantly — a silent success. The fix pushes real wall-time into
 > every turn (cache-safe), the way Claude's own system prompt injects the
 > current date.
+
+### Measurement & evaluation
+
+Testing a nondeterministic agent needs more than unit tests:
+
+- **Behavioral evals.** Model-in-the-loop behaviour runs through an on-demand
+  eval harness whose approval scenarios assert on **resulting state, never reply
+  wording**, with a separate accuracy dashboard for the relatedness classifier —
+  what makes a nondeterministic agent gateable at all.
+- **Tracing & observability.** Every durable step emits a Langfuse span — model
+  rounds with full token usage (cache reads/writes), tool calls with their risk
+  tier — so cost and behaviour are inspectable per turn. Trace callbacks never
+  throw into the workflow.
+- **Tokenomics.** Per-turn cost is measured from those traces on scripted days
+  and gated against a budget — it lands **~$9/mo with 78% of input billed as
+  cache reads**, re-checked against live traffic. Measurement drove design:
+  [one decision](docs/adr-0003-remove-turn-router.md) *removed* a cheap/expensive
+  model router once the numbers showed it forfeited the prompt cache for no real
+  saving.
+
+### Keeping it reliable
+
+A live household tool fails at its *edges*, quietly, so the durability work
+targets five of them:
+
+- **Ingestion** — an inbound message is durably enqueued *before* it's acked;
+  a crash in that window replays from WhatsApp's redelivery, and dedupe makes the
+  replay safe.
+- **Durable execution** — turns are short-lived durable workflows on
+  [DBOS](https://www.dbos.dev/); each state write co-commits with its journal
+  checkpoint in one Postgres transaction, so recovery is exactly-once. A
+  kill-mid-flight suite SIGKILLs a turn and proves identical output, every effect
+  once.
+- **External effects** — calendar events get a deterministic id, so a replayed
+  create folds Google's 409 to success instead of double-booking; outbound
+  messages are classified at-least-once vs at-most-once against a send log.
+- **Recovery** — encrypted point-in-time backups to S3 with asymmetric keys (the
+  host can't decrypt its own backups); restoring is mechanical reconciliation,
+  not judgment.
+- **Liveness** — an independent alert channel that doesn't depend on the
+  WhatsApp socket it's watching.
+
+### Security & operations
+
+Credentials never reach the model — by construction and by CI: secrets stay out
+of prompts, traces, and the vector store, and the egress allowlist is
+unit-tested, so a dependency that dials an unlisted host turns CI red. The
+runtime is a non-root, read-only-rootfs container on a hardened host.
 
 ## How it works
 
