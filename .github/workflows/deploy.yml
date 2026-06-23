@@ -62,9 +62,19 @@ jobs:
           cd /home/hh/hh-assistant
           sudo -u hh git fetch --tags --prune origin
           sudo -u hh git checkout --force "${RELEASE_REF}"
-          GHCR_PAT=\$(aws ssm get-parameter --name "${GHCR_PAT_PARAM}" --with-decryption --region "${AWS_REGION}" --query Parameter.Value --output text)
-          sudo -u hh env EZRA_TAG="${EZRA_TAG}" GHCR_USER="${GHCR_USER}" GHCR_PAT="\$GHCR_PAT" \
-            bash infra/deploy/on-host-deploy.sh
+          # Fetch a fresh GHCR PAT from Parameter Store IF the AWS CLI is on the
+          # host; otherwise fall back to the host's existing \`docker login\`
+          # (on-host-deploy.sh skips its own login when GHCR_PAT is unset). Once
+          # the AWS CLI is installed on the box, this auto-upgrades to the
+          # self-fetching path with no workflow change.
+          if command -v aws >/dev/null 2>&1; then
+            GHCR_PAT=\$(aws ssm get-parameter --name "${GHCR_PAT_PARAM}" --with-decryption --region "${AWS_REGION}" --query Parameter.Value --output text)
+            sudo -u hh env EZRA_TAG="${EZRA_TAG}" GHCR_USER="${GHCR_USER}" GHCR_PAT="\$GHCR_PAT" \
+              bash infra/deploy/on-host-deploy.sh
+          else
+            sudo -u hh env EZRA_TAG="${EZRA_TAG}" \
+              bash infra/deploy/on-host-deploy.sh
+          fi
           REMOTE_EOF
           )
 
