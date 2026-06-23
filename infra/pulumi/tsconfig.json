@@ -1,0 +1,19 @@
+{
+  "comment": "Standalone Pulumi nodejs tsconfig. Not part of the app build (root tsconfig 'include' is src/ only). CommonJS per Pulumi's ts-node loader.",
+  "compilerOptions": {
+    "strict": true,
+    "outDir": "bin",
+    "target": "es2020",
+    "lib": ["es2020"],
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "sourceMap": true,
+    "experimentalDecorators": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+    "types": ["node"]
+  },
+  "files": ["index.ts"],
+  "include": ["*.ts", "components/*.ts", "cloud-init/*.ts"]
+}

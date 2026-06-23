@@ -1,0 +1,24 @@
+# Pulumi project for hh-assistant (ezra) — V2_NOTES §2 "Provisioning as code".
+#
+# Goal (clarified with the builder): reproducibility as a capability, not just
+# the ~Oct-2026 Hetzner swap. `pulumi up` with a different stack/region/provider
+# stands up a WORKING host from zero (staging, rebuilt prod, Hetzner, throwaway).
+# The migration is one instance of that capability.
+#
+# Two stacks:
+#   prod    — ADOPTS the existing hand-built AWS resources via `pulumi import`
+#             (never force-replace: the live box holds the Baileys session +
+#             pgdata). protectInstance=true; preview must show an EMPTY diff.
+#   scratch — CREATES a fresh env from zero to prove the create path, then
+#             `pulumi destroy`. protectInstance=false.
+#
+# State backend + secrets provider are NOT pinned here — set them at `pulumi
+# login` / `pulumi stack init` time so the choice stays a sub-decision (see
+# README): self-managed S3 (`pulumi login s3://hh-assistant-pulumi-state`) +
+# passphrase secrets provider is the recommended default.
+name: hh-assistant-infra
+runtime:
+  name: nodejs
+  options:
+    packagemanager: pnpm
+description: Parameterized, create-from-zero host environments for the ezra household assistant.

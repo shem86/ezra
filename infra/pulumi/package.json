@@ -1,0 +1,18 @@
+{
+  "name": "hh-assistant-infra",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pulumi (TypeScript) IaC for the ezra household assistant — see Pulumi.yaml.",
+  "main": "index.ts",
+  "comment": "Isolated workspace: its own tsconfig + deps, deliberately OUTSIDE the app's strict tsconfig and the DBOS-determinism ESLint scope. TypeScript pinned to 5.9.3 (Pulumi's nodejs loader), NOT the app's 6.0.3. Exact pins honored via the repo-root .npmrc (save-exact).",
+  "dependencies": {
+    "@pulumi/aws": "7.34.0",
+    "@pulumi/command": "1.2.1",
+    "@pulumi/pulumi": "3.247.0"
+  },
+  "devDependencies": {
+    "@types/node": "25.9.2",
+    "ts-node": "10.9.2",
+    "typescript": "5.9.3"
+  }
+}

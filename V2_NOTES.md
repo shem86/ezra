@@ -57,6 +57,20 @@ never builds the production image. Consequences and fixes:
 
 ## 2. Provisioning as code (IaC)
 
+> **In progress → `infra/pulumi/` (Pulumi, TypeScript).** Decision: **Pulumi**
+> (stays in the repo's one language). Goal reframed with the builder —
+> reproducibility as a *capability* (stand up a new env easily), not just the
+> Hetzner swap. Two stacks: `prod` adopts the live resources (each carries an
+> `import` id + `protect`) and `scratch` proves create-from-zero. cloud-init runs
+> `provision-host.sh` for a full-chain bootstrap (this note's second bullet).
+> **prod adopt APPLIED (2026-06-23):** state backend live (S3); `pulumi up`
+> imported all 17 resources with **0 replacements / 0 destroys** (additive
+> management tags only; instance 🔒 protected, NOT replaced — same original launch
+> time, EIP intact, Baileys/pgdata untouched). Post-apply preview = 21 unchanged
+> (empty-diff gate met). scratch create-graph plans 10 from zero. **Remaining:** a
+> private-repo deploy key for a real scratch full-chain `up`. See
+> `infra/pulumi/README.md`.
+
 - The instance, EIP, security group, IAM user, and S3 backup bucket were all
   created by hand via AWS CLI (T15/T17). v2: Terraform or Pulumi — one `apply`,
   versioned, diffable. This is what makes the Hetzner migration cheap.

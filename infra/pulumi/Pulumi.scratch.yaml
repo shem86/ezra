@@ -1,0 +1,29 @@
+# scratch stack — CREATES a fresh env from zero to PROVE the create path (the
+# reproducibility capability), then `pulumi destroy`. No pinned IDs: the region
+# default VPC/subnet + the latest Canonical Ubuntu 24.04 AMI resolve at apply.
+# protectInstance=false so it can be torn down. No backup bucket, no CI role.
+#
+# Same region as prod on purpose: cloud-init reads the SHARED, already-existing
+# SSM params (/hh-assistant/ghcr-pat to pull the private image; /hh-assistant/env
+# for secretsMode=ssm) via the instance role — no per-region copies needed. The
+# fresh box gets its own instance/EIP/SG (distinct names), so it never collides
+# with prod. It boots to a running ezra; WhatsApp pairing is the manual stop (the
+# single household number cannot be double-paired) — that is the expected ceiling.
+#
+# BILLABLE: a t3a.medium runs while this stack is up. Spin up, verify, destroy.
+config:
+  aws:region: us-east-1
+  ezra:envName: scratch
+  ezra:instanceType: t3a.medium
+  ezra:volumeSizeGb: "40"
+  ezra:keyName: hh-assistant
+  ezra:sshAllowCidr: 0.0.0.0/0
+  ezra:protectInstance: "false"
+  ezra:createBackupBucket: "false"
+  ezra:createCiDeployRole: "false"
+  ezra:repoUrl: https://github.com/shem86/hh-assistant.git
+  ezra:repoRef: main
+  ezra:ezraTag: latest
+  ezra:secretsMode: ssm
+  ezra:secretsParam: /hh-assistant/env
+encryptionsalt: v1:jtH2ufbPY9s=:v1:KoJc+dmJe6DfYbSX:cA58AmyG2/cDQXbESemp0Ncqq95zsw==
