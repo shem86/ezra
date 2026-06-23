@@ -3,8 +3,16 @@
 # (infra/egress/nftables.sh) — Docker's own iptables churn fights host
 # nftables, so egress enforcement stays off the container layer on purpose.
 #
-# Run from the repo root:
-#   docker compose -f infra/docker-compose.prod.yml up -d --build
+# The ezra image is PULLED from GHCR (built+pushed by CI, .github/workflows/
+# ci.yml) — the host never compiles from source. The tag is chosen by
+# EZRA_TAG (an immutable :sha-<short> or :<version>); it defaults to :latest.
+# Production swaps are driven by infra/deploy/on-host-deploy.sh (CD: deploy.yml).
+#
+# Run from the repo root, pull-based (host / CD):
+#   EZRA_TAG=<tag> docker compose --env-file .env -f infra/docker-compose.prod.yml pull ezra
+#   EZRA_TAG=<tag> docker compose --env-file .env -f infra/docker-compose.prod.yml up -d
+# To build locally instead of pulling, add the override that restores `build:`:
+#   docker compose -f infra/docker-compose.prod.yml -f infra/docker-compose.build.yml up -d --build
 # Secrets are injected at runtime from ../.env (gitignored, never in the image).
 #
 # Hardening summary:
@@ -21,10 +29,10 @@ name: hh-assistant
 
 services:
   ezra:
-    build:
-      context: ..
-      dockerfile: infra/Dockerfile
-    image: hh-assistant:prod
+    # Pulled from GHCR; never built on the host (build: lives in the
+    # docker-compose.build.yml override for local dev). EZRA_TAG selects the
+    # immutable tag CI pushed; :latest is the fallback for a manual `up`.
+    image: ghcr.io/shem86/hh-assistant:${EZRA_TAG:-latest}
     restart: unless-stopped
     depends_on:
       postgres:
