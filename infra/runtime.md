@@ -107,3 +107,37 @@ non-listed host confirmed"** — `curl https://example.com` from inside the
 container times out while `https://api.anthropic.com` succeeds. Host nftables
 cannot be exercised from the dev Mac, so T16 delivers the artifacts and the
 unit-tested allowlist; T45 confirms enforcement on the real box.
+
+## CI/CD (V2_NOTES §1) — build once, deploy on release
+
+The host **no longer builds** the image. CI (`.github/workflows/ci.yml`) builds
+`infra/Dockerfile`, runs the two §8 smokes (compose-config + `loadProductionConfig`
+in the real image), and pushes immutable tags to GHCR
+(`ghcr.io/shem86/hh-assistant`): `:sha-<short>` + `:main` on a `main` push, and
+`:<version>` + `:latest` on a `v*` release tag. The prod compose pulls that tag
+via `EZRA_TAG` (default `:latest`); `infra/docker-compose.build.yml` is the
+local-dev override that restores an in-place `build:`.
+
+**Deploy** (`.github/workflows/deploy.yml`) fires on a published GitHub release:
+it assumes an AWS role via OIDC and sends an SSM `AWS-RunShellScript` to the
+instance, which syncs the host checkout to the release ref, reads the GHCR PAT
+from Parameter Store, and runs `infra/deploy/on-host-deploy.sh`. That script:
+record prior tag → `pull` → **migrate-gate** (run migrations with the NEW image
+before swapping, so a bad migration fails the deploy rather than crash-looping a
+swapped app — forward-only, so image-swap rollback reverts the app, not the
+schema) → `up -d` → healthcheck (wait for the `ezra up:` launch marker, no
+crash-loop) → **auto-rollback** to the prior tag on failure. The deploy can be
+re-run manually via the workflow's `workflow_dispatch` input.
+
+### One-time prerequisites (provisioned outside the repo)
+
+| Prereq | Where | Notes |
+|---|---|---|
+| AWS IAM role for GitHub OIDC | repo variable `AWS_DEPLOY_ROLE_ARN` | trust the repo's OIDC subject; allow `ssm:SendCommand` on `i-0a7e9f4767666ac9e` + `ssm:GetCommandInvocation` |
+| Instance profile on the host | EC2 `i-0a7e9f4767666ac9e` | `AmazonSSMManagedInstanceCore` (SSM agent) + `ssm:GetParameter`/KMS-decrypt for the PAT param. §3 has an IAM *user* (backups) — the *instance role* may be new; verify/create |
+| GHCR read PAT | SSM Parameter Store `/hh-assistant/ghcr-pat` (SecureString) | `read:packages`; the on-host `docker login`. CI's `GITHUB_TOKEN` covers the push side automatically |
+| Host git checkout + read-only fetch | `/home/hh/hh-assistant` | the SSM step `git checkout`s the release ref so compose/script match the image; private repo needs a read-only deploy token/key for `git fetch` |
+
+Steady-state post-deploy regressions (a process that wedges after the gate
+passes) are caught by the hc-ping.com **dead-man** (`src/ops/deadman.ts`), not
+this pipeline. A proper HTTP `/health` readiness endpoint is a clean follow-up.

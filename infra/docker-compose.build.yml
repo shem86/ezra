@@ -1,0 +1,15 @@
+# Local-build override for the prod compose. The base file
+# (docker-compose.prod.yml) PULLS ezra from GHCR — that is the host / CD path.
+# For local dev, where there is no pushed image for your working tree, layer
+# this override to restore an in-place build of infra/Dockerfile:
+#
+#   docker compose -f infra/docker-compose.prod.yml -f infra/docker-compose.build.yml up -d --build
+#
+# CI uses neither path directly: it `buildx build`s the image, tags it with the
+# EZRA_TAG it is about to test, and `docker compose run`s the base file (the
+# locally-loaded image satisfies the GHCR ref without a pull).
+services:
+  ezra:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile

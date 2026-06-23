@@ -1,0 +1,99 @@
+name: Deploy
+
+# CD (V2_NOTES §1). On a published GitHub release, deploy the matching image
+# (built + pushed to GHCR by ci.yml) to the production host over AWS SSM — no
+# inbound SSH. The host runs infra/deploy/on-host-deploy.sh, which migrate-gates,
+# swaps, healthchecks, and auto-rolls-back. The CD gate is by discipline: only
+# cut a release off green main (branch protection is unavailable while private,
+# §10). SSM keeps GitHub provider-coupled only here; the on-host script is
+# portable for the ~Oct-2026 Hetzner move.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Image/release tag to deploy (e.g. v2.0.0)'
+        required: true
+
+permissions:
+  id-token: write # OIDC token for AWS role assumption
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  INSTANCE_ID: i-0a7e9f4767666ac9e
+  GHCR_PAT_PARAM: /hh-assistant/ghcr-pat # SSM Parameter Store, SecureString
+  GHCR_USER: shem86
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve release tag → EZRA_TAG
+        id: tag
+        # Release tag v2.0.0 → image tag 2.0.0 (ci.yml metadata semver strips v).
+        run: |
+          RAW="${{ github.event.release.tag_name || github.event.inputs.tag }}"
+          echo "ezra_tag=${RAW#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy via SSM
+        env:
+          EZRA_TAG: ${{ steps.tag.outputs.ezra_tag }}
+          RELEASE_REF: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          # The remote script: sync the host checkout to the release ref (so the
+          # compose file + deploy script + migrations match the image), pull the
+          # GHCR PAT from Parameter Store via the instance role, then run the
+          # deploy. Heredoc keeps it a single SSM command document line.
+          REMOTE=$(cat <<REMOTE_EOF
+          set -euo pipefail
+          cd /home/hh/hh-assistant
+          sudo -u hh git fetch --tags --prune origin
+          sudo -u hh git checkout --force "${RELEASE_REF}"
+          GHCR_PAT=\$(aws ssm get-parameter --name "${GHCR_PAT_PARAM}" --with-decryption --region "${AWS_REGION}" --query Parameter.Value --output text)
+          sudo -u hh env EZRA_TAG="${EZRA_TAG}" GHCR_USER="${GHCR_USER}" GHCR_PAT="\$GHCR_PAT" \
+            bash infra/deploy/on-host-deploy.sh
+          REMOTE_EOF
+          )
+
+          PARAMS=$(jq -n --arg c "$REMOTE" '{commands:[$c]}')
+          CID=$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name AWS-RunShellScript \
+            --comment "deploy ezra ${EZRA_TAG}" \
+            --parameters "$PARAMS" \
+            --region "$AWS_REGION" \
+            --query Command.CommandId --output text)
+          echo "SSM command id: $CID"
+
+          # Poll to a terminal state. get-command-invocation can 400 briefly
+          # right after send (invocation not yet registered) — tolerate it.
+          while true; do
+            STATUS=$(aws ssm get-command-invocation --command-id "$CID" --instance-id "$INSTANCE_ID" \
+              --region "$AWS_REGION" --query Status --output text 2>/dev/null || echo Pending)
+            echo "status: $STATUS"
+            case "$STATUS" in
+              Success) break ;;
+              Cancelled|TimedOut|Failed|Undeliverable|Terminated)
+                echo "::error::SSM deploy ended in $STATUS"
+                aws ssm get-command-invocation --command-id "$CID" --instance-id "$INSTANCE_ID" \
+                  --region "$AWS_REGION" --query StandardErrorContent --output text || true
+                aws ssm get-command-invocation --command-id "$CID" --instance-id "$INSTANCE_ID" \
+                  --region "$AWS_REGION" --query StandardOutputContent --output text || true
+                exit 1 ;;
+            esac
+            sleep 5
+          done
+
+          echo "----- on-host deploy output -----"
+          aws ssm get-command-invocation --command-id "$CID" --instance-id "$INSTANCE_ID" \
+            --region "$AWS_REGION" --query StandardOutputContent --output text

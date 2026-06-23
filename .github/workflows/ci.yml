@@ -3,10 +3,11 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
 
 jobs:
-  ci:
+  quality:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -39,3 +40,102 @@ jobs:
       # debounce/FIFO/execute-once tests as one suite. Overlaps `pnpm test`
       # by design — this is the gate's named, green-in-CI invocation.
       - run: pnpm test:recovery
+
+  # Builds the production image (infra/Dockerfile) and runs the two cheap
+  # pre-flight smokes from V2_NOTES §8 before pushing an immutable tag to GHCR.
+  # This job is the catch v1 lacked: the image had never been built in CI, so a
+  # Dockerfile bug (missing `COPY .npmrc` → ERR_PNPM_LOCKFILE_CONFIG_MISMATCH,
+  # §1/§9) shipped undetected to the host. PRs build + smoke but never push.
+  image:
+    runs-on: ubuntu-latest
+    needs: quality
+    permissions:
+      contents: read
+      packages: write # GITHUB_TOKEN pushes to GHCR — no extra secret needed.
+    env:
+      IMAGE: ghcr.io/shem86/hh-assistant
+      COMPOSE: infra/docker-compose.prod.yml
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Immutable tags: :sha-<short> always; :main on the main branch; the
+      # semver + :latest pair only on a v* release tag.
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=sha,prefix=sha-,format=short
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      # Single build, loaded into the local daemon under every tag PLUS a fixed
+      # :ci-smoke ref the smokes target. GHA layer cache keeps this well under
+      # the 10-min budget (§ CI optimization). push:false here — we push the
+      # metadata tags explicitly below, so :ci-smoke never reaches the registry.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/Dockerfile
+          load: true
+          push: false
+          tags: |
+            ${{ env.IMAGE }}:ci-smoke
+            ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # §8 verification, with zero WhatsApp/model/calendar traffic.
+      - name: Throwaway .env for the config smokes
+        # Syntactically-valid dummies so productionEnvSchema (src/ops/config.ts)
+        # passes — including a base64 SA-key JSON and the URL-typed fields.
+        # DATABASE_URL/WA_SESSION_DIR are overridden by the compose `environment`
+        # block, so their values here don't matter. EZRA_TAG selects the image.
+        run: |
+          SA_B64=$(printf '{"client_email":"ci@ci.iam.gserviceaccount.com","private_key":"ci-dummy"}' | base64 -w0)
+          cat > .env <<EOF
+          POSTGRES_PASSWORD=ci-dummy
+          ANTHROPIC_API_KEY=ci-dummy
+          VOYAGE_API_KEY=ci-dummy
+          LANGFUSE_PUBLIC_KEY=ci-dummy
+          LANGFUSE_SECRET_KEY=ci-dummy
+          ALERT_CHANNEL_TOKEN=ci-dummy
+          ALERT_CHANNEL_CHAT_ID=ci-dummy
+          DEADMAN_PING_URL=https://hc-ping.com/ci-dummy
+          GOOGLE_SA_KEY_B64=${SA_B64}
+          CALENDAR_ID_HUSBAND=husband@example.com
+          CALENDAR_ID_WIFE=wife@example.com
+          WA_JID_HUSBAND=1@s.whatsapp.net
+          WA_JID_WIFE=2@s.whatsapp.net
+          WA_HOUSEHOLD_CONVERSATIONS=3@g.us
+          EOF
+
+      - name: Compose config smoke (§8 — interpolation / --env-file wiring)
+        run: docker compose --env-file .env -f "$COMPOSE" config -q
+        env:
+          EZRA_TAG: ci-smoke
+
+      - name: Config-load smoke (§8/§9 — loadProductionConfig in the real image)
+        # --no-deps: no postgres needed; loadProductionConfig only validates env.
+        run: |
+          docker compose --env-file .env -f "$COMPOSE" run --rm --no-deps ezra \
+            node -e 'import("./dist/ops/config.js").then(m => { m.loadProductionConfig(); console.log("config OK"); })'
+        env:
+          EZRA_TAG: ci-smoke
+
+      # Push only the metadata tags (never :ci-smoke), and only off a PR.
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push image to GHCR
+        if: github.event_name != 'pull_request'
+        run: echo "${{ steps.meta.outputs.tags }}" | xargs -rL1 docker push
