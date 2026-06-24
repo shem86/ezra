@@ -25,6 +25,10 @@ env:
   INSTANCE_ID: i-0a7e9f4767666ac9e
   GHCR_PAT_PARAM: /hh-assistant/ghcr-pat # SSM Parameter Store, SecureString
   GHCR_USER: shem86
+  # Steady-state secret delivery (V2_NOTES §3): the host self-fetches its .env
+  # from this SSM SecureString each deploy — no hand-scp'd file. Mirrors the
+  # cloud-init create path; rotate by `aws ssm put-parameter --overwrite`.
+  SECRETS_PARAM: /hh-assistant/env
 
 jobs:
   deploy:
@@ -69,7 +73,11 @@ jobs:
           # role, then deploy. on-host-deploy.sh logs in with it — no reliance on
           # any persisted host login, so PAT rotation is just an SSM overwrite.
           GHCR_PAT=\$(aws ssm get-parameter --name "${GHCR_PAT_PARAM}" --with-decryption --region "${AWS_REGION}" --query Parameter.Value --output text)
+          # SECRETS_MODE=ssm: on-host-deploy.sh self-fetches .env from
+          # SECRETS_PARAM before the swap (V2_NOTES §3) — the host no longer
+          # relies on a hand-maintained on-disk .env.
           sudo -u hh env EZRA_TAG="${EZRA_TAG}" GHCR_USER="${GHCR_USER}" GHCR_PAT="\$GHCR_PAT" \
+            SECRETS_MODE="ssm" SECRETS_PARAM="${SECRETS_PARAM}" AWS_REGION="${AWS_REGION}" \
             bash infra/deploy/on-host-deploy.sh
           REMOTE_EOF
           )

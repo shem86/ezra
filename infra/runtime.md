@@ -121,8 +121,12 @@ local-dev override that restores an in-place `build:`.
 **Deploy** (`.github/workflows/deploy.yml`) fires on a published GitHub release:
 it assumes an AWS role via OIDC and sends an SSM `AWS-RunShellScript` to the
 instance, which syncs the host checkout to the release ref, reads the GHCR PAT
-from Parameter Store, and runs `infra/deploy/on-host-deploy.sh`. That script:
-record prior tag → `pull` → **migrate-gate** (run migrations with the NEW image
+from Parameter Store, and runs `infra/deploy/on-host-deploy.sh` with
+`SECRETS_MODE=ssm`. That script: **materialize `.env`** (self-fetch it from the
+`/hh-assistant/env` SSM SecureString via the instance role — V2_NOTES §3, so the
+host no longer relies on a hand-scp'd file; atomic, aborts the deploy if the
+fetch is empty/fails before any swap) → record prior tag → `pull` →
+**migrate-gate** (run migrations with the NEW image
 before swapping, so a bad migration fails the deploy rather than crash-looping a
 swapped app — forward-only, so image-swap rollback reverts the app, not the
 schema) → `up -d` → healthcheck (wait for the `ezra up:` launch marker, no
@@ -145,6 +149,7 @@ dry-run). Redeploying or rolling an **already-released** tag is the
 | AWS IAM role for GitHub OIDC | repo variable `AWS_DEPLOY_ROLE_ARN` | trust the repo's OIDC subject; allow `ssm:SendCommand` on `i-0a7e9f4767666ac9e` + `ssm:GetCommandInvocation` |
 | Instance profile on the host | EC2 `i-0a7e9f4767666ac9e` | The instance already carries the `hh-assistant-backup-ec2` profile (one per instance), so SSM perms were added to **that existing role** — `AmazonSSMManagedInstanceCore` + an inline `hh-read-ghcr-param` (`ssm:GetParameter` on `/hh-assistant/*` + scoped `kms:Decrypt`). The backup S3 policy is untouched. |
 | GHCR read PAT | SSM Parameter Store `/hh-assistant/ghcr-pat` (SecureString) | A **classic** PAT with `read:packages` — fine-grained PATs have no Packages permission for *user-owned* packages (org-owned only). The on-host `docker login` uses it; CI's `GITHUB_TOKEN` covers the push side automatically. See rotation below. |
+| App `.env` | SSM Parameter Store `/hh-assistant/env` (SecureString) | The whole app `.env` (V2_NOTES §3). Seed once from the live file: `aws ssm put-parameter --region us-east-1 --name /hh-assistant/env --type SecureString --value file://.env --overwrite`. Covered by the same `hh-read-ghcr-param` policy (`/hh-assistant/*`). Must carry the host-generated `POSTGRES_PASSWORD` unchanged (Postgres binds it at first init). Rotate any secret by editing `.env` and re-running the same `put-parameter`. |
 | Host git checkout + read-only fetch | `/home/hh/hh-assistant` | the SSM step `git checkout`s the release ref so compose/script match the image; private repo needs a read-only deploy token/key for `git fetch` |
 
 Steady-state post-deploy regressions (a process that wedges after the gate

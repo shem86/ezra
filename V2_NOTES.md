@@ -107,22 +107,35 @@ built the production image. **Both gaps are now closed** (PRs #8–#10,
   provider-portable — keep it, but invoke it from **cloud-init/user-data** so a
   fresh box self-bootstraps the `hh` user + SSH lockdown without a manual SSH.
 
-## 3. Secrets management (SSM precedent set by §1; app `.env` still manual)
+## 3. Secrets management — ✅ SSM chosen + wired both paths (prod cutover = one put-parameter)
 
-- v1: a hand-maintained `.env` scp'd to the host. Fragile and manual. **Still
-  the case for the app secrets** — but §1's CD established the **SSM Parameter
-  Store** path: the GHCR PAT now lives at `/hh-assistant/ghcr-pat` and the host
-  self-fetches it at deploy time via its IAM identity. That's the precedent to
-  extend the rest of the `.env` onto.
-- **`POSTGRES_PASSWORD` is a footgun**: Postgres binds it at *first* data-dir
-  init, so changing it in `.env` afterward silently breaks app auth (the deploy
-  had to preserve the host-generated value across the `.env` load). Generate it
-  **once** into a secret store, never inline per-deploy.
-- v2 options: lean into **AWS SSM Parameter Store / Secrets Manager** (already
-  proven for the GHCR PAT; the host has the IAM identity), or **SOPS + age**
-  committing an encrypted `.env.enc` to the repo (we already run `age` for
-  backups, so the tooling is in place). Either gives auditable, reproducible
-  secret delivery and removes the manual scp. *(Deferred: prod-touching infra.)*
+- v1: a hand-maintained `.env` scp'd to the host. Fragile and manual. §1's CD
+  set the precedent — the GHCR PAT lives at `/hh-assistant/ghcr-pat` and the
+  host self-fetches it via its IAM identity — and §2's Pulumi extended it to the
+  whole `.env`.
+- **Decision: AWS SSM Parameter Store** (`secretsMode=ssm`, the testable-now
+  default; the host already has the instance role and the role's
+  `hh-read-ghcr-param` policy already covers `parameter/hh-assistant/*`). **SOPS
+  + age stays modeled as a one-switch portable alternative** (`secretsMode=sops`,
+  for the ~Oct-2026 Hetzner/non-AWS host) — wired in both cloud-init and
+  `on-host-deploy.sh`, inert until selected.
+- **Done (2026-06-24): `.env` materialized from SSM on *both* paths.** The
+  create path (`cloud-init/user-data.yaml.tmpl`) already did it; this pass added
+  the matching seam to **steady-state CD** — `infra/deploy/on-host-deploy.sh`
+  self-fetches `.env` from `SECRETS_PARAM` (`/hh-assistant/env`) before every
+  swap, gated by `SECRETS_MODE` (`deploy.yml` sets `ssm`; default `none` keeps
+  the on-disk file so the script stays provider-portable). Atomic write (temp →
+  require non-empty → `mv`), so a failed fetch aborts *before* any pull/swap and
+  leaves the running container untouched. `POSTGRES_PASSWORD` footgun handled by
+  design: the stored `.env` must carry the same host-generated value the data
+  dir was initialized with (commented at the seam) — so the param is seeded
+  *from* the live `.env`, never regenerated.
+- **Remaining (prod cutover, one human step):** the prod param
+  `/hh-assistant/env` does not exist yet (only `ghcr-pat` + `deploy-key` do), so
+  the live host still boots from its hand-scp'd file. Seed it once from the live
+  `.env` (`aws ssm put-parameter --name /hh-assistant/env --type SecureString
+  --value file://.env --overwrite`), then the next release deploys SSM-sourced.
+  Rotation thereafter is just `put-parameter --overwrite`; no host touch.
 
 ## 4. Compose / runtime ergonomics — ✅ Makefile built (host-Node removal deferred)
 
