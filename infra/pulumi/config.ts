@@ -51,6 +51,11 @@ export interface EnvConfig {
   sopsEnvFile?: string; // secretsMode=sops: repo-relative path to .env.<env>.enc
   deployKeyParam?: string; // SSM SecureString w/ a read-only repo deploy key (private-repo clone)
 
+  // Backoffice exposure (BO-17): SSM SecureString holding a Tailscale auth key.
+  // On a from-zero box the bootstrap joins the tailnet and `tailscale serve`s
+  // the backoffice over HTTPS. Empty string ⇒ skip the tailnet bootstrap.
+  tailscaleAuthkeyParam?: string;
+
   // adopt-prod: maps a resource key (see host-environment.ts `imp`) to its live
   // AWS id. Present ⇒ that resource is brought into state via the `import`
   // resource option on the next `pulumi up`. Absent (a fresh env) ⇒ create.
@@ -96,6 +101,9 @@ export function loadEnvConfig(): EnvConfig {
     ageKeyParam: c.get("ageKeyParam"),
     sopsEnvFile: c.get("sopsEnvFile"),
     deployKeyParam: c.get("deployKeyParam"),
+
+    // Defaults to the Phase-0 SSM param; set to "" to skip the tailnet bootstrap.
+    tailscaleAuthkeyParam: c.get("tailscaleAuthkeyParam") ?? "/hh-assistant/tailscale-authkey",
 
     importIds: c.getObject<Record<string, string>>("importIds"),
   };

@@ -177,6 +177,96 @@ export function loadProductionConfig(
   };
 }
 
+// --- Backoffice (read-only console) -----------------------------------------
+// The backoffice runs as its OWN process (never inside the spine). Its env is
+// the same SSM-delivered file, so its config is a narrow, purpose-built loader
+// rather than the full app Config — it must NOT demand alert/dead-man/WA vars
+// it never uses (same false-coupling reasoning as loadTransportOpsConfig). The
+// data-source keys it does need (SELECT-only DB url, Langfuse, calendar) are
+// added to this schema as the screens that use them land (BO-5, B2).
+const backofficeEnvSchema = z.object({
+  BACKOFFICE_TOKEN: z
+    .string()
+    .min(32, 'required — long random bearer token (>= 32 chars), defence-in-depth behind the tailnet'),
+  BACKOFFICE_PORT: z.coerce.number().int().positive().default(8787),
+  // Path to the built SPA (backoffice/dist). In the prod image this is an
+  // absolute path baked by the Dockerfile; locally it is repo-relative.
+  BACKOFFICE_DIST_DIR: z.string().min(1).default('backoffice/dist'),
+  // The SELECT-only role's connection string (BO-17 migration creates the
+  // role). DISTINCT from the spine's DATABASE_URL: the console must never hold
+  // a write-capable handle. Kept separate so a misconfig fails closed (no
+  // silent fallback to the app's read/write URL).
+  BACKOFFICE_DATABASE_URL: z
+    .string()
+    .min(1, 'required — SELECT-only postgres connection string for the read-only console'),
+  // Costs-screen monthly ceiling for the budget gauge (display only — the real
+  // spend backstop is provider-side, V2 §12). $50 default (Phase 0).
+  BACKOFFICE_MONTHLY_BUDGET_USD: z.coerce.number().positive().default(50),
+});
+
+export interface BackofficeConfig {
+  readonly token: string;
+  readonly port: number;
+  readonly distDir: string;
+  /** SELECT-only role connection string — never the spine's read/write URL. */
+  readonly databaseUrl: string;
+  readonly monthlyBudgetUsd: number;
+  /** Langfuse READ-API access (Costs/Logs) — reuses the existing trace keys. */
+  readonly langfuse: {
+    readonly publicKey: string;
+    readonly secretKey: string;
+    readonly baseUrl: string;
+  };
+  /** Credentials the Status probes ping (cheap auth checks) + Calendar read.
+   *  These never enter prompts/traces — the console pings, it doesn't reason. */
+  readonly anthropicApiKey: string;
+  readonly voyageApiKey: string;
+  readonly googleServiceAccount: { readonly clientEmail: string; readonly privateKey: string };
+  readonly calendarIds: { readonly husband: string; readonly wife: string };
+}
+
+export function loadBackofficeConfig(
+  env: Record<string, string | undefined> = process.env,
+): BackofficeConfig {
+  const parsed = backofficeEnvSchema.safeParse(env);
+  if (!parsed.success) {
+    throw new Error(`Invalid environment configuration:\n${formatIssues(parsed.error.issues)}`);
+  }
+  // Data-source keys come from the base schema (same keys the spine uses) —
+  // the backoffice reads what the spine writes / pings what it depends on.
+  const shared = envSchema
+    .pick({
+      LANGFUSE_PUBLIC_KEY: true,
+      LANGFUSE_SECRET_KEY: true,
+      LANGFUSE_BASE_URL: true,
+      ANTHROPIC_API_KEY: true,
+      VOYAGE_API_KEY: true,
+      GOOGLE_SA_KEY_B64: true,
+      CALENDAR_ID_HUSBAND: true,
+      CALENDAR_ID_WIFE: true,
+    })
+    .safeParse(env);
+  if (!shared.success) {
+    throw new Error(`Invalid environment configuration:\n${formatIssues(shared.error.issues)}`);
+  }
+  return {
+    token: parsed.data.BACKOFFICE_TOKEN,
+    port: parsed.data.BACKOFFICE_PORT,
+    distDir: parsed.data.BACKOFFICE_DIST_DIR,
+    databaseUrl: parsed.data.BACKOFFICE_DATABASE_URL,
+    monthlyBudgetUsd: parsed.data.BACKOFFICE_MONTHLY_BUDGET_USD,
+    langfuse: {
+      publicKey: shared.data.LANGFUSE_PUBLIC_KEY,
+      secretKey: shared.data.LANGFUSE_SECRET_KEY,
+      baseUrl: shared.data.LANGFUSE_BASE_URL,
+    },
+    anthropicApiKey: shared.data.ANTHROPIC_API_KEY,
+    voyageApiKey: shared.data.VOYAGE_API_KEY,
+    googleServiceAccount: shared.data.GOOGLE_SA_KEY_B64,
+    calendarIds: { husband: shared.data.CALENDAR_ID_HUSBAND, wife: shared.data.CALENDAR_ID_WIFE },
+  };
+}
+
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
   const parsed = envSchema.safeParse(env);
   if (!parsed.success) {
