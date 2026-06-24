@@ -1,0 +1,26 @@
+[Unit]
+Description=hh-assistant base backup (pg_basebackup → encrypted → S3, PITR anchor)
+Documentation=file:///home/hh/hh-assistant/infra/backup/README.md
+# The base backup talks to the running postgres + sidecar image, so docker (and
+# thus the compose stack) must be up. Not Requires= — a missed run is caught by
+# the freshness dead-man (hh-backup-freshness.*), not by failing the boot.
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+# Runs as the hh operator (in the docker group) — the same identity the bring-up
+# runbook used for the old crontab line. No sudo: the backup sidecar is driven
+# through the docker group, not systemctl (see infra/host/sudoers-hh-ops).
+User=hh
+Group=hh
+WorkingDirectory=/home/hh/hh-assistant
+# --env-file .env + running from the repo root are load-bearing: with
+# `-f infra/...` the compose project dir becomes infra/, so ${POSTGRES_PASSWORD}
+# (and the overlay's relative paths) only resolve against the project .env when
+# compose is pointed at it explicitly. `run --rm` is a one-shot job container
+# that exits — it does NOT touch the long-running `receivewal` sidecar.
+ExecStart=/usr/bin/docker compose --env-file /home/hh/hh-assistant/.env \
+  -f /home/hh/hh-assistant/infra/docker-compose.prod.yml \
+  -f /home/hh/hh-assistant/infra/backup/docker-compose.backup.yml \
+  run --rm backup backup.sh base

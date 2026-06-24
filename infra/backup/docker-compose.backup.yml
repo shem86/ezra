@@ -38,14 +38,20 @@ services:
       - ../.env
     environment:
       PGHOST: postgres
-      PGUSER: hh
+      # The replication role. Defaults to `hh` (the existing prod box was wired
+      # for `hh` by enable-replication.sh at T45) for zero-touch compatibility;
+      # a fresh box baked by initdb-replication.sh (V2_NOTES §6) gets a
+      # least-priv `hh_backup` role — point this at it by setting BACKUP_PGUSER=
+      # hh_backup (and BACKUP_ROLE_PASSWORD to match) in that box's .env.
+      PGUSER: ${BACKUP_PGUSER:-hh}
       PGDATABASE: hh_assistant_prod
-      # The replication connection auths as hh (pg_hba scram). Interpolate the
-      # one existing secret rather than duplicate it: compose reads
-      # ${POSTGRES_PASSWORD} from the project .env at up/run time — so any cron
-      # `run` must execute from the repo dir (or pass --env-file) for this to
-      # resolve. Keeps the password in exactly one place (POSTGRES_PASSWORD).
-      PGPASSWORD: ${POSTGRES_PASSWORD:?compose must load the project .env to interpolate PGPASSWORD}
+      # The replication connection auths via scram (pg_hba). Interpolate the one
+      # existing secret rather than duplicate it: compose reads the password from
+      # the project .env at up/run time — so any cron/timer `run` must execute
+      # from the repo dir (or pass --env-file) for this to resolve. When PGUSER
+      # is the dedicated hh_backup role, set BACKUP_ROLE_PASSWORD to its password
+      # (defaults to POSTGRES_PASSWORD, matching the initdb default).
+      PGPASSWORD: ${BACKUP_ROLE_PASSWORD:-${POSTGRES_PASSWORD:?compose must load the project .env to interpolate PGPASSWORD}}
       BACKUP_WAL_SPOOL: /var/lib/backup/wal-spool
     # Unshipped WAL must survive a sidecar restart, so the spool is a volume.
     volumes:

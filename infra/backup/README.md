@@ -28,8 +28,12 @@ The one source of truth for the allowed S3 host lives in the egress allowlist
 | `restore.sh` | `into <container>` (restore latest base + WAL) · `drill` (self-asserting base+WAL PITR) |
 | `t44-reconcile-drill.sh` | T44 gate: runbook §4 external-effect reconciliation, real S3 + real Google, self-contained + self-cleaning |
 | `t44-calendar-effect.ts` | T44 calendar leg — drives the production calendar client (create/recreate/count/delete) |
-| `enable-replication.sh` | T45 wiring: idempotent `host replication` pg_hba line + reload so the sidecar can stream |
-| `Dockerfile` | sidecar image: pg17 client tools + aws-cli + age |
+| `initdb-replication.sh` | **V2_NOTES §6** declarative bake: mounted into `/docker-entrypoint-initdb.d/`, creates the least-priv `hh_backup` REPLICATION role + the `host replication` pg_hba line at FIRST init of a fresh data dir — so continuous WAL works on first boot with no hand-run step. Runs ONLY on an empty PGDATA (helps rebuilds / create-from-zero; never mutates the live prod data dir). |
+| `enable-replication.sh` | T45 wiring: idempotent `host replication` pg_hba line + reload so the sidecar can stream. **Superseded for fresh boxes by `initdb-replication.sh`** but kept (idempotent) for the existing prod box + reattached volumes. |
+| `freshness.sh` | **V2_NOTES §6**: reads the latest base-backup age from S3 and pings a healthchecks.io dead-man (`<url>` fresh / `<url>/fail` stale). Surfaces a stalled base cron the WAL stream can't catch. |
+| `hh-backup-base.{service,timer}` | **V2_NOTES §6** declarative base-backup schedule (daily 03:00 UTC) — replaces the hand-installed crontab line. |
+| `hh-backup-freshness.{service,timer}` | **V2_NOTES §6** hourly freshness check driving `freshness.sh` → the dead-man. |
+| `Dockerfile` | sidecar image: pg17 client tools + aws-cli + age + curl (freshness ping) |
 | `docker-compose.backup.yml` | sidecar overlay for the prod stack |
 
 ## Config (env; see `.env.example`)
@@ -146,6 +150,37 @@ docker compose --env-file .env -f infra/docker-compose.prod.yml \
            -f infra/backup/docker-compose.backup.yml \
            run --rm backup backup.sh base >> backup-base.log 2>&1
 ```
+
+### Automated wiring (V2_NOTES §6) — what's declarative now
+
+The three open §6 items are now in-repo artifacts:
+
+1. **Replication baked into initdb** (`initdb-replication.sh`, mounted into the
+   postgres service in `docker-compose.prod.yml`). On a FRESH data dir it creates
+   the least-priv `hh_backup` REPLICATION role and appends the `host replication`
+   pg_hba line, so a rebuild / create-from-zero box streams WAL on first boot with
+   no `enable-replication.sh` step. **It runs only on an empty PGDATA** — it
+   cannot and does not touch the live prod data dir; that box stays wired for the
+   `hh` role by the T45 `enable-replication.sh`.
+2. **Base backups scheduled by a host timer** (`hh-backup-base.{service,timer}`,
+   daily 03:00 UTC) — the declarative replacement for the crontab line above.
+3. **Freshness surfaced to the dead-man** (`freshness.sh` +
+   `hh-backup-freshness.{service,timer}`, hourly): pings a **second**
+   healthchecks.io check (`BACKUP_FRESHNESS_PING_URL`, distinct from the process
+   `DEADMAN_PING_URL`) — `<url>` when the latest base is within
+   `BACKUP_MAX_AGE_HOURS` (default 30h), `<url>/fail` when stale/missing. The
+   check alerts from outside if the fresh ping stops.
+
+Cloud-init (`infra/pulumi/cloud-init/user-data.yaml.tmpl`) installs + enables both
+timers and starts the sidecar on a fresh box. **Operator steps remain** (this PR
+does NOT touch the live host): on the existing prod box, install + enable the two
+timers once (`install -m 0644 infra/backup/hh-backup-*.{service,timer}
+/etc/systemd/system/ && systemctl daemon-reload && systemctl enable --now
+hh-backup-base.timer hh-backup-freshness.timer`), set
+`BACKUP_FRESHNESS_PING_URL` in `.env` (create the second hc-ping check first),
+disable the old crontab line, and let the next full rebuild pick up the initdb
+bake. The existing prod sidecar keeps using the `hh` role (leave `BACKUP_PGUSER`
+unset) until a rebuild migrates it to `hh_backup`.
 
 **Verified live (2026-06-15):** slot `hh_backup` created, `pg_receivewal`
 streaming (segments `…0003.age`/`…0004.age`, 16 MiB encrypted, shipped

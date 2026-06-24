@@ -6,6 +6,11 @@
 .wa-session
 node_modules
 dist
+# The backoffice SPA is built INSIDE the image (Dockerfile build stage); keep
+# the local install/build out of the context — nested dirs aren't covered by
+# the top-level node_modules/dist patterns above.
+backoffice/node_modules
+backoffice/dist
 .git
 tests
 spikes

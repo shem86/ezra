@@ -1,0 +1,16 @@
+[Unit]
+Description=daily hh-assistant base backup (replaces the hand-installed crontab line)
+
+[Timer]
+Unit=hh-backup-base.service
+# Daily at 03:00 UTC — same cadence as the T45 bring-up crontab line this
+# replaces. OnCalendar (not OnUnitActiveSec) so the run anchors to wall-clock
+# 03:00 regardless of boot time.
+OnCalendar=*-*-* 03:00:00 UTC
+# Catch up a run missed while the host was off (e.g. a reboot spanning 03:00),
+# but jitter so a fleet doesn't stampede S3 at the same instant.
+Persistent=true
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target

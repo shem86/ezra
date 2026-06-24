@@ -121,42 +121,49 @@ if ! EZRA_TAG="$EZRA_TAG" compose run --rm ezra node dist/memory/migrate-cli.js;
 fi
 
 # --- 5. swap the running app to the new tag -----------------------------------
-log "swapping ezra to ${EZRA_TAG}"
-EZRA_TAG="$EZRA_TAG" compose up -d ezra
+# Spine + the read-only backoffice (same image, different entry) swap together.
+log "swapping ezra + backoffice to ${EZRA_TAG}"
+EZRA_TAG="$EZRA_TAG" compose up -d ezra backoffice
 
-# --- 6. healthcheck gate: launch marker + no restart-loop ----------------------
+# --- 6. healthcheck gate: launch markers + no restart-loop ---------------------
 # No HTTP endpoint exists (src/ops/health.ts is a socket/alert monitor), so the
-# readiness signal is the launch line main.ts prints (`ezra up:`) plus the
-# container staying `running` without crash-looping.
-log "waiting up to ${HEALTH_TIMEOUT}s for the launch marker"
-cid="$(EZRA_TAG="$EZRA_TAG" compose ps -q ezra)"
-healthy=false
+# readiness signal is the launch lines the processes print (`ezra up:` and
+# `backoffice up:`) plus both containers staying `running` without crash-looping.
+log "waiting up to ${HEALTH_TIMEOUT}s for the launch markers (ezra + backoffice)"
+ezra_cid="$(EZRA_TAG="$EZRA_TAG" compose ps -q ezra)"
+bo_cid="$(EZRA_TAG="$EZRA_TAG" compose ps -q backoffice)"
+ezra_up=false
+bo_up=false
 deadline=$(( SECONDS + HEALTH_TIMEOUT ))
+crashed=false
 while (( SECONDS < deadline )); do
-  status="$(docker inspect -f '{{.State.Status}}' "$cid" 2>/dev/null || echo missing)"
-  restarts="$(docker inspect -f '{{.RestartCount}}' "$cid" 2>/dev/null || echo 0)"
-  if [[ "$status" == "exited" || "$status" == "dead" || "${restarts:-0}" -ge 2 ]]; then
-    log "container is crash-looping (status=$status restarts=$restarts)"
-    break
-  fi
-  if docker logs "$cid" 2>&1 | grep -q 'ezra up:'; then
-    healthy=true
-    break
-  fi
+  for pair in "ezra:$ezra_cid" "backoffice:$bo_cid"; do
+    name="${pair%%:*}"; cid="${pair#*:}"
+    status="$(docker inspect -f '{{.State.Status}}' "$cid" 2>/dev/null || echo missing)"
+    restarts="$(docker inspect -f '{{.RestartCount}}' "$cid" 2>/dev/null || echo 0)"
+    if [[ "$status" == "exited" || "$status" == "dead" || "${restarts:-0}" -ge 2 ]]; then
+      log "$name is crash-looping (status=$status restarts=$restarts)"
+      crashed=true
+    fi
+  done
+  $crashed && break
+  docker logs "$ezra_cid" 2>&1 | grep -q 'ezra up:' && ezra_up=true
+  docker logs "$bo_cid" 2>&1 | grep -q 'backoffice up:' && bo_up=true
+  if [[ "$ezra_up" == true && "$bo_up" == true ]]; then break; fi
   sleep 3
 done
 
-if [[ "$healthy" == true ]]; then
-  log "healthy: ${EZRA_TAG} is up (steady-state monitored by the hc-ping dead-man)"
+if [[ "$ezra_up" == true && "$bo_up" == true ]]; then
+  log "healthy: ${EZRA_TAG} spine + backoffice are up (steady-state via the hc-ping dead-man)"
   exit 0
 fi
 
 # --- 7. auto-rollback ---------------------------------------------------------
-log "HEALTHCHECK FAILED for ${EZRA_TAG}"
+log "HEALTHCHECK FAILED for ${EZRA_TAG} (ezra_up=$ezra_up backoffice_up=$bo_up)"
 if [[ -n "$PRIOR_TAG" && "$PRIOR_TAG" != "$EZRA_TAG" ]]; then
-  log "rolling back to ${PRIOR_TAG}"
-  EZRA_TAG="$PRIOR_TAG" compose up -d ezra
+  log "rolling back ezra + backoffice to ${PRIOR_TAG}"
+  EZRA_TAG="$PRIOR_TAG" compose up -d ezra backoffice
 else
-  log "no prior tag to roll back to — leaving the failed container for diagnosis"
+  log "no prior tag to roll back to — leaving the failed containers for diagnosis"
 fi
 exit 1

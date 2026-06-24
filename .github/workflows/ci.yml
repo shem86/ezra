@@ -49,6 +49,14 @@ jobs:
       # debounce/FIFO/execute-once tests as one suite. Overlaps `pnpm test`
       # by design — this is the gate's named, green-in-CI invocation.
       - run: pnpm test:recovery
+      # Backoffice frontend — the isolated sub-package (own lockfile/toolchain).
+      # The read-only SERVER (src/backoffice) is already covered by the root
+      # build/lint/test above; this gates the React SPA (typecheck + Vite build,
+      # its own eslint + Vitest render tests).
+      - run: pnpm -C backoffice install --frozen-lockfile
+      - run: pnpm -C backoffice build
+      - run: pnpm -C backoffice lint
+      - run: pnpm -C backoffice test
 
   # Builds the production image (infra/Dockerfile) and runs the two cheap
   # pre-flight smokes from V2_NOTES §8 before pushing an immutable tag to GHCR.
@@ -121,6 +129,8 @@ jobs:
           WA_JID_HUSBAND=1@s.whatsapp.net
           WA_JID_WIFE=2@s.whatsapp.net
           WA_HOUSEHOLD_CONVERSATIONS=3@g.us
+          BACKOFFICE_TOKEN=ci-dummy-token-0123456789-abcdefghij
+          BACKOFFICE_DATABASE_URL=postgres://ro:ro@localhost:5432/hh_assistant
           EOF
 
       - name: Compose config smoke (§8 — interpolation / --env-file wiring)
@@ -133,6 +143,25 @@ jobs:
         run: |
           docker compose --env-file .env -f "$COMPOSE" run --rm --no-deps ezra \
             node -e 'import("./dist/ops/config.js").then(m => { m.loadProductionConfig(); console.log("config OK"); })'
+        env:
+          EZRA_TAG: ci-smoke
+
+      - name: Backoffice config-load smoke (validates the new backoffice vars)
+        run: |
+          docker compose --env-file .env -f "$COMPOSE" run --rm --no-deps backoffice \
+            node -e 'import("./dist/ops/config.js").then(m => { m.loadBackofficeConfig(); console.log("backoffice config OK"); })'
+        env:
+          EZRA_TAG: ci-smoke
+
+      - name: Backoffice boot smoke (the entry serves + prints its marker)
+        # Boot the real entry; the cost cache warm-up may fail on dummy keys
+        # (non-fatal, logged), but the server must listen and print `backoffice
+        # up:`. timeout stops the long-running server after the marker window.
+        run: |
+          out="$(docker compose --env-file .env -f "$COMPOSE" run --rm --no-deps backoffice \
+            timeout 12 node dist/backoffice/cli.js 2>&1 || true)"
+          echo "$out"
+          echo "$out" | grep -q 'backoffice up:' || { echo 'no backoffice up: marker'; exit 1; }
         env:
           EZRA_TAG: ci-smoke
 
