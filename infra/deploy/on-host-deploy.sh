@@ -112,18 +112,45 @@ log "pulling ${IMAGE}:${EZRA_TAG}"
 EZRA_TAG="$EZRA_TAG" compose pull ezra
 
 # --- 4. migrate-gate: run migrations with the NEW image, before the swap ------
-# Postgres is a dependency, so `run` (no --no-deps) brings it up if needed.
 # migrate-cli reads DATABASE_URL from the compose environment block.
+#
+# `--no-recreate postgres` + `--no-deps`: ensure Postgres is up WITHOUT
+# recreating it. A compose change to the postgres service or a network's
+# driver_opts (e.g. the egress bridge-name pin, V2_NOTES §5) would otherwise
+# make `compose run` recreate postgres / reconcile the egress network on the
+# LIVE stack — which Docker can't do with containers attached, erroring
+# "container … is not connected to network …" and wedging the stack mid-deploy
+# (2026-06-24 incident). Any such DEFINITION change is applied once, cleanly, by
+# the swap's down/up fallback below — never by the migrate-gate.
+log "ensuring Postgres is up without recreating it"
+EZRA_TAG="$EZRA_TAG" compose up -d --no-recreate postgres
 log "migrate-gate: applying migrations with ${EZRA_TAG}"
-if ! EZRA_TAG="$EZRA_TAG" compose run --rm ezra node dist/memory/migrate-cli.js; then
+if ! EZRA_TAG="$EZRA_TAG" compose run --rm --no-deps ezra node dist/memory/migrate-cli.js; then
   log "MIGRATION FAILED — aborting before swap; old container left running"
   exit 1
 fi
 
 # --- 5. swap the running app to the new tag -----------------------------------
 # Spine + the read-only backoffice (same image, different entry) swap together.
+# In-place first (fast, no downtime for the common case). A compose
+# network/volume DEFINITION change can't be applied to a running stack — `up`
+# then errors recreating the network with containers attached. On that failure,
+# fall back to a clean `down` + `up` (recreates networks correctly; named
+# volumes — pgdata, wa-session — are PRESERVED, never `-v`), a brief planned
+# downtime that the standard release flow then heals + auto-rollbacks like any
+# other.
 log "swapping ezra + backoffice to ${EZRA_TAG}"
-EZRA_TAG="$EZRA_TAG" compose up -d ezra backoffice
+if ! EZRA_TAG="$EZRA_TAG" compose up -d ezra backoffice; then
+  log "in-place swap failed (likely a network/volume-definition change) — clean down/up (named volumes preserved)"
+  EZRA_TAG="$EZRA_TAG" compose down --remove-orphans
+  EZRA_TAG="$EZRA_TAG" compose up -d
+  # The egress network may have been recreated under its pinned bridge name
+  # (hh-egress0); re-apply the host nftables allowlist so it matches the new
+  # interface immediately rather than waiting for the refresh timer. Best-effort
+  # — the hh operator may lack the sudo right, and the timer re-applies anyway.
+  sudo systemctl start hh-egress.service 2>/dev/null \
+    || log "note: run 'sudo systemctl start hh-egress.service' to re-apply egress for the new bridge"
+fi
 
 # --- 6. healthcheck gate: launch markers + no restart-loop ---------------------
 # No HTTP endpoint exists (src/ops/health.ts is a socket/alert monitor), so the
