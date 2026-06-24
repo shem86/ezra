@@ -1,24 +1,27 @@
-// Status — live service probes grouped by area + static reliability edges
-// (recovery-runbook copy). Renders fixtures for now; BO-11 wires /api/status.
+// Status — LIVE service probes grouped by area + static reliability edges
+// (recovery-runbook copy). Fetches /api/status (BO-11).
 import { Icon } from '../components/icon';
 import { Badge, Card, Dot } from '../components/primitives';
-import { edges as edgesFx, kpis as kpisFx, services as servicesFx, type EdgeRow, type ServiceRow } from '../fixtures';
+import { api, type ApiClient } from '../api/client';
+import { useAsync } from '../api/use-async';
+import type { StatusResponse } from '../api/types';
 
-export interface StatusData {
-  services: ServiceRow[];
-  edges: EdgeRow[];
-  turnsToday: number;
-  avgLatency: string;
-}
+export function StatusScreen({ client = api }: { client?: ApiClient }): React.JSX.Element {
+  const { data, error, loading } = useAsync<StatusResponse>((signal) => client.status(signal));
 
-const FIXTURE_DATA: StatusData = {
-  services: servicesFx,
-  edges: edgesFx,
-  turnsToday: kpisFx.turnsToday,
-  avgLatency: kpisFx.avgLatency,
-};
+  if (error !== null) {
+    return (
+      <Card>
+        <span style={{ color: 'var(--err)' }}>
+          {error === 'unauthorized' ? 'Unauthorized — open with ?token=…' : `Could not load status: ${error}`}
+        </span>
+      </Card>
+    );
+  }
+  if (data === null) {
+    return <Card>{loading ? 'Running probes…' : 'No status.'}</Card>;
+  }
 
-export function StatusScreen({ data = FIXTURE_DATA }: { data?: StatusData }): React.JSX.Element {
   const groups = [...new Set(data.services.map((s) => s.group))];
   const deg = data.services.filter((s) => s.status !== 'operational');
 

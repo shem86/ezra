@@ -6,10 +6,18 @@
 import { resolve } from 'node:path';
 import { Pool } from 'pg';
 import { loadBackofficeConfig } from '../ops/config.js';
+import { makeGoogleCalendarClient } from '../tools/calendar-client.js';
 import { createApiRouter } from './api.js';
 import { makeRateLimiter } from './auth.js';
 import { makeCostClient } from './cost.js';
 import { makeTurnEnricher } from './journal.js';
+import {
+  makeAnthropicPing,
+  makeLangfusePing,
+  makeVoyagePing,
+  runProbes,
+  type StatusResponse,
+} from './probes.js';
 import { createBackofficeServer } from './server.js';
 
 function main(): void {
@@ -33,11 +41,38 @@ function main(): void {
     publicKey: config.langfuse.publicKey,
     secretKey: config.langfuse.secretKey,
   });
-  const api = createApiRouter({
-    db: { query: (sql, params) => pool.query(sql, params === undefined ? undefined : [...params]) },
-    cost,
-    enricher,
+
+  const db = { query: (sql: string, params?: readonly unknown[]) => pool.query(sql, params === undefined ? undefined : [...params]) };
+
+  // Calendar client (read-only events.list) — for the Status GCal ping and the
+  // Database calendar rows (BO-12). Built from the service-account key.
+  const calendar = makeGoogleCalendarClient({
+    clientEmail: config.googleServiceAccount.clientEmail,
+    privateKey: config.googleServiceAccount.privateKey,
+    calendarIds: config.calendarIds,
   });
+
+  // Live status, cached briefly (probes hit external APIs).
+  let statusCache: { at: number; value: StatusResponse } | undefined;
+  const status = async (): Promise<StatusResponse> => {
+    if (statusCache !== undefined && Date.now() - statusCache.at < 30_000) return statusCache.value;
+    const value = await runProbes({
+      db,
+      pingAnthropic: makeAnthropicPing(config.anthropicApiKey),
+      pingVoyage: makeVoyagePing(config.voyageApiKey),
+      pingLangfuse: makeLangfusePing(config.langfuse.baseUrl, config.langfuse.publicKey, config.langfuse.secretKey),
+      pingCalendar: async () => {
+        const t = Date.now();
+        const win = { start: new Date(), end: new Date(Date.now() + 60_000) };
+        await calendar.listEvents('husband', win);
+        return Date.now() - t;
+      },
+    });
+    statusCache = { at: Date.now(), value };
+    return value;
+  };
+
+  const api = createApiRouter({ db, cost, enricher, status });
 
   const server = createBackofficeServer({
     token: config.token,

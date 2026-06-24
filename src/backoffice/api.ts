@@ -7,6 +7,7 @@ import type { ApiResponse, ApiRouter } from './server.js';
 import { isTableKey, queryTable, tableCatalogue, type Queryable } from './queries.js';
 import type { CostClient } from './cost.js';
 import { getLogs, type TurnEnricher } from './journal.js';
+import type { StatusResponse } from './probes.js';
 
 export interface ApiDeps {
   /** SELECT-only pool in production (BACKOFFICE_DATABASE_URL → SELECT-only role). */
@@ -15,6 +16,8 @@ export interface ApiDeps {
   readonly cost?: CostClient | undefined;
   /** Langfuse per-turn enrichment (Logs screen); degrades to `—` if absent. */
   readonly enricher?: TurnEnricher | undefined;
+  /** Live health probes (Status screen), cached by the composer. */
+  readonly status?: (() => Promise<StatusResponse>) | undefined;
 }
 
 function clampLimit(raw: string | null): number | undefined {
@@ -44,6 +47,12 @@ export function createApiRouter(deps: ApiDeps): ApiRouter {
         const limit = clampLimit(url.searchParams.get('limit'));
         const logs = await getLogs(deps.db, deps.enricher, limit === undefined ? {} : { limit });
         return { status: 200, body: logs };
+      }
+
+      // GET /api/status → live health probes.
+      if (path === '/api/status') {
+        if (deps.status === undefined) return { status: 503, body: { error: 'status unavailable' } };
+        return { status: 200, body: await deps.status() };
       }
 
       // GET /api/db/:table → one table's rows (paged via ?limit).

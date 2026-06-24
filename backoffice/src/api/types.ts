@@ -62,3 +62,24 @@ export interface LogsResponse {
   turns: TurnRow[];
   enriched: boolean;
 }
+
+// --- Status (live probes) ---------------------------------------------------
+export interface ServiceRow {
+  name: string;
+  group: string;
+  status: 'operational' | 'degraded' | 'down';
+  latency: string;
+  uptime: string;
+  detail: string;
+}
+export interface EdgeRow {
+  name: string;
+  status: string;
+  detail: string;
+}
+export interface StatusResponse {
+  services: ServiceRow[];
+  edges: EdgeRow[];
+  turnsToday: number;
+  avgLatency: string;
+}

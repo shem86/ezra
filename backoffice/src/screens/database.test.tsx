@@ -31,6 +31,7 @@ const fakeClient: ApiClient = {
   table: async () => listing,
   costs: unused,
   logs: unused,
+  status: unused,
 };
 
 describe('DatabaseScreen (live data)', () => {
@@ -54,6 +55,7 @@ describe('DatabaseScreen (live data)', () => {
       table: async () => listing,
       costs: unused,
       logs: unused,
+      status: unused,
     };
     render(<DatabaseScreen client={failing} />);
     await waitFor(() => expect(screen.getByText(/Unauthorized/)).toBeInTheDocument());

@@ -217,6 +217,12 @@ export interface BackofficeConfig {
     readonly secretKey: string;
     readonly baseUrl: string;
   };
+  /** Credentials the Status probes ping (cheap auth checks) + Calendar read.
+   *  These never enter prompts/traces — the console pings, it doesn't reason. */
+  readonly anthropicApiKey: string;
+  readonly voyageApiKey: string;
+  readonly googleServiceAccount: { readonly clientEmail: string; readonly privateKey: string };
+  readonly calendarIds: { readonly husband: string; readonly wife: string };
 }
 
 export function loadBackofficeConfig(
@@ -226,13 +232,22 @@ export function loadBackofficeConfig(
   if (!parsed.success) {
     throw new Error(`Invalid environment configuration:\n${formatIssues(parsed.error.issues)}`);
   }
-  // Langfuse keys come from the base schema (same keys as the trace sink) —
-  // the backoffice reads what the spine writes.
-  const lf = envSchema
-    .pick({ LANGFUSE_PUBLIC_KEY: true, LANGFUSE_SECRET_KEY: true, LANGFUSE_BASE_URL: true })
+  // Data-source keys come from the base schema (same keys the spine uses) —
+  // the backoffice reads what the spine writes / pings what it depends on.
+  const shared = envSchema
+    .pick({
+      LANGFUSE_PUBLIC_KEY: true,
+      LANGFUSE_SECRET_KEY: true,
+      LANGFUSE_BASE_URL: true,
+      ANTHROPIC_API_KEY: true,
+      VOYAGE_API_KEY: true,
+      GOOGLE_SA_KEY_B64: true,
+      CALENDAR_ID_HUSBAND: true,
+      CALENDAR_ID_WIFE: true,
+    })
     .safeParse(env);
-  if (!lf.success) {
-    throw new Error(`Invalid environment configuration:\n${formatIssues(lf.error.issues)}`);
+  if (!shared.success) {
+    throw new Error(`Invalid environment configuration:\n${formatIssues(shared.error.issues)}`);
   }
   return {
     token: parsed.data.BACKOFFICE_TOKEN,
@@ -241,10 +256,14 @@ export function loadBackofficeConfig(
     databaseUrl: parsed.data.BACKOFFICE_DATABASE_URL,
     monthlyBudgetUsd: parsed.data.BACKOFFICE_MONTHLY_BUDGET_USD,
     langfuse: {
-      publicKey: lf.data.LANGFUSE_PUBLIC_KEY,
-      secretKey: lf.data.LANGFUSE_SECRET_KEY,
-      baseUrl: lf.data.LANGFUSE_BASE_URL,
+      publicKey: shared.data.LANGFUSE_PUBLIC_KEY,
+      secretKey: shared.data.LANGFUSE_SECRET_KEY,
+      baseUrl: shared.data.LANGFUSE_BASE_URL,
     },
+    anthropicApiKey: shared.data.ANTHROPIC_API_KEY,
+    voyageApiKey: shared.data.VOYAGE_API_KEY,
+    googleServiceAccount: shared.data.GOOGLE_SA_KEY_B64,
+    calendarIds: { husband: shared.data.CALENDAR_ID_HUSBAND, wife: shared.data.CALENDAR_ID_WIFE },
   };
 }
 

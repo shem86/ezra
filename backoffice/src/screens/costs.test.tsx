@@ -31,6 +31,7 @@ const stubClient = (partial: Partial<ApiClient>): ApiClient => ({
   table: async () => ({ table: '', label: '', icon: '', columns: [], rows: [] }),
   costs: async () => costs,
   logs: async () => ({ turns: [], enriched: false }),
+  status: async () => ({ services: [], edges: [], turnsToday: 0, avgLatency: "—" }),
   ...partial,
 });
 

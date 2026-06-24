@@ -27,6 +27,7 @@ const client = (logs: LogsResponse): ApiClient => ({
     throw new Error('unused');
   },
   logs: async () => logs,
+  status: async () => ({ services: [], edges: [], turnsToday: 0, avgLatency: "—" }),
 });
 
 describe('LogsScreen (live)', () => {
