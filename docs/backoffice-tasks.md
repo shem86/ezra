@@ -1,64 +1,107 @@
-# Tasks: Ezra Backoffice (Phase 3) — for an autonomous `/goal` run
+# Tasks: Ezra Backoffice (Phase 3) — for an autonomous, **end-to-end** `/goal` run
 
 Implements `docs/backoffice-plan.md` (APPROVED). This ledger is written to be
-executed by an autonomous agent. Tasks are ordered by dependency; each is a
-single focused unit with **machine-checkable** acceptance. Work top-to-bottom;
-do not start a task until its predecessors' verify commands are green.
+executed by an autonomous agent that **runs to completion with production
+access** — it writes the code, gets CI green, applies the IaC, deploys via the
+standard release flow, wires Tailscale on the live host, and verifies the
+result. When the run finishes, the backoffice is **built, connected, and
+working on the host**. There is no mid-run hand-back.
 
-IDs are `BO-N`. Commit messages should reference them (`backoffice: … (BO-7)`),
-matching the repo's T-number convention.
+The human's only involvement is **Phase 0** below: a one-time set of
+prerequisites that hand the agent the credentials and the single secret a human
+must mint (a Tailscale auth key). Do Phase 0 first, then launch `/goal`.
+
+Tasks are `BO-N`, ordered by dependency. Commit messages reference them
+(`backoffice: … (BO-7)`), matching the repo's T-number convention.
+
+> **"Read-only" means the product, not the agent.** The backoffice never writes
+> to any real datastore (no mutation routes, no tool/DBOS imports, SELECT-only
+> DB role). The *agent*, by contrast, is fully empowered: it pushes to `main`,
+> runs `pnpm release`, applies Pulumi, and SSHes the prod host. Keep these two
+> ideas separate everywhere below.
+
+---
+
+## Phase 0 — Operator prerequisites *(human, ONE TIME, before the run)*
+
+Complete these, then start the `/goal` run. Their purpose is to leave the agent
+with **zero blockers** — every credential it needs is already reachable from the
+environment you launch it in, and the one secret only a human can produce is
+already minted.
+
+- [ ] **Run the agent in a credentialed environment.** The shell that runs
+      `/goal` must already have, working and non-interactive:
+  - **AWS** credentials that can: assume/serve as the deploy role, write SSM
+    SecureStrings under `/hh-assistant/*`, and run `pulumi up` on the
+    adopt-prod stack (i.e. the Pulumi state backend + passphrase are reachable,
+    `pulumi whoami` succeeds, `aws sts get-caller-identity` succeeds).
+  - **GitHub** (`gh auth status` green) with push rights to
+    `shem86/hh-assistant` and permission to create releases — `pnpm release`
+    pushes a tag and runs `gh release create`.
+  - **Prod host SSH**: key-based `ssh ubuntu@98.91.67.226` works
+    non-interactively (the `ubuntu` user can sudo; `hh` cannot — see
+    `host-sudo-access-path` memory). Needed for the Tailscale first-roll and any
+    psql on the prod DB.
+- [ ] **Mint a Tailscale auth key** in the Tailscale admin console (reusable or
+      ephemeral; tagged so ACLs allow it) and store it as an SSM SecureString,
+      e.g. `/hh-assistant/tailscale-authkey`. Confirm the tailnet has **HTTPS
+      certificates + MagicDNS enabled** so `tailscale serve` can get a
+      `*.ts.net` cert. This is the one secret the agent cannot generate itself.
+- [ ] **Confirm the budget number** the Costs screen should show as the monthly
+      ceiling (or accept the default the agent picks from Config and flag it).
+- [ ] **Tell the agent the release version** to cut (e.g. `v0.8.0`), or let it
+      pick the next semver off `main` and report it.
+
+Everything else the agent generates and stores itself (the backoffice bearer
+token and the SELECT-only DB password), because Phase 0 gave it SSM write.
+
+> After Phase 0: launch `/goal` with the goal statement below and walk away.
 
 ---
 
 ## Goal statement (paste into `/goal`)
 
-> Build the Ezra backoffice — a **read-only** operations console — by executing
-> `docs/backoffice-tasks.md` top to bottom, one task at a time. It implements
-> `docs/backoffice-spec.md` (APPROVED) and `docs/backoffice-plan.md`. After each
-> task, run its **Verify** command(s); only commit and advance when green
-> (`backoffice: <summary> (BO-N)`). Obey the **Guardrails** below without
-> exception. **Stop at the Autonomy boundary** (after BO-17) and hand the
-> remaining prod-credentialed steps back to me with a summary of what's left.
-> Honor `CLAUDE.md` and `.claude/rules/*` throughout (strict TS, Zod at
-> boundaries, no default exports, DI via `deps`, `src/ops/config.ts` is the only
-> env reader). If a task needs a decision or a dependency outside the
-> pre-approved list, stop and ask rather than guess.
+> Build **and ship** the Ezra backoffice — a read-only operations console — end
+> to end, with production access, by executing `docs/backoffice-tasks.md` top to
+> bottom, one task at a time. It implements `docs/backoffice-spec.md` (APPROVED)
+> and `docs/backoffice-plan.md`. Phase 0 (operator prerequisites) is already
+> done, so every credential you need is available and the Tailscale auth key is
+> in SSM at `/hh-assistant/tailscale-authkey`. After each task run its
+> **Verify** command(s); only commit and advance when green
+> (`backoffice: <summary> (BO-N)`). Obey the **Guardrails** without exception.
+> Run all the way to **BO-23** — do not stop early or hand back: when you
+> finish, the backoffice must be reachable over the tailnet at `*.ts.net` HTTPS,
+> behind auth, serving live data, with zero write path. Honor `CLAUDE.md` and
+> `.claude/rules/*` throughout (strict TS, Zod at boundaries, no default
+> exports, DI via `deps`, `src/ops/config.ts` is the only env reader). If a task
+> needs a dependency outside the pre-approved list, add it only after noting
+> why; if a `Verify` fails after a genuine fix attempt, deploy auto-rollback or
+> CI red is your stop signal — diagnose and fix, do not weaken the gate.
 
 ## Guardrails (apply to every task)
 
-1. **Read-only, always.** No mutation routes/handlers; no writes to any real
-   DB; no tool-layer or DBOS imports in the backoffice service. Integration
-   tests run against the `_test` DB (per `.claude/rules/testing.md`).
-2. **No prod, no credentials, no real effects.** Never run `pnpm release`,
-   deploy, `pulumi up`, AWS/SSM commands, real WhatsApp/calendar writes, or real
-   model calls in CI. Drafting infra *code* is fine; *applying* it is not.
+1. **The product is read-only.** No mutation routes/handlers; no writes to any
+   real datastore from the backoffice; no tool-layer or DBOS imports in the
+   backoffice service; the running service connects through the **SELECT-only**
+   DB role. Integration tests run against the `_test` DB
+   (`.claude/rules/testing.md`).
+2. **The agent ships to prod — carefully.** You may push to `main`, run
+   `pnpm release`, `pulumi up`, `aws ssm`, and SSH the prod host. The standard
+   safety rails still bind: **never commit secrets or Baileys session state**,
+   never let credentials enter prompts/traces/the semantic store, **never
+   restore Baileys from backup**, never weaken a failing test or lint rule to go
+   green (`CLAUDE.md` "Never"). Schema/role changes are forward-only.
 3. **Isolated frontend package.** `backoffice/` has its own
    `package.json`/lockfile/`tsconfig`/eslint. Frontend deps (`react`,
    `react-dom`, `vite`, `@vitejs/plugin-react`, `@types/react*`) go there only —
-   never into root `package.json`. Any dep beyond that list ⇒ stop and ask.
+   never into root `package.json`.
 4. **Exact pins** (`.npmrc` `save-exact`); commit the lockfile in any
    dep-touching commit.
 5. **Verify-then-commit.** A task is done only when its Verify command(s) pass.
    One commit per task (or per small coherent step within it).
-6. **Stay in the worktree/branch.** Do not push to `main`; do not open PRs
-   unless asked.
-
-## Autonomy boundary
-
-Do **BO-1 … BO-17** (all codeable + in-repo-verifiable, including *drafting* the
-IaC/egress/migration code). Then **STOP**. The following are **human-only** and
-must be left to the operator (they touch prod or need credentials/real traffic):
-
-- Provision SSM secrets: backoffice bearer token, Tailscale auth key, the
-  SELECT-only DB URL.
-- Tailscale **first-roll on the live host** (userData is `ignoreChanges`, so
-  Pulumi won't run it on prod).
-- `pulumi up` (apply the cloud-init + role changes).
-- `pnpm release vX.Y.Z` and the release→SSM deploy.
-- Over-the-tailnet verification (HTTPS reachable, auth required, screens live,
-  zero write path).
-
-Hand these back with a checklist and any values the operator must supply.
+6. **Green `main` gates the release.** `pnpm release` requires a clean `main`
+   matching origin with a green CI image build. Land all code on `main` and get
+   CI green *before* the deploy tasks (B5).
 
 ---
 
@@ -104,8 +147,8 @@ Hand these back with a checklist and any values the operator must supply.
 
 ### BO-5 · Config vars + `pnpm backoffice` script
 - **Acceptance:** `src/ops/config.ts` gains backoffice vars (bearer token,
-  SELECT-only `DATABASE_URL`, port) with Zod validation + tests; `.env.example`
-  updated; `pnpm backoffice` script added.
+  SELECT-only `DATABASE_URL`, port, optional monthly-budget number) with Zod
+  validation + tests; `.env.example` updated; `pnpm backoffice` script added.
 - **Verify:** config unit tests pass; `pnpm build && pnpm lint`.
 - **Files:** `src/ops/config.ts`, `tests/unit/**config**`, `.env.example`,
   `package.json`.
@@ -193,10 +236,10 @@ Hand these back with a checklist and any values the operator must supply.
 - **Acceptance:** `infra/Dockerfile` also runs `pnpm -C backoffice build` and
   includes compiled `src/backoffice`; `infra/docker-compose.prod.yml` gains a
   `backoffice` service (same image, entry `pnpm backoffice`, tailnet-bound,
-  shares Postgres); `on-host-deploy.sh` waits for a backoffice `up:` marker.
+  shares Postgres); `on-host-deploy.sh` waits for a backoffice `up:` marker
+  alongside `ezra up:` (extend the 180s window); existing auto-rollback covers it.
 - **Verify:** `docker compose -f infra/docker-compose.prod.yml config` parses;
-  `docker build` locally **if** Docker is available (else note CI is the
-  arbiter). No deploy.
+  `docker build` locally if Docker is available (else note CI is the arbiter).
 - **Files:** `infra/Dockerfile`, `infra/docker-compose.prod.yml`,
   `infra/deploy/on-host-deploy.sh`.
 
@@ -204,13 +247,13 @@ Hand these back with a checklist and any values the operator must supply.
 - **Acceptance:** `.github/workflows/ci.yml` adds `pnpm -C backoffice build` +
   lint/tests to the gates and extends the config smoke to boot the backoffice
   entry; PRs build+smoke but never push (unchanged rule).
-- **Verify:** workflow YAML is valid; the added steps mirror existing ones.
-  (CI actually runs on push — operator-observed.)
+- **Verify:** workflow YAML is valid; the added steps mirror existing ones; on
+  push to a branch, CI runs green (observe the run).
 - **Files:** `.github/workflows/ci.yml`.
 
 > **Gate B3:** CI green incl. backoffice build + config smoke.
 
-## B4 — IaC / egress / migration *(draft only — apply is human-gated)*
+## B4 — IaC, egress, SELECT-only role *(code)*
 
 ### BO-16 · Egress allowlist additions
 - **Acceptance:** `src/ops/egress-allowlist.ts` + nftables mirror gain Tailscale
@@ -218,30 +261,87 @@ Hand these back with a checklist and any values the operator must supply.
 - **Verify:** the allowlist↔nftables **drift test** passes; `pnpm build && pnpm test`.
 - **Files:** `src/ops/egress-allowlist.ts`, `infra/egress/**`, tests.
 
-### BO-17 · SELECT-only role + Pulumi cloud-init draft
-- **Acceptance:** a forward-only migration (or documented grant) creating the
-  SELECT-only role with `USAGE`+`SELECT` on the app, `dbos`, and pgvector
-  schemas; `infra/pulumi/cloud-init/render.ts` gains the Tailscale bootstrap
-  (install + `tailscale up` from an SSM auth key + `tailscale serve`). **Code
-  only — no `pulumi up`.**
-- **Verify:** migration applies cleanly on the `_test` DB; `pnpm -C infra/pulumi`
-  typechecks/builds. No apply.
+### BO-17 · SELECT-only role migration + Pulumi cloud-init code
+- **Acceptance:** a forward-only migration creating the SELECT-only role with
+  `USAGE`+`SELECT` on the app, `dbos`, and pgvector schemas (the role's password
+  is set out-of-band from the SSM SELECT-only DB URL, **not** hard-coded in the
+  migration); `infra/pulumi/cloud-init/render.ts` gains the Tailscale bootstrap
+  (install + `tailscale up` from the SSM auth key + `tailscale serve` fronting
+  the backoffice port) so a from-zero env wires it automatically. Code lands
+  here; it is *applied* in B5.
+- **Verify:** migration applies cleanly on the `_test` DB; a `_test`-DB
+  integration test connects as the SELECT-only role and proves it can read but
+  not write; `pnpm -C infra/pulumi` typechecks/builds.
 - **Files:** `migrations/000X-backoffice-readonly-role.sql`,
   `infra/pulumi/cloud-init/render.ts`, `infra/pulumi/config.ts`.
 
-> **STOP — autonomy boundary.** Hand back the human-only checklist (SSM secrets,
-> Tailscale first-roll, `pulumi up`, `pnpm release`, tailnet verification).
+> **Gate B4:** all code merged to a green branch; SELECT-only role proven on
+> `_test`; Pulumi workspace builds.
 
----
+## B5 — Provision, deploy, and verify on prod *(the agent does all of this)*
 
-## Operator handoff checklist (after BO-17)
+### BO-18 · Generate + store the agent-owned secrets in SSM
+- **Acceptance:** mint a strong backoffice bearer token and a strong SELECT-only
+  DB password; store both as SSM SecureStrings under `/hh-assistant/*`
+  (e.g. `/hh-assistant/backoffice-token`, `/hh-assistant/backoffice-db-url` with
+  the full SELECT-only connection string). Values never touch git, prompts, or
+  traces.
+- **Verify:** `aws ssm get-parameter --with-decryption` returns each; the
+  values match what the migration/role and Config expect.
+- **Files:** none in-repo (SSM only); note the param names in the deploy log.
 
-- [ ] Put secrets in SSM: backoffice bearer token, Tailscale auth key,
-      SELECT-only DB URL (under `/hh-assistant/*`).
-- [ ] Tailscale first-roll on the live host (one-time; userData is
-      `ignoreChanges`).
-- [ ] `pulumi up` on the adopt-prod stack (cloud-init + role).
-- [ ] Apply the SELECT-only role migration on prod.
-- [ ] `pnpm release vX.Y.Z` → watch the release→SSM deploy + auto-rollback.
-- [ ] Verify over the tailnet: `*.ts.net` HTTPS reachable, auth required, all
-      five screens live, **zero write path**.
+### BO-19 · Land on `main`, CI green
+- **Acceptance:** merge the backoffice branch into `main` (fast-forward / PR as
+  the repo allows); the CI image build for that `main` commit is green.
+- **Verify:** `git log origin/main` shows the backoffice commits; the GHCR image
+  for `:main` (or the release SHA) exists; CI run is green.
+- **Files:** none (git/CI).
+
+### BO-20 · `pulumi up` (adopt-prod): egress + role + cloud-init
+- **Acceptance:** apply the Pulumi adopt-prod stack so the egress allowlist,
+  SELECT-only role provisioning hook, and encoded cloud-init are in state. Note
+  the prod instance's `userData` is `ignoreChanges` — `pulumi up` will **not**
+  re-run cloud-init on the existing box; that's why BO-22 rolls Tailscale
+  out-of-band. The diff must be intentional (no instance replacement).
+- **Verify:** `pulumi up` succeeds with no resource that would replace the live
+  instance/volume; `pulumi preview` afterward is clean.
+- **Files:** none beyond what BO-16/BO-17 produced.
+
+### BO-21 · Release + deploy (release → SSM)
+- **Acceptance:** cut the release with `pnpm release vX.Y.Z` (version from Phase
+  0 or the next semver). This blocks on the CI image build, then fires the
+  release→SSM deploy: migrate-gate runs the BO-17 migration (creating the
+  SELECT-only role/grants), `up -d` starts the spine **and** the new backoffice
+  service, healthcheck waits for both `ezra up:` and the backoffice marker, with
+  auto-rollback on failure. Set the SELECT-only role's **password** on prod
+  (psql over SSH) to match the SSM `backoffice-db-url`.
+- **Verify:** the deploy run reaches healthy (no auto-rollback); on the host,
+  `docker compose ps` shows the backoffice container up and the spine healthy;
+  the backoffice can connect with the SELECT-only URL.
+- **Files:** none (release/deploy); record the version cut.
+
+### BO-22 · Tailscale first-roll + serve on the live host
+- **Acceptance:** over `ssh ubuntu@98.91.67.226`: install `tailscale`,
+  `tailscale up` using the auth key from `/hh-assistant/tailscale-authkey`, then
+  `tailscale serve` to front the backoffice's tailnet-bound port with the
+  node's `*.ts.net` HTTPS cert. No public inbound port is opened (the SG stays
+  SSH-only ingress). This mirrors the cloud-init encoded in BO-17 for from-zero
+  envs; document the one-time host step in `infra/runtime.md`.
+- **Verify:** `tailscale status` shows the node online; `tailscale serve status`
+  shows the backoffice fronted on HTTPS; the SG still has no new public ingress.
+- **Files:** `infra/runtime.md` (document the one-time step).
+
+### BO-23 · End-to-end verification over the tailnet
+- **Acceptance:** from a tailnet client, the backoffice is reachable at
+  `https://<host>.<tailnet>.ts.net`, **requires auth** (401 without the bearer
+  token, 200 with it), serves **live** data on all five screens (Overview,
+  Database, Logs, Costs, Status), and exposes **zero write path** (no mutation
+  route responds). Steady-state health (the spine's hc-ping dead-man) is intact.
+- **Verify:** curl without token → 401; with token → 200 + live JSON on each
+  `/api/*`; a probe for any mutating method returns 404/405; screens load in a
+  browser over the tailnet. Report the URL and the result.
+- **Files:** none — this is the final acceptance.
+
+> **Done:** the backoffice is built, connected, and working on the host —
+> reachable over the tailnet behind auth, serving live read-only data, deployed
+> by the standard release flow with auto-rollback intact.

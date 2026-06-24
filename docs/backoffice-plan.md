@@ -145,24 +145,30 @@ auth, serving live data, no write path, deployed by the standard release flow.
 - **B3/B4:** mostly sequential (packaging → CI → IaC → ship), though the
   Dockerfile/compose drafts can begin during B2.
 
-## Execution model — autonomous `/goal` agent
+## Execution model — autonomous, **end-to-end** `/goal` agent
 
-The build is driven by a `/goal` agent run, so the milestones above are
-decomposed into atomic, **self-verifying** tasks in `docs/backoffice-tasks.md`.
-Two things the agent decomposition adds on top of this plan:
+The build is driven by a single `/goal` agent run that goes **all the way to a
+working, deployed backoffice on the host** — code, CI, IaC apply, release, and
+on-host Tailscale wiring. The milestones above are decomposed into atomic,
+**self-verifying** tasks in `docs/backoffice-tasks.md`. The decomposition adds:
 
-- **Autonomy boundary.** The agent does everything that is codeable and
-  verifiable **in-repo** — B0–B3 in full, plus *drafting* the B4 IaC / egress /
-  migration code (tasks BO-1…BO-17). It **stops** at anything that touches prod
-  or needs credentials/real traffic and hands those back to you: SSM secret
-  provisioning, the Tailscale first-roll on the live host, `pulumi up`,
-  `pnpm release`/deploy, and over-the-tailnet verification.
-- **Standing guardrails** (enforced every task): read-only only — no mutation
-  routes, no prod writes, integration tests on the `_test` DB; `backoffice/`
-  stays an isolated package (frontend deps never enter root `package.json`); no
-  `pnpm release` / deploy / AWS / real WhatsApp or calendar writes; honor
-  `CLAUDE.md` + `.claude/rules/*`; new deps only within the pre-approved list,
-  else stop and ask; verify-then-commit per task.
+- **No mid-run hand-back.** The agent runs with production access and completes
+  B0–B5 (BO-1…BO-23): it writes the code, gets CI green, `pulumi up`s the
+  adopt-prod stack, cuts `pnpm release`, SSHes the host to roll Tailscale, and
+  verifies over the tailnet. The only human work is **Phase 0** (operator
+  prerequisites) done once *before* the run — handing the agent its credentials
+  and the one secret a human must mint (a Tailscale auth key). After Phase 0 the
+  agent has zero blockers.
+- **"Read-only" is the product, not the agent.** The backoffice never writes to
+  any real datastore (no mutation routes, no tool/DBOS imports, SELECT-only DB
+  role, `_test`-DB integration tests). The agent itself is fully empowered to
+  push to `main`, release, apply Pulumi, and touch the prod host.
+- **Standing guardrails** (enforced every task): product read-only; `backoffice/`
+  stays an isolated package (frontend deps never enter root `package.json`);
+  honor `CLAUDE.md` + `.claude/rules/*` and its "Never" list (no committed
+  secrets/Baileys state, no credentials in prompts/traces, never weaken a gate
+  to go green, forward-only schema); exact pins; verify-then-commit per task;
+  green `main` gates the release.
 
-See `docs/backoffice-tasks.md` for the full ledger and the goal statement to
-feed `/goal`.
+See `docs/backoffice-tasks.md` for the full ledger, the Phase 0 prerequisites,
+and the goal statement to feed `/goal`.
