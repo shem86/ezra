@@ -64,20 +64,53 @@ export class HostEnvironment extends pulumi.ComponentResource {
           ),
         ).value;
 
-    // --- security group: SSH in, egress OPEN ---------------------------------
-    // Egress stays open on purpose: the real allowlist is host nftables on the
-    // docker egress bridge (infra/egress, src/ops/egress-allowlist.ts). SG egress
-    // tightening is deferred (V2_NOTES §5). groupName is immutable ⇒ pinned for adopt.
-    // description + rule shape match the live prod SG EXACTLY: the group
-    // description is immutable (a mismatch forces replacement), and the live
-    // rules carry no per-rule descriptions. Egress stays open here; real egress
-    // is host nftables (V2_NOTES §5). Descriptions must be ASCII (AWS regex).
+    // --- security group: SSH in, egress a COARSE allowlist (V2_NOTES §5) ------
+    // Cloud-layer defense-in-depth UNDER the host nftables allowlist (infra/egress,
+    // src/ops/egress-allowlist.ts), which is the real, hostname-aware control on
+    // the docker egress bridge. The SG can only filter by IP/port (no hostnames),
+    // so this is a deliberately COARSE second layer: it bounds the host to the
+    // protocol/port set it legitimately needs and drops everything else.
+    //
+    // CRITICAL (why §5 says "carefully"): an SG with ANY explicit egress rule
+    // LOSES the implicit allow-all — so this list must enumerate EVERY port the
+    // HOST ITSELF needs outbound, not just the container's. The SG governs the
+    // host's own traffic (SSM agent, apt, DNS, NTP) AND, because the container's
+    // egress is routed/NAT'd out the host ENI, the container's traffic too. Miss
+    // a port and the host loses connectivity. Each rule below is justified inline.
+    // Applying this to LIVE prod is a deliberate, careful step — see the PR.
+    //
+    // groupName is immutable ⇒ pinned for adopt. Per-rule `description`s are set
+    // (ASCII only — AWS regex); the inline egress block carries them on a fresh
+    // create, and on adopt they appear as a benign in-place rule update at the
+    // first tightened `pulumi up` (the egress shape itself is the real change).
     const sg = new aws.ec2.SecurityGroup(`${name}-sg`, {
       name: cfg.securityGroupName,
       description: "hh-assistant: SSH only ingress",
       vpcId: vpcId,
       ingress: [{ protocol: "tcp", fromPort: 22, toPort: 22, cidrBlocks: [cfg.sshAllowCidr] }],
-      egress: [{ protocol: "-1", fromPort: 0, toPort: 0, cidrBlocks: ["0.0.0.0/0"] }],
+      egress: [
+        // 443/tcp — the workhorse. Carries: SSM agent + CD channel (ssm/
+        // ssmmessages/ec2messages endpoints, the no-inbound-SSH deploy path),
+        // `aws ssm get-parameter` secret fetches (SSM + KMS), GHCR image pulls,
+        // AWS S3 backups + ip-ranges.amazonaws.com, and ALL container HTTPS
+        // (Anthropic, Voyage, Google Calendar, Langfuse, Telegram, healthchecks,
+        // WhatsApp/Baileys, fbcdn media). Everything in egress-allowlist.ts is 443.
+        { protocol: "tcp", fromPort: 443, toPort: 443, cidrBlocks: ["0.0.0.0/0"], description: "HTTPS: SSM/CD, GHCR, AWS S3, model/embedding/calendar/tracing/alert/WhatsApp APIs" },
+        // 80/tcp — stock Ubuntu apt (archive.ubuntu.com / security.ubuntu.com
+        // serve over HTTP) + unattended-upgrades security patches. The Docker
+        // and NodeSource repos are HTTPS (covered by 443); base-OS apt is not.
+        { protocol: "tcp", fromPort: 80, toPort: 80, cidrBlocks: ["0.0.0.0/0"], description: "HTTP: Ubuntu apt + security updates (archive/security.ubuntu.com)" },
+        // 53/tcp + 53/udp — DNS. The host firewall pins the VPC resolver
+        // (169.254.169.253, link-local); allowing 53 broadly keeps name
+        // resolution working regardless of resolver placement. TCP covers large
+        // responses / fallback. Without DNS the host resolves nothing.
+        { protocol: "tcp", fromPort: 53, toPort: 53, cidrBlocks: ["0.0.0.0/0"], description: "DNS over TCP (large responses / fallback)" },
+        { protocol: "udp", fromPort: 53, toPort: 53, cidrBlocks: ["0.0.0.0/0"], description: "DNS over UDP (name resolution)" },
+        // 123/udp — NTP. The clock must stay accurate: reminders + compaction
+        // anchor to Eastern time, never server time (CLAUDE.md), so a drifting
+        // clock mis-fires reminders. systemd-timesyncd/chrony dials NTP out.
+        { protocol: "udp", fromPort: 123, toPort: 123, cidrBlocks: ["0.0.0.0/0"], description: "NTP time sync (Eastern-anchored reminders need an accurate clock)" },
+      ],
       tags: { ...tags, Name: cfg.securityGroupName },
     }, imp("sg"));
 
