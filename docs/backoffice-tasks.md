@@ -29,7 +29,7 @@ with **zero blockers** — every credential it needs is already reachable from t
 environment you launch it in, and the one secret only a human can produce is
 already minted.
 
-- [ ] **Run the agent in a credentialed environment.** The shell that runs
+- [x] **Run the agent in a credentialed environment.** The shell that runs
       `/goal` must already have, working and non-interactive:
   - **AWS** credentials that can: assume/serve as the deploy role, write SSM
     SecureStrings under `/hh-assistant/*`, and run `pulumi up` on the
@@ -42,18 +42,38 @@ already minted.
     non-interactively (the `ubuntu` user can sudo; `hh` cannot — see
     `host-sudo-access-path` memory). Needed for the Tailscale first-roll and any
     psql on the prod DB.
-- [ ] **Mint a Tailscale auth key** in the Tailscale admin console (reusable or
-      ephemeral; tagged so ACLs allow it) and store it as an SSM SecureString,
-      e.g. `/hh-assistant/tailscale-authkey`. Confirm the tailnet has **HTTPS
-      certificates + MagicDNS enabled** so `tailscale serve` can get a
-      `*.ts.net` cert. This is the one secret the agent cannot generate itself.
-- [ ] **Confirm the budget number** the Costs screen should show as the monthly
-      ceiling (or accept the default the agent picks from Config and flag it).
-- [ ] **Tell the agent the release version** to cut (e.g. `v0.8.0`), or let it
-      pick the next semver off `main` and report it.
+- [x] **Mint a Tailscale auth key** and store it as an SSM SecureString at
+      `/hh-assistant/tailscale-authkey` (done; reusable key). **Caveat for the
+      agent:** the tailnet is brand-new — device approval is *off* (so the host
+      auto-authorizes), but **HTTPS certificates + MagicDNS must be confirmed
+      enabled** in the admin console before `tailscale serve` can issue the
+      `*.ts.net` cert; verify this at BO-22 and, after the host joins, **disable
+      key expiry** on the node so it doesn't drop off the tailnet.
+- [x] **Budget:** the Costs screen monthly ceiling is **$50 USD** — bake this
+      into Config at BO-5 (`BACKOFFICE_MONTHLY_BUDGET_USD=50` or equivalent).
+- [x] **Release version:** cut **`v2.2.0`** at BO-21 (latest release is
+      `v2.1.1`; this is the minor feature bump).
 
 Everything else the agent generates and stores itself (the backoffice bearer
 token and the SELECT-only DB password), because Phase 0 gave it SSM write.
+
+### ✅ Phase 0 verified — environment is prepped (2026-06-24)
+
+All prerequisites are done and end-to-end tested on the operator's Mac (the same
+machine `/goal` runs on):
+
+- **AWS** — user `shem` (acct `001467466089`), region `us-east-1`; SSM write +
+  the `s3://hh-assistant-pulumi-state` backend reachable.
+- **GitHub** — `gh` logged in (`repo`+`workflow` scopes), release-capable.
+- **Prod SSH** — `ubuntu@98.91.67.226` works, sudo OK.
+- **Pulumi** — CLI `3.247.0` installed at `~/.pulumi/bin`, symlinked to
+  `~/.local/bin/pulumi` (on the harness PATH); `infra/pulumi` deps installed;
+  passphrase recovered (the IaC stack's `hh-…-iac`) and wired via `~/.zshenv` →
+  `PULUMI_CONFIG_PASSPHRASE_FILE=~/.pulumi/passphrase.txt` (sourced by the
+  agent's non-interactive shells). **`pulumi preview --stack prod` is a clean
+  baseline: 21 resources unchanged, empty diff** — so the agent's BO-20 diff
+  will be purely its own additions, no instance replacement.
+- **Tailscale auth key** — present in SSM, valid `tskey-auth-…` format.
 
 > After Phase 0: launch `/goal` with the goal statement below and walk away.
 
