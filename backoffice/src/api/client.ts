@@ -2,7 +2,7 @@
 // so the httpOnly bo_session cookie rides along. GET-only — the console never
 // mutates. A 401 surfaces as ApiError so the UI can prompt for the token.
 
-import type { Catalogue, TableListing } from './types';
+import type { Catalogue, CostsResponse, TableListing } from './types';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -28,10 +28,12 @@ async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
 export interface ApiClient {
   catalogue(signal?: AbortSignal): Promise<Catalogue>;
   table(table: string, limit?: number, signal?: AbortSignal): Promise<TableListing>;
+  costs(signal?: AbortSignal): Promise<CostsResponse>;
 }
 
 export const api: ApiClient = {
   catalogue: (signal) => getJson<Catalogue>('/api/db', signal),
   table: (table, limit, signal) =>
     getJson<TableListing>(`/api/db/${encodeURIComponent(table)}${limit ? `?limit=${limit}` : ''}`, signal),
+  costs: (signal) => getJson<CostsResponse>('/api/costs', signal),
 };

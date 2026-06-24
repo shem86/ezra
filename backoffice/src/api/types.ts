@@ -19,3 +19,28 @@ export interface TableListing extends TableMeta {
   columns: string[];
   rows: Row[];
 }
+
+// --- Costs (Langfuse-derived, estimated) ------------------------------------
+export interface TokenSplitSlice {
+  label: string;
+  pct: number;
+  color: string;
+}
+export interface UsageTypeRow {
+  name: string;
+  note: string;
+  tokens: number;
+  cost: number;
+  share: number;
+}
+export interface CostsResponse {
+  estimated: true;
+  budgetUsd: number;
+  monthCostUsd: number;
+  lastMonthCostUsd: number;
+  tokensMonth: number;
+  cacheReadPct: number;
+  dailyCost: number[];
+  tokenSplit: TokenSplitSlice[];
+  byUsage: UsageTypeRow[];
+}

@@ -5,6 +5,8 @@ const TOKEN = 'x'.repeat(40);
 const validEnv = {
   BACKOFFICE_TOKEN: TOKEN,
   BACKOFFICE_DATABASE_URL: 'postgres://hh_readonly:pw@localhost:5432/hh_assistant',
+  LANGFUSE_PUBLIC_KEY: 'pk-lf-test',
+  LANGFUSE_SECRET_KEY: 'sk-lf-test',
 };
 
 describe('loadBackofficeConfig', () => {
@@ -15,6 +17,8 @@ describe('loadBackofficeConfig', () => {
     expect(config.port).toBe(8787);
     expect(config.distDir).toBe('backoffice/dist');
     expect(config.monthlyBudgetUsd).toBe(50);
+    expect(config.langfuse.publicKey).toBe('pk-lf-test');
+    expect(config.langfuse.baseUrl).toBe('https://cloud.langfuse.com');
   });
 
   it('coerces port and budget from strings', () => {

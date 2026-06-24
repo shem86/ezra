@@ -211,6 +211,12 @@ export interface BackofficeConfig {
   /** SELECT-only role connection string — never the spine's read/write URL. */
   readonly databaseUrl: string;
   readonly monthlyBudgetUsd: number;
+  /** Langfuse READ-API access (Costs/Logs) — reuses the existing trace keys. */
+  readonly langfuse: {
+    readonly publicKey: string;
+    readonly secretKey: string;
+    readonly baseUrl: string;
+  };
 }
 
 export function loadBackofficeConfig(
@@ -220,12 +226,25 @@ export function loadBackofficeConfig(
   if (!parsed.success) {
     throw new Error(`Invalid environment configuration:\n${formatIssues(parsed.error.issues)}`);
   }
+  // Langfuse keys come from the base schema (same keys as the trace sink) —
+  // the backoffice reads what the spine writes.
+  const lf = envSchema
+    .pick({ LANGFUSE_PUBLIC_KEY: true, LANGFUSE_SECRET_KEY: true, LANGFUSE_BASE_URL: true })
+    .safeParse(env);
+  if (!lf.success) {
+    throw new Error(`Invalid environment configuration:\n${formatIssues(lf.error.issues)}`);
+  }
   return {
     token: parsed.data.BACKOFFICE_TOKEN,
     port: parsed.data.BACKOFFICE_PORT,
     distDir: parsed.data.BACKOFFICE_DIST_DIR,
     databaseUrl: parsed.data.BACKOFFICE_DATABASE_URL,
     monthlyBudgetUsd: parsed.data.BACKOFFICE_MONTHLY_BUDGET_USD,
+    langfuse: {
+      publicKey: lf.data.LANGFUSE_PUBLIC_KEY,
+      secretKey: lf.data.LANGFUSE_SECRET_KEY,
+      baseUrl: lf.data.LANGFUSE_BASE_URL,
+    },
   };
 }
 

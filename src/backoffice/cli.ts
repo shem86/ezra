@@ -8,6 +8,7 @@ import { Pool } from 'pg';
 import { loadBackofficeConfig } from '../ops/config.js';
 import { createApiRouter } from './api.js';
 import { makeRateLimiter } from './auth.js';
+import { makeCostClient } from './cost.js';
 import { createBackofficeServer } from './server.js';
 
 function main(): void {
@@ -20,8 +21,15 @@ function main(): void {
   // The SELECT-only pool (BO-17 role). A small pool: this is a single-operator
   // console, not a high-throughput service.
   const pool = new Pool({ connectionString: config.databaseUrl, max: 4 });
+  const cost = makeCostClient({
+    baseUrl: config.langfuse.baseUrl,
+    publicKey: config.langfuse.publicKey,
+    secretKey: config.langfuse.secretKey,
+    budgetUsd: config.monthlyBudgetUsd,
+  });
   const api = createApiRouter({
     db: { query: (sql, params) => pool.query(sql, params === undefined ? undefined : [...params]) },
+    cost,
   });
 
   const server = createBackofficeServer({
@@ -34,6 +42,11 @@ function main(): void {
 
   server.listen(config.port, () => {
     console.log(`backoffice up: read-only console listening on :${config.port} (dist ${distDir})`);
+    // Warm the Langfuse cost cache (a cold read is ~15-20s over the US region);
+    // best-effort so the operator's first Costs view is instant. Never fatal.
+    void cost.getCosts().catch((err: unknown) => {
+      console.error(`backoffice: cost warm-up skipped — ${err instanceof Error ? err.message : String(err)}`);
+    });
   });
 
   const shutdown = (signal: string): void => {

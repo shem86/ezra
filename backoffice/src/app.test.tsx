@@ -30,6 +30,7 @@ describe('App shell', () => {
   it('honours the initial location.hash', () => {
     location.hash = '#costs';
     render(<App />);
-    expect(screen.getByText('Cost by model')).toBeInTheDocument();
+    // Costs fetches live; before data lands it shows the page chrome + loader.
+    expect(screen.getByText('Costs & tokenomics')).toBeInTheDocument();
   });
 });

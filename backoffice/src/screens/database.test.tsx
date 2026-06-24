@@ -17,6 +17,10 @@ const listing: TableListing = {
   ],
 };
 
+const noCosts: ApiClient['costs'] = async () => {
+  throw new Error('not used');
+};
+
 const fakeClient: ApiClient = {
   catalogue: async () => ({
     tables: [
@@ -25,6 +29,7 @@ const fakeClient: ApiClient = {
     ],
   }),
   table: async () => listing,
+  costs: noCosts,
 };
 
 describe('DatabaseScreen (live data)', () => {
@@ -46,6 +51,7 @@ describe('DatabaseScreen (live data)', () => {
         throw Object.assign(new Error('unauthorized'), { name: 'ApiError' });
       },
       table: async () => listing,
+      costs: noCosts,
     };
     render(<DatabaseScreen client={failing} />);
     await waitFor(() => expect(screen.getByText(/Unauthorized/)).toBeInTheDocument());

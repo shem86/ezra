@@ -5,10 +5,13 @@
 
 import type { ApiResponse, ApiRouter } from './server.js';
 import { isTableKey, queryTable, tableCatalogue, type Queryable } from './queries.js';
+import type { CostClient } from './cost.js';
 
 export interface ApiDeps {
   /** SELECT-only pool in production (BACKOFFICE_DATABASE_URL → SELECT-only role). */
   readonly db: Queryable;
+  /** Langfuse-derived costs (Costs screen); absent until BO-9 wires it. */
+  readonly cost?: CostClient | undefined;
 }
 
 function clampLimit(raw: string | null): number | undefined {
@@ -25,6 +28,12 @@ export function createApiRouter(deps: ApiDeps): ApiRouter {
       // GET /api/db → the table catalogue (drives the Database rail).
       if (path === '/api/db') {
         return { status: 200, body: { tables: tableCatalogue() } };
+      }
+
+      // GET /api/costs → Langfuse-derived (estimated) spend + token economics.
+      if (path === '/api/costs') {
+        if (deps.cost === undefined) return { status: 503, body: { error: 'costs unavailable' } };
+        return { status: 200, body: await deps.cost.getCosts() };
       }
 
       // GET /api/db/:table → one table's rows (paged via ?limit).
