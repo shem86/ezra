@@ -89,10 +89,9 @@ sudo bash infra/provision-host.sh
 # 3. bring up the hardened process
 docker compose --env-file .env -f infra/docker-compose.prod.yml up -d --build
 
-# 4. egress allowlist (find the bridge, then apply). The egress bridge only
-#    exists once ezra is up (it owns the egress network).
-EG=br-$(docker network inspect hh-assistant_egress -f '{{slice .Id 0 12}}')
-sudo EGRESS_IFACE="$EG" infra/egress/nftables.sh apply
+# 4. egress allowlist. The bridge name is pinned to hh-egress0 in
+#    docker-compose.prod.yml (com.docker.network.bridge.name) — no inspect.
+sudo EGRESS_IFACE=hh-egress0 infra/egress/nftables.sh apply
 ```
 
 ## Verification — split between here and T45

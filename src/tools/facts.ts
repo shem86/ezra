@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { defineTool } from './define-tool.js';
 import type { HouseholdToolDeps } from './deps.js';
 import { getFact, upsertFact } from '../memory/store.js';
+import { fenceUntrusted } from '../agent/untrusted.js';
 
 const setFactSchema = z.object({
   key: z.string().min(1).describe('Stable fact key, e.g. "wifi-network", "boiler-service-phone"'),
@@ -37,6 +38,9 @@ export const getFactTool = defineTool<HouseholdToolDeps, typeof getFactSchema>({
     if (fact === null) {
       return `no fact stored for ${args.key}`;
     }
-    return `${args.key}: ${fact.value}`;
+    // The value was written by a member but is replayed into a later turn — a
+    // crafted value could carry an instruction (the memory-poisoning loop).
+    // Fence the value as data; the key is the household's own lookup handle.
+    return `${args.key}: ${fenceUntrusted('stored-fact', fact.value)}`;
   },
 });

@@ -8,6 +8,7 @@ import { defineTool } from './define-tool.js';
 import type { HouseholdToolDeps } from './deps.js';
 import { searchSemanticMemories } from '../memory/semantic.js';
 import { householdTimeZone } from '../orchestration/tz.js';
+import { fenceUntrusted } from '../agent/untrusted.js';
 
 const recallSchema = z.object({
   query: z
@@ -39,6 +40,10 @@ export const recallHistoryTool = defineTool<HouseholdToolDeps, typeof recallSche
     if (memories.length === 0) {
       return 'no stored memories match that query';
     }
-    return memories.map((m) => `[${dayLabel(m.createdAt)}] ${m.content}`).join('\n');
+    // Recalled summaries can echo forwarded/pasted untrusted text from past
+    // turns — fence the content as data; the [day] label is our own framing.
+    return memories
+      .map((m) => `[${dayLabel(m.createdAt)}] ${fenceUntrusted('recalled', m.content)}`)
+      .join('\n');
   },
 });

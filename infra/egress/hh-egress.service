@@ -6,12 +6,16 @@ Requires=docker.service
 
 [Service]
 Type=oneshot
-# Re-derive the egress bridge (its name tracks the docker network id) and
-# apply the default-deny ruleset (creates the table). BOOT-ONLY now (V2_NOTES
+# Apply the default-deny ruleset (creates the table). BOOT-ONLY now (V2_NOTES
 # §11): the periodic re-resolve is hh-egress-refresh.service on the timer, which
 # swaps set elements without the fail-open window `apply`'s table-delete opens.
 # Idempotent, so re-running by hand is safe.
-ExecStart=/usr/bin/env bash -c 'EG=br-$(docker network inspect hh-assistant_egress -f "{{slice .Id 0 12}}") && EGRESS_IFACE="$EG" bash /home/hh/hh-assistant/infra/egress/nftables.sh apply'
+# EGRESS_IFACE is the STATIC bridge name pinned in docker-compose.prod.yml
+# (com.docker.network.bridge.name=hh-egress0, V2_NOTES §5) — no `docker network
+# inspect` derivation. nft matches iifname as a string, so the table loads even
+# before docker brings the bridge up.
+Environment=EGRESS_IFACE=hh-egress0
+ExecStart=/usr/bin/env bash /home/hh/hh-assistant/infra/egress/nftables.sh apply
 
 [Install]
 WantedBy=multi-user.target

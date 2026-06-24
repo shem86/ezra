@@ -25,10 +25,11 @@
 # applying a change (a bad interval overlap did exactly this once).
 #
 # Usage (root on the host):
-#   EGRESS_IFACE=br-xxxx infra/egress/nftables.sh apply     # build + load ruleset
-#   EGRESS_IFACE=br-xxxx infra/egress/nftables.sh refresh   # re-resolve sets only
-#   infra/egress/nftables.sh print                          # dump rendered ruleset
-# Find the bridge: docker network inspect hh-assistant_egress -f '{{.Id}}' → br-<first12>
+#   EGRESS_IFACE=hh-egress0 infra/egress/nftables.sh apply    # build + load ruleset
+#   EGRESS_IFACE=hh-egress0 infra/egress/nftables.sh refresh  # re-resolve sets only
+#   infra/egress/nftables.sh print                            # dump rendered ruleset
+# The bridge name is pinned to hh-egress0 in docker-compose.prod.yml
+# (com.docker.network.bridge.name) — a STATIC iifname, no inspect needed.
 set -euo pipefail
 
 readonly TABLE="hh_egress"
@@ -146,7 +147,7 @@ EOF
 cmd="${1:-print}"
 case "$cmd" in
   print)
-    EGRESS_IFACE="${EGRESS_IFACE:-br-PLACEHOLDER}" render_ruleset
+    EGRESS_IFACE="${EGRESS_IFACE:-hh-egress0}" render_ruleset
     ;;
   apply)
     nft list table inet "${TABLE}" >/dev/null 2>&1 && nft delete table inet "${TABLE}"

@@ -9,6 +9,7 @@ import {
   listCalendarEventsTool,
   type CalendarToolDeps,
 } from '../../src/tools/calendar.ts';
+import { fenceUntrusted, UNTRUSTED_OPEN } from '../../src/agent/untrusted.js';
 import {
   CalendarRequestError,
   deriveCalendarEventId,
@@ -249,6 +250,14 @@ describe('list_calendar_events', () => {
     expect(result).toContain('2026-06-25 16:00'); // 20:00Z rendered as Eastern wall time
     expect(result).toContain('Birthday');
     expect(result).toContain('all day');
+
+    // UC-3 (ADR-0005): event titles are third-party — fenced as data. The
+    // household-controlled framing (header, date/time) stays OUTSIDE the fence.
+    expect(result).toContain(fenceUntrusted('calendar', 'חוג ג׳ודו'));
+    expect(result).toContain(fenceUntrusted('calendar', 'Birthday'));
+    expect(result.slice(0, result.indexOf(UNTRUSTED_OPEN))).toContain(
+      "events on the husband's calendar",
+    );
   });
 
   it('reports an empty range plainly', async () => {

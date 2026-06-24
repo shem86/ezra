@@ -11,6 +11,7 @@ import { searchSemanticMemories, writeSemanticMemory } from '../../src/memory/se
 import { makeRunTool } from '../../src/tools/registry.ts';
 import { makeHouseholdToolRegistry } from '../../src/tools/index.ts';
 import type { ToolCall } from '../../src/agent/context.ts';
+import { UNTRUSTED_OPEN } from '../../src/agent/untrusted.ts';
 import { makeFakeEmbedder, vec } from './helpers/fake-embedder.ts';
 
 const connectionString = process.env.DATABASE_URL ?? '';
@@ -120,12 +121,20 @@ describe('recall_history tool', () => {
     );
 
     expect(result.parked).toBe(false);
-    const lines = result.content.split('\n');
-    expect(lines).toHaveLength(2);
-    expect(lines[0]).toContain(afterschoolSummary);
-    expect(lines[1]).toContain(afterschoolFollowup);
-    // Dated in household-local days — the model needs "when" to judge staleness.
-    expect(lines[0]).toMatch(/^\[\d{4}-\d{2}-\d{2}\]/);
+    // Each recalled memory is now a fenced block (ADR-0005/UC-4):
+    // `[day] «untrusted:recalled»\n<content>\n«/untrusted»`. Count by the fence
+    // opener rather than newlines, which the fence multiplies.
+    expect(result.content.split(UNTRUSTED_OPEN).length - 1).toBe(2);
+    // Recalled content is fenced as untrusted data, not authoritative text.
+    expect(result.content).toContain(`${UNTRUSTED_OPEN}recalled»`);
+    // Nearest first: the summary precedes its follow-up.
+    expect(result.content).toContain(afterschoolSummary);
+    expect(result.content).toContain(afterschoolFollowup);
+    expect(result.content.indexOf(afterschoolSummary)).toBeLessThan(
+      result.content.indexOf(afterschoolFollowup),
+    );
+    // Each block is dated in household-local days — the model needs "when".
+    expect(result.content).toMatch(/^\[\d{4}-\d{2}-\d{2}\] «untrusted:recalled»/);
   });
 
   it('scopes by relevance: a different query surfaces different memories first', async () => {

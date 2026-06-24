@@ -10,9 +10,10 @@
 # deploy — CLAUDE.md "Deploying"). These targets are for on-host/manual ops.
 
 COMPOSE := docker compose --env-file .env -f infra/docker-compose.prod.yml
-# The egress bridge name tracks the docker network id; re-derive it (mirrors the
-# hh-egress.service ExecStart). Evaluated only when an egress target runs.
-EG = br-$$(docker network inspect hh-assistant_egress -f '{{slice .Id 0 12}}')
+# The egress bridge name is pinned STATICALLY in docker-compose.prod.yml
+# (com.docker.network.bridge.name, V2_NOTES §5) — no `docker network inspect`
+# derivation. Mirrors the hh-egress.service ExecStart's EGRESS_IFACE.
+EG = hh-egress0
 
 .PHONY: help pair up down ps logs restart config-smoke egress-apply egress-refresh
 
