@@ -194,3 +194,48 @@ token. To rotate (proactively, or after a red deploy blamed on auth):
 A classic `read:packages` token can read *all* packages the account sees; the
 only way to a per-package-scoped token is to move the image to a GitHub **org**
 and use a fine-grained org PAT (then update `IMAGE`/`GHCR_USER` everywhere).
+
+## Backoffice (read-only console) — exposure + one-time host roll
+
+The read-only operations console (`src/backoffice` + `backoffice/` SPA, served
+by `pnpm backoffice` / `dist/backoffice/cli.js`) ships in the same image as the
+spine and runs as a separate `backoffice` service (`docker-compose.prod.yml`),
+bound to **loopback only** (`127.0.0.1:8787`). It is exposed over a **Tailscale**
+tailnet — no public ingress (the SG stays SSH-only).
+
+### One-time host roll (Tailscale) — done 2026-06-24 on the live box
+A fresh env does this automatically via cloud-init (`infra/pulumi/cloud-init`).
+The existing prod box (userData is `ignoreChanges`) was rolled out-of-band:
+
+```bash
+ssh ubuntu@98.91.67.226
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up --auth-key="$(aws ssm get-parameter --name /hh-assistant/tailscale-authkey --with-decryption --region us-east-1 --query Parameter.Value --output text)" --hostname=ezra-backoffice
+sudo tailscale serve --bg --https=443 http://127.0.0.1:8787
+```
+
+Reachable at `https://ezra-backoffice.<tailnet>.ts.net` (valid `*.ts.net`
+Let's Encrypt cert; MagicDNS + HTTPS must be enabled in the tailnet admin
+console). **Admin-console follow-up:** disable key expiry on the `ezra-backoffice`
+node so it never drops off the tailnet.
+
+### SELECT-only DB role
+The console connects through the `hh_readonly` role (migration
+`0007`, created passwordless at ezra launch). Its password is set out-of-band
+from the SSM `BACKOFFICE_DATABASE_URL` (never in git):
+
+```bash
+ssh ubuntu@98.91.67.226
+sudo -iu hh bash -c 'cd ~/hh-assistant; \
+  RO_PW=$(grep "^BACKOFFICE_DATABASE_URL=" .env | sed -E "s#.*hh_readonly:([^@]+)@.*#\1#"); \
+  docker exec hh-postgres-prod psql -U hh -d hh_assistant_prod -c "ALTER ROLE hh_readonly LOGIN PASSWORD '"'"'$RO_PW'"'"'"'
+```
+
+### Deploy note — network-definition changes
+`on-host-deploy.sh` detects an egress-network bridge-name drift up front and,
+when present, deploys via a clean full-stack `down`/`up` (both compose files, so
+the backup sidecar + shared network are handled; named volumes preserved) — the
+in-place migrate-gate/swap can't apply a network `driver_opts` change to a live
+stack. This is a one-time event per such change; afterwards deploys take the
+fast in-place path. (2026-06-24: the egress bridge pin `hh-egress0` was applied
+this way during the v2.2.2 deploy.)
