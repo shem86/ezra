@@ -177,6 +177,43 @@ export function loadProductionConfig(
   };
 }
 
+// --- Backoffice (read-only console) -----------------------------------------
+// The backoffice runs as its OWN process (never inside the spine). Its env is
+// the same SSM-delivered file, so its config is a narrow, purpose-built loader
+// rather than the full app Config — it must NOT demand alert/dead-man/WA vars
+// it never uses (same false-coupling reasoning as loadTransportOpsConfig). The
+// data-source keys it does need (SELECT-only DB url, Langfuse, calendar) are
+// added to this schema as the screens that use them land (BO-5, B2).
+const backofficeEnvSchema = z.object({
+  BACKOFFICE_TOKEN: z
+    .string()
+    .min(32, 'required — long random bearer token (>= 32 chars), defence-in-depth behind the tailnet'),
+  BACKOFFICE_PORT: z.coerce.number().int().positive().default(8787),
+  // Path to the built SPA (backoffice/dist). In the prod image this is an
+  // absolute path baked by the Dockerfile; locally it is repo-relative.
+  BACKOFFICE_DIST_DIR: z.string().min(1).default('backoffice/dist'),
+});
+
+export interface BackofficeConfig {
+  readonly token: string;
+  readonly port: number;
+  readonly distDir: string;
+}
+
+export function loadBackofficeConfig(
+  env: Record<string, string | undefined> = process.env,
+): BackofficeConfig {
+  const parsed = backofficeEnvSchema.safeParse(env);
+  if (!parsed.success) {
+    throw new Error(`Invalid environment configuration:\n${formatIssues(parsed.error.issues)}`);
+  }
+  return {
+    token: parsed.data.BACKOFFICE_TOKEN,
+    port: parsed.data.BACKOFFICE_PORT,
+    distDir: parsed.data.BACKOFFICE_DIST_DIR,
+  };
+}
+
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
   const parsed = envSchema.safeParse(env);
   if (!parsed.success) {
