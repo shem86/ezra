@@ -22,6 +22,7 @@ export const egressCategories = [
   'deadman',
   'whatsapp',
   'backup',
+  'tailscale',
 ] as const;
 
 export type EgressCategory = (typeof egressCategories)[number];
@@ -125,6 +126,27 @@ export const egressAllowlist: readonly EgressDestination[] = [
     subdomains: true,
     category: 'backup',
     reason: 'AWS S3 global endpoint fallback (bucket virtual-host) — T17 backups',
+  },
+  // --- Backoffice exposure: Tailscale (BO-16) -------------------------------
+  // The backoffice CONTAINER's own egress (Langfuse read API, Google Calendar,
+  // Anthropic, Voyage) reuses the spine entries above — same hosts, already
+  // allowed. The one genuinely new outbound is Tailscale, which runs on the
+  // HOST (tailscaled / `tailscale serve`), not the docker egress bridge this
+  // ruleset polices — so it is host-OUTPUT, not forwarded container traffic.
+  // It is declared here to keep this list the single source of truth for ALL
+  // of Ezra's outbound (a from-zero host whose firewall also polices OUTPUT,
+  // or a future in-container tailscaled, then has it covered).
+  {
+    host: 'tailscale.com',
+    subdomains: true,
+    category: 'tailscale',
+    reason: 'Tailscale coordination (controlplane.tailscale.com) + DERP relays (derpN.tailscale.com) — fronts the backoffice over the tailnet (BO-16/22)',
+  },
+  {
+    host: 'tailscale.io',
+    subdomains: true,
+    category: 'tailscale',
+    reason: 'Tailscale control/logging (log.tailscale.io) — host tailscaled',
   },
 ];
 

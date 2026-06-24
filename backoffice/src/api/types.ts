@@ -1,0 +1,85 @@
+// Shared response types for the read-only /api/* surface. These mirror the
+// server's shapes (src/backoffice) — the contract between the two halves. The
+// SPA is read-only too: there are no request/mutation types, only responses.
+
+export type CellValue = string | number | boolean | null;
+export type Row = Record<string, CellValue>;
+
+export interface TableMeta {
+  table: string;
+  label: string;
+  icon: string;
+}
+
+export interface Catalogue {
+  tables: TableMeta[];
+}
+
+export interface TableListing extends TableMeta {
+  columns: string[];
+  rows: Row[];
+}
+
+// --- Costs (Langfuse-derived, estimated) ------------------------------------
+export interface TokenSplitSlice {
+  label: string;
+  pct: number;
+  color: string;
+}
+export interface UsageTypeRow {
+  name: string;
+  note: string;
+  tokens: number;
+  cost: number;
+  share: number;
+}
+export interface CostsResponse {
+  estimated: true;
+  budgetUsd: number;
+  monthCostUsd: number;
+  lastMonthCostUsd: number;
+  tokensMonth: number;
+  cacheReadPct: number;
+  dailyCost: number[];
+  tokenSplit: TokenSplitSlice[];
+  byUsage: UsageTypeRow[];
+}
+
+// --- Logs (DBOS journal + Langfuse enrichment) ------------------------------
+export interface TurnRow {
+  id: string;
+  ts: string;
+  level: 'info' | 'warn' | 'error';
+  st: string;
+  ms: number | null;
+  tool: string | null;
+  tier: string | null;
+  tokens: number | null;
+  cache: number | null;
+  cost: number | null;
+}
+export interface LogsResponse {
+  turns: TurnRow[];
+  enriched: boolean;
+}
+
+// --- Status (live probes) ---------------------------------------------------
+export interface ServiceRow {
+  name: string;
+  group: string;
+  status: 'operational' | 'degraded' | 'down';
+  latency: string;
+  uptime: string;
+  detail: string;
+}
+export interface EdgeRow {
+  name: string;
+  status: string;
+  detail: string;
+}
+export interface StatusResponse {
+  services: ServiceRow[];
+  edges: EdgeRow[];
+  turnsToday: number;
+  avgLatency: string;
+}
