@@ -130,12 +130,20 @@ built the production image. **Both gaps are now closed** (PRs #8–#10,
   design: the stored `.env` must carry the same host-generated value the data
   dir was initialized with (commented at the seam) — so the param is seeded
   *from* the live `.env`, never regenerated.
-- **Remaining (prod cutover, one human step):** the prod param
-  `/hh-assistant/env` does not exist yet (only `ghcr-pat` + `deploy-key` do), so
-  the live host still boots from its hand-scp'd file. Seed it once from the live
-  `.env` (`aws ssm put-parameter --name /hh-assistant/env --type SecureString
-  --value file://.env --overwrite`), then the next release deploys SSM-sourced.
-  Rotation thereafter is just `put-parameter --overwrite`; no host touch.
+- **Done (2026-06-24): prod param seeded.** `/hh-assistant/env` now holds the
+  live `.env`, seeded once from the host's canonical file (`ssh ubuntu@<host>
+  'sudo cat .../.env'` → `put-parameter`). **Advanced tier**, because the full
+  `.env` exceeds SSM Standard's 4096-char cap — `GOOGLE_SA_KEY_B64` (base64 SA
+  key, ~2–3 KB) alone dominates it. ~$0.05/param/month; the alternative free
+  paths (SOPS+age, or splitting the SA key into its own Standard param) were
+  weighed and declined for one-flag simplicity. Rotation is just `put-parameter
+  --overwrite` (stays Advanced); no host touch. The next release deploys
+  SSM-sourced — verify the deploy log shows `secrets: .env materialized from ssm`.
+- **Caveat for create-from-zero:** the cloud-init path reads the *same* single
+  `/hh-assistant/env`, so a real prod rebuild inherits the Advanced-tier param
+  (fine — it already exists). A *fresh provider* (Hetzner) has no SSM at all and
+  should use `secretsMode=sops` (no size cap, no standing cost, already wired) —
+  that's the natural moment to migrate off Advanced-tier SSM.
 
 ## 4. Compose / runtime ergonomics — ✅ Makefile built (host-Node removal deferred)
 
