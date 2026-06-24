@@ -16,3 +16,5 @@ whatsapp.com
 fbcdn.net
 s3.us-east-1.amazonaws.com
 s3.amazonaws.com
+tailscale.com
+tailscale.io
