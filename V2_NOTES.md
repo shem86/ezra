@@ -16,12 +16,12 @@ section below; this table is the index.
 |---|---|---|
 | 1 | CI/CD pipeline (build→GHCR→release→SSM deploy) | ✅ shipped — only README badge automation open (§10 dissolves it) |
 | 2 | IaC (Pulumi TS) | ✅ shipped — prod adopted (0 replacements) + create-from-zero proven |
+| 3 | App secrets → SSM/SOPS | ✅ shipped — both paths wired + prod param seeded (2026-06-24); only the next-deploy log check remains |
 | 4 | Compose ergonomics (`Makefile`) | ✅ shipped — host-Node removal still open |
-| 5 | Egress firewall (units + static bridge pin) | ✅ shipped — cloud-layer SG tightening open |
+| 5 | Egress firewall (units + static bridge pin) | ✅ shipped — cloud-layer SG egress now authored in Pulumi (apply pending — deliberate prod step) |
 | 7 | Pairing (`make pair`) | ✅ shipped |
 | 8 | CI verification smokes (image + config-load) | ✅ shipped |
 | 11 | Egress refresh split (no fail-open window) | ✅ shipped |
-| 3 | App secrets → SSM/SOPS | ⏳ open — deferred (prod-touching) |
 | 6 | Backups automation (initdb bake + scheduled base + freshness) | ✅ shipped in-repo — host enable of the timers is the one operator step |
 | 9 | Footguns burned in v1 | 📌 reference |
 | 10 | Going public (secret/PII scrub, LICENSE) | ⏳ gate — evaluate before flipping |
@@ -37,16 +37,19 @@ section below; this table is the index.
    fence-at-tool on calendar/recall/facts + the system-prompt rule; injection
    evals hold. Phase 1 (nonce marker, web/Q&A, forwarded-message provenance)
    deferred to M5.
-3. **§3 — move app `.env` onto SSM**, now that §2's Pulumi manages the host
-   identity and the §1 CD already self-fetches the GHCR PAT from SSM.
-4. ~~**§6 — bake replication into initdb + schedule base backups + surface
+3. ~~**§6 — bake replication into initdb + schedule base backups + surface
    freshness**~~ ✅ shipped in-repo (initdb bake + `hh_backup` role + base/
    freshness timers + dead-man ping); the one operator step left is enabling the
    timers on the live host (the PR doesn't touch prod).
-5. **§4 / §5 — drop host Node** (render the allowlist at image-build) and add
-   **cloud-layer SG egress** as defense-in-depth (lands with §2 Pulumi).
-6. **§10 — the going-public gate** (history secret scan, PII audit, LICENSE);
+4. **§4 / §5 — drop host Node** (render the allowlist at image-build). The
+   **cloud-layer SG egress** defense-in-depth is now authored in §2's Pulumi SG
+   (443/80/53/123); applying it to live prod is the remaining deliberate step.
+5. **§10 — the going-public gate** (history secret scan, PII audit, LICENSE);
    flipping dissolves the §1 badge workarounds and unlocks branch protection.
+
+*(§3 closed 2026-06-24 — `.env`-from-SSM wired on both paths and the prod
+param seeded; the only remainder is a one-line check that the next release's
+deploy log shows `secrets: .env materialized from ssm`, not a build task.)*
 
 ## 1. CI/CD — ✅ BUILT (badge automation still open)
 
@@ -128,8 +131,11 @@ gotchas live in `infra/pulumi/README.md`. Two stacks:
   installs+enables every egress unit the repo ships (§5/§11). This is what makes
   the ~Oct-2026 Hetzner migration a provider swap, not a re-derivation.
 
-**Still open:** cloud-layer SG egress tightening (tracked in §5 — lands here on
-the Pulumi-managed security group).
+**Cloud-layer SG egress (tracked in §5):** now authored on the Pulumi-managed
+security group (`components/host-environment.ts` — the SG already creates/adopts
+its egress, so this swaps the single allow-all rule for a coarse 443/80/53/123
+allowlist). Apply to live prod is still pending as a deliberate, careful step
+(SG rules govern the host's own traffic — see §5).
 
 ## 3. Secrets management — ✅ SSM chosen + wired both paths (prod cutover = one put-parameter)
 
@@ -188,7 +194,7 @@ the Pulumi-managed security group).
   dependency entirely. *(Deferred: firewall-adjacent infra, needs host
   coordination; folds into the §5 systemd workstream.)*
 
-## 5. Egress firewall automation — ✅ units + static bridge pin shipped (SG tightening open)
+## 5. Egress firewall automation — ✅ units + static bridge pin shipped (SG egress authored in Pulumi; apply pending)
 
 - **systemd unit + timer — authored in-repo and installed (2026-06-23, with
   §11):** `hh-egress.service` applies on boot (after docker, creates the table),
@@ -208,10 +214,29 @@ the Pulumi-managed security group).
   `systemctl start`). Takes effect on the next `compose down && up` (network
   recreate). `nftables.sh`'s `print` default + the `infra/runtime.md` recipe
   follow the same static name.
-- **Still open — cloud-layer defense-in-depth.** The security-group egress is
-  default-open; tighten it (e.g. 443 + 53, plus a lane for host apt) as a coarse
-  second layer — carefully, since SG rules also govern the host's own traffic.
-  *(Lands with §2's Pulumi-managed security group.)*
+- **✅ Authored — cloud-layer defense-in-depth (apply pending as a deliberate
+  prod step).** The security-group egress was default-open (`protocol:"-1"`,
+  `0.0.0.0/0`). §2's Pulumi already creates/adopts the SG, so this swaps that
+  single allow-all rule for a **coarse, port-based allowlist** in
+  `infra/pulumi/components/host-environment.ts` — an SG with any explicit egress
+  rule loses the implicit allow-all, so it enumerates **every** port the host
+  legitimately needs outbound (the SG governs the host's OWN traffic *and* the
+  container's, which NATs out the same ENI):
+  - **443/tcp** — the workhorse: SSM agent + the no-inbound-SSH CD channel,
+    `aws ssm get-parameter` (SSM+KMS), GHCR pulls, AWS S3 backups, and ALL
+    container HTTPS (every host in `src/ops/egress-allowlist.ts` is 443 —
+    Anthropic, Voyage, Google, Langfuse, Telegram, healthchecks, WhatsApp/fbcdn).
+  - **80/tcp** — stock Ubuntu apt (`archive`/`security.ubuntu.com` serve HTTP) +
+    unattended-upgrades. The Docker/NodeSource repos are HTTPS (covered by 443).
+  - **53/tcp + 53/udp** — DNS (TCP for large/fallback responses).
+  - **123/udp** — NTP: Eastern-anchored reminders/compaction need an accurate
+    clock, so the host's time-sync must reach out.
+
+  This is a **coarse** second layer under the hostname-aware host nftables
+  allowlist — the SG can't filter by hostname (IP/port only). **Applying it to
+  live prod is a deliberate, careful step** (a missed port cuts host
+  connectivity): do it with AWS Console / Session-Manager access available as a
+  fallback, and ideally validate on a §2 create-from-zero (`scratch`) env first.
 
 ## 6. Backups — ✅ automated in-repo (host timer-enable is the one operator step)
 

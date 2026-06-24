@@ -38,6 +38,7 @@ write_files:
       AGE_KEY_PARAM="@@AGE_KEY_PARAM@@"
       SOPS_ENV_FILE="@@SOPS_ENV_FILE@@"
       DEPLOY_KEY_PARAM="@@DEPLOY_KEY_PARAM@@"
+      TAILSCALE_AUTHKEY_PARAM="@@TAILSCALE_AUTHKEY_PARAM@@"
       REPO_DIR=/home/hh/hh-assistant
 
       # --- 1. host tooling: Docker engine + compose plugin, aws-cli, Node 22 ----
@@ -171,7 +172,46 @@ write_files:
       systemctl start hh-egress.service || true
       systemctl enable --now hh-egress.timer
 
-      log "full-chain bootstrap complete — ezra is up; remaining manual step: WhatsApp pairing (pnpm pair)"
+      # --- 7. backoffice exposure: SELECT-only role password + Tailscale -------
+      # 7a. Migration 0007 (applied by ezra at startup, main.ts runMigrations)
+      # created hh_readonly passwordless. Set its password to match the
+      # BACKOFFICE_DATABASE_URL in .env so the console can connect. Idempotent.
+      BO_URL="$(grep -E '^BACKOFFICE_DATABASE_URL=' "${REPO_DIR}/.env" | head -1 | cut -d= -f2-)"
+      if [[ -n "${BO_URL}" ]]; then
+        log "waiting for the hh_readonly role (ezra applies migrations on launch)"
+        for _ in $(seq 1 30); do
+          if sudo -u hh docker exec hh-postgres-prod psql -U hh -d hh_assistant_prod -tAc \
+               "SELECT 1 FROM pg_roles WHERE rolname='hh_readonly'" 2>/dev/null | grep -q 1; then break; fi
+          sleep 2
+        done
+        # Decode the password from the URL (handles %xx) without shell quoting.
+        RO_PW="$(U="${BO_URL}" node -e 'process.stdout.write(new URL(process.env.U).password)')"
+        sudo -u hh docker exec hh-postgres-prod psql -U hh -d hh_assistant_prod \
+          -c "ALTER ROLE hh_readonly LOGIN PASSWORD '${RO_PW}'" \
+          && log "SELECT-only role password set from BACKOFFICE_DATABASE_URL"
+      else
+        log "BACKOFFICE_DATABASE_URL unset — skipping SELECT-only role password"
+      fi
+
+      # 7b. Tailscale: join the tailnet + serve the backoffice over HTTPS. No
+      # public ingress (tailscaled dials OUT; the SG stays SSH-only). `tailscale
+      # serve` fronts the loopback-bound backoffice (127.0.0.1:8787) with the
+      # node's *.ts.net Let's Encrypt cert — MagicDNS + HTTPS must be enabled in
+      # the tailnet admin console (Phase 0). Mirrors the live-host first-roll
+      # (BO-22); on prod this whole file is ignoreChanges so it never re-runs.
+      if [[ -n "${TAILSCALE_AUTHKEY_PARAM}" ]]; then
+        log "installing tailscale + joining the tailnet"
+        curl -fsSL https://tailscale.com/install.sh | sh
+        TS_AUTHKEY="$(aws ssm get-parameter --name "${TAILSCALE_AUTHKEY_PARAM}" --with-decryption \
+          --region "${AWS_REGION}" --query Parameter.Value --output text)"
+        tailscale up --auth-key="${TS_AUTHKEY}" --hostname=ezra-backoffice
+        tailscale serve --bg --https=443 http://127.0.0.1:8787
+        log "tailscale up + serving the backoffice over HTTPS on the tailnet"
+      else
+        log "TAILSCALE_AUTHKEY_PARAM unset — skipping tailnet bootstrap"
+      fi
+
+      log "full-chain bootstrap complete — ezra + backoffice up; remaining manual step: WhatsApp pairing (pnpm pair)"
 
 runcmd:
   - [ bash, /opt/ezra/bootstrap.sh ]

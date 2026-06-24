@@ -65,6 +65,44 @@ services:
       - internal # to Postgres
       - egress # to the internet (host nftables filters it to the allowlist)
 
+  # The read-only operations console — SAME image, different entry. A separate
+  # process from the spine (never inside it). Reachable only over the tailnet:
+  # the port is published on LOOPBACK ONLY (127.0.0.1), and `tailscale serve` on
+  # the host fronts it with the *.ts.net HTTPS cert — so no public ingress (the
+  # SG stays SSH-only). Connects to Postgres through the SELECT-only role
+  # (BACKOFFICE_DATABASE_URL in .env points at postgres:5432 with hh_readonly).
+  backoffice:
+    image: ghcr.io/shem86/hh-assistant:${EZRA_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["node", "dist/backoffice/cli.js"]
+    # Same runtime secrets file as the spine (Langfuse/Anthropic/Voyage/GCal for
+    # the probes + costs), plus the backoffice-only vars (token, SELECT-only URL,
+    # budget) — all from .env (SSM-delivered).
+    env_file:
+      - ../.env
+    environment:
+      BACKOFFICE_PORT: "8787"
+      BACKOFFICE_DIST_DIR: /app/backoffice/dist
+    # Loopback-only publish — tailscale serve (host) proxies tailnet → here.
+    ports:
+      - "127.0.0.1:8787:8787"
+    # --- process sandbox (same hardening as the spine; the console writes
+    # NOTHING — read-only product on a read-only rootfs) ----------------------
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    user: "1000:1000"
+    tmpfs:
+      - /tmp
+    networks:
+      - internal # to Postgres (SELECT-only role)
+      - egress # to Langfuse/Anthropic/Voyage/Google Calendar reads
+
   postgres:
     image: pgvector/pgvector:pg17
     container_name: hh-postgres-prod
