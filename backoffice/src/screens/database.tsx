@@ -1,31 +1,66 @@
-// Database browser — read-only direct SELECT over the real tables. Renders the
-// fixture `tables` for now; BO-7 swaps in the typed /api/db/:table client.
-import { useMemo, useState } from 'react';
-import { Icon } from '../components/icon';
+// Database browser — read-only direct SELECT over the real tables, served live
+// by /api/db/:table (BO-7). The handler→client→screen slice this establishes is
+// the template the B2 screens copy. Approve/Edit controls stay disabled.
+import { useEffect, useMemo, useState } from 'react';
+import { Icon, type IconName } from '../components/icon';
 import { Badge, Card, Cell } from '../components/primitives';
-import { tables as tablesFx, type Row, type TableFixture } from '../fixtures';
+import { api, type ApiClient } from '../api/client';
+import type { Row, TableListing, TableMeta } from '../api/types';
 
-export function DatabaseScreen({
-  tables = tablesFx,
-}: {
-  tables?: Record<string, TableFixture>;
-}): React.JSX.Element {
-  const keys = Object.keys(tables);
-  const [active, setActive] = useState(keys[0] ?? '');
+export function DatabaseScreen({ client = api }: { client?: ApiClient }): React.JSX.Element {
+  const [tables, setTables] = useState<TableMeta[]>([]);
+  const [active, setActive] = useState('');
+  const [listing, setListing] = useState<TableListing | null>(null);
   const [q, setQ] = useState('');
   const [sel, setSel] = useState<Row | null>(null);
-  const tbl = tables[active];
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const ac = new AbortController();
+    client
+      .catalogue(ac.signal)
+      .then((c) => {
+        setTables(c.tables);
+        setActive((prev) => prev || c.tables[0]?.table || '');
+        setError(null);
+      })
+      .catch((e: unknown) => {
+        if (!ac.signal.aborted) setError(e instanceof Error ? e.message : 'failed to load tables');
+      });
+    return () => ac.abort();
+  }, [client]);
+
+  useEffect(() => {
+    if (!active) return;
+    const ac = new AbortController();
+    setLoading(true);
+    setSel(null);
+    setQ('');
+    client
+      .table(active, 200, ac.signal)
+      .then((l) => {
+        setListing(l);
+        setError(null);
+      })
+      .catch((e: unknown) => {
+        if (!ac.signal.aborted) {
+          setListing(null);
+          setError(e instanceof Error ? e.message : 'failed to load table');
+        }
+      })
+      .finally(() => {
+        if (!ac.signal.aborted) setLoading(false);
+      });
+    return () => ac.abort();
+  }, [active, client]);
 
   const rows = useMemo(() => {
-    if (tbl === undefined) return [];
-    if (!q.trim()) return tbl.rows;
+    if (listing === null) return [];
+    if (!q.trim()) return listing.rows;
     const s = q.toLowerCase();
-    return tbl.rows.filter((r) => Object.values(r).some((v) => String(v).toLowerCase().includes(s)));
-  }, [q, tbl]);
-
-  if (tbl === undefined) {
-    return <Card>No tables.</Card>;
-  }
+    return listing.rows.filter((r) => Object.values(r).some((v) => String(v).toLowerCase().includes(s)));
+  }, [listing, q]);
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '210px 1fr', gap: 18, alignItems: 'start' }}>
@@ -43,26 +78,19 @@ export function DatabaseScreen({
           Tables
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {keys.map((k) => (
+          {tables.map((t) => (
             <button
-              key={k}
-              onClick={() => {
-                setActive(k);
-                setSel(null);
-                setQ('');
-              }}
+              key={t.table}
+              onClick={() => setActive(t.table)}
               className="tablebtn"
               style={{
-                background: k === active ? 'var(--accent-soft)' : 'none',
-                color: k === active ? 'var(--accent-ink)' : 'var(--ink)',
+                background: t.table === active ? 'var(--accent-soft)' : 'none',
+                color: t.table === active ? 'var(--accent-ink)' : 'var(--ink)',
               }}
             >
-              <Icon name={tables[k]!.icon as never} size={15} />
+              <Icon name={t.icon as IconName} size={15} />
               <span style={{ flex: 1, textAlign: 'left', fontFamily: 'var(--mono)', fontSize: 12.5 }}>
-                {tables[k]!.label}
-              </span>
-              <span style={{ fontSize: 11, color: 'var(--muted-2)', fontFamily: 'var(--mono)' }}>
-                {tables[k]!.rows.length}
+                {t.label}
               </span>
             </button>
           ))}
@@ -71,7 +99,9 @@ export function DatabaseScreen({
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <h2 style={{ margin: 0, fontFamily: 'var(--mono)', fontSize: 19, fontWeight: 600 }}>{tbl.label}</h2>
+          <h2 style={{ margin: 0, fontFamily: 'var(--mono)', fontSize: 19, fontWeight: 600 }}>
+            {listing?.label ?? active ?? '—'}
+          </h2>
           <Badge mono>
             <Icon name="lock" size={11} /> read-only
           </Badge>
@@ -83,19 +113,20 @@ export function DatabaseScreen({
           </div>
         </div>
 
-        {tbl.note && (
+        {error !== null && (
           <div
             style={{
               fontSize: 12.5,
-              color: 'var(--muted)',
-              background: 'var(--surface-2)',
-              border: '1px solid var(--border)',
+              color: 'var(--err)',
+              background: 'color-mix(in oklch, var(--err) 8%, var(--surface))',
+              border: '1px solid color-mix(in oklch, var(--err) 30%, var(--border))',
               borderRadius: 8,
               padding: '9px 12px',
-              lineHeight: 1.5,
             }}
           >
-            {tbl.note}
+            {error === 'unauthorized'
+              ? 'Unauthorized — open this console with ?token=… to sign in.'
+              : `Could not load data: ${error}`}
           </div>
         )}
 
@@ -104,19 +135,19 @@ export function DatabaseScreen({
             <table className="grid">
               <thead>
                 <tr>
-                  {tbl.columns.map((c) => (
+                  {(listing?.columns ?? []).map((c) => (
                     <th key={c}>{c}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r) => (
+                {rows.map((r, i) => (
                   <tr
-                    key={String(r['id'] ?? JSON.stringify(r))}
+                    key={String(r['id'] ?? r['action_id'] ?? r['idempotency_key'] ?? r['seq'] ?? r['key'] ?? i)}
                     onClick={() => setSel(r)}
-                    className={sel && sel['id'] === r['id'] ? 'on' : ''}
+                    className={sel && sel === r ? 'on' : ''}
                   >
-                    {tbl.columns.map((c) => (
+                    {(listing?.columns ?? []).map((c) => (
                       <td key={c}>
                         <Cell col={c} val={r[c]} />
                       </td>
@@ -136,28 +167,28 @@ export function DatabaseScreen({
               justifyContent: 'space-between',
             }}
           >
-            <span>
-              {rows.length} of {tbl.rows.length} rows
-            </span>
+            <span>{loading ? 'loading…' : `${rows.length} of ${listing?.rows.length ?? 0} rows`}</span>
             <span style={{ fontFamily: 'var(--mono)' }}>
-              SELECT * FROM {tbl.label}
+              SELECT * FROM {listing?.label ?? active}
               {q ? ` WHERE … '${q}'` : ''}
             </span>
           </div>
         </Card>
       </div>
 
-      {sel && <RowDrawer table={tbl} row={sel} onClose={() => setSel(null)} />}
+      {sel && listing && <RowDrawer label={listing.label} icon={listing.icon} row={sel} onClose={() => setSel(null)} />}
     </div>
   );
 }
 
 function RowDrawer({
-  table,
+  label,
+  icon,
   row,
   onClose,
 }: {
-  table: TableFixture;
+  label: string;
+  icon: string;
   row: Row;
   onClose: () => void;
 }): React.JSX.Element {
@@ -174,10 +205,10 @@ function RowDrawer({
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <Icon name={table.icon as never} size={16} />
-            <span style={{ fontFamily: 'var(--mono)', fontSize: 14, fontWeight: 600 }}>{table.label}</span>
+            <Icon name={icon as IconName} size={16} />
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 14, fontWeight: 600 }}>{label}</span>
             <span style={{ fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--muted)' }}>
-              {String(row['id'] ?? '')}
+              {String(row['id'] ?? row['action_id'] ?? row['idempotency_key'] ?? row['key'] ?? '')}
             </span>
           </div>
           <button className="iconbtn" onClick={onClose}>

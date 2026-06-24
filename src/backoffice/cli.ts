@@ -4,7 +4,9 @@
 // once listening; the deploy healthcheck waits for that marker (BO-14).
 
 import { resolve } from 'node:path';
+import { Pool } from 'pg';
 import { loadBackofficeConfig } from '../ops/config.js';
+import { createApiRouter } from './api.js';
 import { makeRateLimiter } from './auth.js';
 import { createBackofficeServer } from './server.js';
 
@@ -15,10 +17,18 @@ function main(): void {
   // finger, tight enough that the tailnet+token combo isn't brute-forceable.
   const rateLimiter = makeRateLimiter({ maxFailures: 8, lockoutMs: 15 * 60_000 });
 
+  // The SELECT-only pool (BO-17 role). A small pool: this is a single-operator
+  // console, not a high-throughput service.
+  const pool = new Pool({ connectionString: config.databaseUrl, max: 4 });
+  const api = createApiRouter({
+    db: { query: (sql, params) => pool.query(sql, params === undefined ? undefined : [...params]) },
+  });
+
   const server = createBackofficeServer({
     token: config.token,
     distDir,
     rateLimiter,
+    api,
     logger: (msg) => console.error(msg),
   });
 
@@ -28,7 +38,9 @@ function main(): void {
 
   const shutdown = (signal: string): void => {
     console.error(`backoffice: ${signal} — closing`);
-    server.close(() => process.exit(0));
+    server.close(() => {
+      void pool.end().finally(() => process.exit(0));
+    });
     // Don't hang forever on a stuck socket.
     setTimeout(() => process.exit(0), 5_000).unref();
   };
