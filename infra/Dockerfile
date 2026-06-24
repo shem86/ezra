@@ -23,6 +23,12 @@ COPY tsconfig.json ./
 COPY src ./src
 RUN pnpm build
 
+# Build the isolated backoffice SPA (its own lockfile + Vite/React toolchain,
+# kept out of the app's deps — same isolation pattern as infra/pulumi). Emits
+# backoffice/dist, which the runtime stage serves via dist/backoffice/cli.js.
+COPY backoffice ./backoffice
+RUN pnpm -C backoffice install --frozen-lockfile && pnpm -C backoffice build
+
 # --- runtime -----------------------------------------------------------------
 FROM node:22-bookworm-slim AS runtime
 ENV NODE_ENV=production
@@ -36,6 +42,9 @@ RUN pnpm install --prod --frozen-lockfile && pnpm store prune
 # (migrate.ts resolves ../../migrations relative to dist/memory — a sibling of dist/).
 COPY --from=build /app/dist ./dist
 COPY migrations ./migrations
+# The built read-only console SPA — static assets the backoffice entry serves.
+# (The backoffice server is app code in dist/backoffice; this is just its UI.)
+COPY --from=build /app/backoffice/dist ./backoffice/dist
 
 # Pre-create the Baileys session mount point owned by `node`. Load-bearing: the
 # wa-session named volume mounts here, and Docker copies THIS directory's
