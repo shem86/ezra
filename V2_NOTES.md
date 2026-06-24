@@ -6,6 +6,45 @@ actually bit, not speculation. The north star: **one command (or one merged
 PR) takes a clean commit to a running, hardened, monitored process — and the
 ~Oct-2026 Hetzner migration is a provider swap, not a re-derivation.**
 
+## Status at a glance
+
+Section numbers are stable anchors (code comments + systemd units reference
+`V2_NOTES §N`) — they don't renumber as items close. Detail stays in each
+section below; this table is the index.
+
+| § | Item | State |
+|---|---|---|
+| 1 | CI/CD pipeline (build→GHCR→release→SSM deploy) | ✅ shipped — only README badge automation open (§10 dissolves it) |
+| 2 | IaC (Pulumi TS) | ✅ shipped — prod adopted (0 replacements) + create-from-zero proven |
+| 4 | Compose ergonomics (`Makefile`) | ✅ shipped — host-Node removal still open |
+| 5 | Egress firewall (units + static bridge pin) | ✅ shipped — cloud-layer SG tightening open |
+| 7 | Pairing (`make pair`) | ✅ shipped |
+| 8 | CI verification smokes (image + config-load) | ✅ shipped |
+| 11 | Egress refresh split (no fail-open window) | ✅ shipped |
+| 3 | App secrets → SSM/SOPS | ⏳ open — deferred (prod-touching) |
+| 6 | Backups automation (initdb bake + scheduled base + freshness) | ⏳ open — deferred (prod-touching DB) |
+| 9 | Footguns burned in v1 | 📌 reference |
+| 10 | Going public (secret/PII scrub, LICENSE) | ⏳ gate — evaluate before flipping |
+| 12 | AI / model-layer guardrails | 🟡 spend limit ✅ set; untrusted-content boundary designed (ADR-0005, Proposed) — Phase 0 impl pending |
+
+**What's next, ranked:**
+
+1. **§12 — set the Anthropic Console monthly spend limit** (dedicated
+   workspace + key). Zero code, biggest risk-reduction-per-effort; the one
+   "do this first" item.
+2. **§12 — data/instruction + memory-poisoning boundary.** Design done:
+   `docs/adr-0005-untrusted-content-boundary.md` (Proposed). Calendar already
+   shipped, so Phase 0 (fence calendar/recall/facts output + prompt rule) is a
+   retrofit, ready to implement on ratification.
+3. **§3 — move app `.env` onto SSM**, now that §2's Pulumi manages the host
+   identity and the §1 CD already self-fetches the GHCR PAT from SSM.
+4. **§6 — bake replication into initdb + schedule base backups + surface
+   freshness** so continuous WAL survives a rebuild with no hand-run step.
+5. **§4 / §5 — drop host Node** (render the allowlist at image-build) and add
+   **cloud-layer SG egress** as defense-in-depth (lands with §2 Pulumi).
+6. **§10 — the going-public gate** (history secret scan, PII audit, LICENSE);
+   flipping dissolves the §1 badge workarounds and unlocks branch protection.
+
 ## 1. CI/CD — ✅ BUILT (badge automation still open)
 
 v1 had CI (build + lint + test with a pgvector service) but no CD, and CI never
@@ -65,47 +104,29 @@ built the production image. **Both gaps are now closed** (PRs #8–#10,
   (tokei.rs for LOC, the native Actions/coverage badges) and the gist
   workaround can be deleted.
 
-## 2. Provisioning as code (IaC) — decision locked: Pulumi TS
+## 2. Provisioning as code (IaC) — ✅ BUILT (`infra/pulumi/`, Pulumi TS)
 
-> **In progress → `infra/pulumi/` (Pulumi, TypeScript).** Decision: **Pulumi**
-> (stays in the repo's one language). Goal reframed with the builder —
-> reproducibility as a *capability* (stand up a new env easily), not just the
-> Hetzner swap. Two stacks: `prod` adopts the live resources (each carries an
-> `import` id + `protect`) and `scratch` proves create-from-zero. cloud-init runs
-> `provision-host.sh` for a full-chain bootstrap (this note's second bullet).
-> **prod adopt APPLIED (2026-06-23):** state backend live (S3); `pulumi up`
-> imported all 17 resources with **0 replacements / 0 destroys** (additive
-> management tags only; instance 🔒 protected, NOT replaced — same original launch
-> time, EIP intact, Baileys/pgdata untouched). Post-apply preview = 21 unchanged
-> (empty-diff gate met). **scratch create path PROVEN end-to-end:** a billable
-> `pulumi up` ran cloud-init's full chain (Docker/Node → deploy-key SSH clone of
-> the private repo → provision-host → SSM synthetic secret → GHCR private pull →
-> compose up) to a running ezra (DBOS launched, 0 restarts) at the WhatsApp-
-> pairing ceiling, then `destroy`ed. **Re-proven by a clean unattended boot of
-> the fixed template (2026-06-23):** cloud-init done/errors:[], 0 failed units,
-> egress timer active on cadence, ezra 0 restarts — no manual touch. Four
-> fresh-box cloud-init bugs found+fixed (/run/sshd, /home/hh ownership, gpg
-> --batch, and the egress timer triggering the §11 refresh unit the bootstrap
-> didn't install). See **Fresh-box cloud-init gotchas** in `infra/pulumi/README.md`.
+**Done (2026-06-23):** `infra/pulumi/` (Pulumi, TypeScript — stays in the
+repo's one language; chosen over Terraform for reproducibility-as-a-capability,
+scope **capability-only**, not a general AWS framework). Detail + the fresh-box
+gotchas live in `infra/pulumi/README.md`. Two stacks:
 
-- The instance, EIP, security group, IAM user, and S3 backup bucket were all
-  created by hand via AWS CLI (T15/T17) — plus the §1 deploy additions (the
-  OIDC deploy role `AWS_DEPLOY_ROLE_ARN`, the instance role, and the
-  `/hh-assistant/ghcr-pat` SSM parameter). v2: **Pulumi (TypeScript)** — one
-  `pulumi up`, versioned, diffable. Chosen over Terraform for reproducibility +
-  same-language-as-the-app; scope is **capability-only** (the resources we
-  actually run), not a general AWS framework. This is what makes the
-  ~Oct-2026 Hetzner migration a provider swap, not a re-derivation.
-- **Import, don't replace.** Prod is live; the Pulumi program must `pulumi
-  import` the existing resources into state and converge to a no-op diff —
-  never recreate them (recreating the instance/EIP/bucket would be an outage +
-  data loss). The host is `i-0a7e9f4767666ac9e`, account `001467466089`,
-  region us-east-1. Sequence: scaffold the program from the live resource
-  shapes (AWS CLI describe-*) → `pulumi import` each → run `pulumi up` until the
-  diff is empty → only then is the hand-built infra under management.
-- `infra/provision-host.sh` (OS baseline) is already idempotent and
-  provider-portable — keep it, but invoke it from **cloud-init/user-data** so a
-  fresh box self-bootstraps the `hh` user + SSH lockdown without a manual SSH.
+- **`prod` adopts the live resources** — `pulumi up` imported all 17 with
+  **0 replacements / 0 destroys** (additive management tags only; the instance
+  is 🔒 `protect`ed, NOT replaced — original launch time, EIP, Baileys/pgdata all
+  intact; post-apply preview = 21 unchanged, the empty-diff gate). The
+  import-don't-replace requirement (recreating instance/EIP/bucket = outage +
+  data loss) is met. Host `i-0a7e9f4767666ac9e`, acct `001467466089`, us-east-1.
+- **`scratch` proves create-from-zero** — a billable `pulumi up` ran cloud-init's
+  full chain (Docker/Node → deploy-key clone → `provision-host.sh` → SSM secret →
+  GHCR pull → compose up) to a running ezra (0 restarts) at the pairing ceiling,
+  then `destroy`ed; re-proven by a clean unattended boot. `provision-host.sh` is
+  now invoked from **cloud-init/user-data** (no manual SSH), and cloud-init also
+  installs+enables every egress unit the repo ships (§5/§11). This is what makes
+  the ~Oct-2026 Hetzner migration a provider swap, not a re-derivation.
+
+**Still open:** cloud-layer SG egress tightening (tracked in §5 — lands here on
+the Pulumi-managed security group).
 
 ## 3. Secrets management (SSM precedent set by §1; app `.env` still manual)
 
@@ -143,26 +164,30 @@ built the production image. **Both gaps are now closed** (PRs #8–#10,
   dependency entirely. *(Deferred: firewall-adjacent infra, needs host
   coordination; folds into the §5 systemd workstream.)*
 
-## 5. Egress firewall automation (units authored; host install + 2 items open)
+## 5. Egress firewall automation — ✅ units + static bridge pin shipped (SG tightening open)
 
-- **systemd unit + timer — authored in-repo (2026-06-23, with §11):**
-  `hh-egress.service` applies on boot (after docker, creates the table),
-  `hh-egress-refresh.service` re-resolves rotating CDN IPs on
-  `hh-egress.timer`. Installing/enabling them on the host is the remaining
-  manual step (deferred infra).
+- **systemd unit + timer — authored in-repo and installed (2026-06-23, with
+  §11):** `hh-egress.service` applies on boot (after docker, creates the table),
+  `hh-egress-refresh.service` re-resolves rotating CDN IPs on `hh-egress.timer`.
+  §2's cloud-init now **installs+enables every egress unit on a fresh box**
+  (`user-data.yaml.tmpl`), so the old "host install is a manual step" no longer
+  holds for the create-from-zero path.
 - **Narrow sudoers — already exists** (`infra/host/sudoers-hh-ops`): NOPASSWD
   scoped to `systemctl {start,stop,restart,status}` of the three egress units
   only (not `nft` directly, not blanket `systemctl`, never `ALL`). Updated with
   §11's refresh unit.
-- **Still open — pin the egress bridge name.** It's dynamic (`br-<id>`, greped
-  from `docker network inspect`); pin it via compose
-  (`com.docker.network.bridge.name`) so the firewall config is static and the
-  units need no lookup (drops the re-derivation in both ExecStarts + the
-  Makefile). Small, but touches the prod compose network.
+- **✅ Done (2026-06-23) — pinned the egress bridge name.** Was dynamic
+  (`br-<id>` greped from `docker network inspect`); now `hh-egress0`, fixed via
+  `com.docker.network.bridge.name` in `docker-compose.prod.yml`. The two unit
+  ExecStarts and the `Makefile` `EG` var drop the `docker network inspect`
+  derivation and pass a static `EGRESS_IFACE` (also simplifies cloud-init's
+  `systemctl start`). Takes effect on the next `compose down && up` (network
+  recreate). `nftables.sh`'s `print` default + the `infra/runtime.md` recipe
+  follow the same static name.
 - **Still open — cloud-layer defense-in-depth.** The security-group egress is
   default-open; tighten it (e.g. 443 + 53, plus a lane for host apt) as a coarse
   second layer — carefully, since SG rules also govern the host's own traffic.
-  *(Lands with §2 IaC, handled separately.)*
+  *(Lands with §2's Pulumi-managed security group.)*
 
 ## 6. Backups — close the open wiring (manual script exists; automation open)
 
@@ -317,19 +342,24 @@ trajectory that changes it.
     a rounds-only counter would miss the "runaway compaction" case it is meant to
     catch. `callModel` (and those sites) must return usage in journaled output
     (today usage only escapes via the non-durable `onUsage` tracer tap).
-- **No prompt-injection / untrusted-content fencing.** WhatsApp message text,
-  recalled history, semantic-memory hits, and the digest all reach the model as
-  authoritative — no provenance separation, no "this is data, not instructions"
-  boundary anywhere. Low-risk while both senders are trusted, but that ends the
-  moment the tool surface grows: **calendar invites, forwarded messages, and
-  pasted list items are third-party content**, and the M5 household-Q&A / any
-  web path injects fully untrusted text. Design the data/instruction boundary
-  *before* calendar + Q&A land, not as a retrofit after.
-- **Memory-poisoning is unguarded.** `set_fact` writes flow back into later
-  turns via `recall` and the digest, with no validation on the recall path — a
-  crafted fact value persists and re-enters context (a self-injection vector).
-  Same trust caveat and same "gets worse as the surface grows" trajectory as the
-  injection gap; treat them as one workstream.
+- **No prompt-injection / untrusted-content fencing → design in
+  `docs/adr-0005-untrusted-content-boundary.md` (Proposed, 2026-06-23).**
+  WhatsApp message text, recalled history, semantic-memory hits, and the digest
+  all reach the model as authoritative — no provenance separation, no "this is
+  data, not instructions" boundary anywhere. **Calendar already shipped
+  (ADR-0004), so the "design before calendar lands" window has closed —
+  `list_calendar_events` already surfaces third-party event text; this is now a
+  retrofit, not a pre-build.** ADR-0005 proposes one canonical fence helper +
+  a stable system-prompt data/instruction rule, applied at the
+  point-of-provenance tools (calendar, recall, facts) in Phase 0, with web/Q&A
+  fencing + forwarded-message provenance in Phase 1. Treat with memory-poisoning
+  as one workstream (below).
+- **Memory-poisoning is unguarded** (folded into ADR-0005). `set_fact` writes
+  flow back into later turns via `get_fact`/`recall` and the digest, with no
+  validation on the read path — a crafted fact value persists and re-enters
+  context (a self-injection vector). ADR-0005 Phase 0 fences `get_fact` and
+  `recall_history` output as untrusted; same trust caveat and "gets worse as the
+  surface grows" trajectory as the injection gap.
 - **No output moderation before send.** Nothing inspects the assistant's text
   between the model and WhatsApp. Acceptable for a trusted group — flagged only
   to record that the count is zero, not minimal.
