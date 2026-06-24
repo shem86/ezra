@@ -11,6 +11,7 @@ import { defineTool } from './define-tool.js';
 import type { HouseholdToolDeps } from './deps.js';
 import { deriveCalendarEventId, type CalendarClient, type CalendarWindow } from './calendar-client.js';
 import { householdTimeZone, wallTimeToInstant } from '../orchestration/tz.js';
+import { fenceUntrusted } from '../agent/untrusted.js';
 
 export interface CalendarToolDeps extends HouseholdToolDeps {
   readonly calendarClient: CalendarClient;
@@ -150,11 +151,15 @@ export const listCalendarEventsTool = defineTool<CalendarToolDeps, typeof listCa
     if (events.length === 0) {
       return `no events on the ${args.owner}'s calendar from ${args.fromDate} to ${args.toDate}`;
     }
-    const lines = events.map((event) =>
-      event.allDay
-        ? `- ${event.start.toISOString().slice(0, 10)} (all day): ${event.title}`
-        : `- ${instantLabel(event.start)}–${instantLabel(event.end).slice(-5)} (household time): ${event.title}`,
-    );
+    // The event title is third-party free text (anyone who shares/invites the
+    // household sets it) — fence it as data, never instructions (ADR-0005).
+    // The date/time framing is ours and stays outside the fence.
+    const lines = events.map((event) => {
+      const title = fenceUntrusted('calendar', event.title);
+      return event.allDay
+        ? `- ${event.start.toISOString().slice(0, 10)} (all day): ${title}`
+        : `- ${instantLabel(event.start)}–${instantLabel(event.end).slice(-5)} (household time): ${title}`;
+    });
     return `events on the ${args.owner}'s calendar (${args.fromDate} to ${args.toDate}):\n${lines.join('\n')}`;
   },
 });

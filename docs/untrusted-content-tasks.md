@@ -52,24 +52,24 @@ UC-A → UC-B → UC-C; UC-D is deferred draft.
 
 ## UC-B — Apply at the point-of-provenance tools *(independent; parallelizable)*
 
-### UC-3 · Fence `list_calendar_events` output
-- [ ] `src/tools/calendar.ts:158`: wrap each event's third-party fields
+### UC-3 · Fence `list_calendar_events` output ✅
+- [x] `src/tools/calendar.ts`: wrap each event's third-party fields
   (title/description) via `fenceUntrusted('calendar', …)`; keep owner + date
   range (household-controlled) outside the fence.
-- [ ] Update the tool's unit test to assert the fenced shape.
+- [x] Updated the calendar unit test to assert the fenced shape.
 - **Done when:** event text is fenced, framing is not; `pnpm test` green.
 
-### UC-4 · Fence `recall_history` output
-- [ ] `src/tools/recall.ts:42`: wrap the recalled summaries via
+### UC-4 · Fence `recall_history` output ✅
+- [x] `src/tools/recall.ts`: wrap the recalled summaries via
   `fenceUntrusted('recalled', …)`; keep the `[day]` labels as framing per the
   team's call (inside or outside — default outside).
-- [ ] Update the tool's unit test.
+- [x] Added a unit test (new file) for the fenced output.
 - **Done when:** recalled content fenced; `pnpm test` green.
 
-### UC-5 · Fence `get_fact` output (poisoning loop)
-- [ ] `src/tools/facts.ts:40`: wrap the stored value via
+### UC-5 · Fence `get_fact` output (poisoning loop) ✅
+- [x] `src/tools/facts.ts`: wrap the stored value via
   `fenceUntrusted('stored-fact', …)`; keep the key outside the fence.
-- [ ] Update the tool's unit test.
+- [x] Added a unit test (new file) for the fenced output.
 - **Done when:** fact value fenced; `pnpm test` green.
 
 ## UC-C — Coverage: injection evals + ratification
@@ -99,6 +99,6 @@ Not built in this workstream. Recorded so it isn't re-derived:
 ## Progress
 
 - [x] UC-A (UC-1 ✅, UC-2 ✅)
-- [ ] UC-B (UC-3, UC-4, UC-5)
+- [x] UC-B (UC-3 ✅, UC-4 ✅, UC-5 ✅)
 - [ ] UC-C (UC-6) — ratifies the boundary
 - [ ] UC-D — deferred draft
