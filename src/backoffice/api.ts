@@ -8,6 +8,11 @@ import { isTableKey, queryTable, tableCatalogue, type Queryable } from './querie
 import type { CostClient } from './cost.js';
 import { getLogs, type TurnEnricher } from './journal.js';
 import type { StatusResponse } from './probes.js';
+import type { CalendarReader } from './calendar.js';
+
+// The calendar is a virtual, read-only "table" sourced live from Google
+// Calendar (no DB table) — listed in the catalogue alongside the real ones.
+const CALENDAR_TABLE = 'calendar_events';
 
 export interface ApiDeps {
   /** SELECT-only pool in production (BACKOFFICE_DATABASE_URL → SELECT-only role). */
@@ -18,6 +23,8 @@ export interface ApiDeps {
   readonly enricher?: TurnEnricher | undefined;
   /** Live health probes (Status screen), cached by the composer. */
   readonly status?: (() => Promise<StatusResponse>) | undefined;
+  /** Live Google Calendar read (Database `calendar_events` rows). */
+  readonly calendar?: CalendarReader | undefined;
 }
 
 function clampLimit(raw: string | null): number | undefined {
@@ -31,9 +38,14 @@ export function createApiRouter(deps: ApiDeps): ApiRouter {
     async handle(_method: string, url: URL): Promise<ApiResponse | undefined> {
       const path = url.pathname;
 
-      // GET /api/db → the table catalogue (drives the Database rail).
+      // GET /api/db → the table catalogue (drives the Database rail). The live
+      // calendar is appended as a virtual table when available.
       if (path === '/api/db') {
-        return { status: 200, body: { tables: tableCatalogue() } };
+        const tables: { table: string; label: string; icon: string }[] = tableCatalogue();
+        if (deps.calendar !== undefined) {
+          tables.push({ table: CALENDAR_TABLE, label: CALENDAR_TABLE, icon: 'calendar' });
+        }
+        return { status: 200, body: { tables } };
       }
 
       // GET /api/costs → Langfuse-derived (estimated) spend + token economics.
@@ -53,6 +65,13 @@ export function createApiRouter(deps: ApiDeps): ApiRouter {
       if (path === '/api/status') {
         if (deps.status === undefined) return { status: 503, body: { error: 'status unavailable' } };
         return { status: 200, body: await deps.status() };
+      }
+
+      // GET /api/db/calendar_events → live Google Calendar read (virtual table).
+      if (path === `/api/db/${CALENDAR_TABLE}`) {
+        if (deps.calendar === undefined) return { status: 503, body: { error: 'calendar unavailable' } };
+        const { columns, rows } = await deps.calendar.list();
+        return { status: 200, body: { table: CALENDAR_TABLE, label: CALENDAR_TABLE, icon: 'calendar', columns, rows } };
       }
 
       // GET /api/db/:table → one table's rows (paged via ?limit).

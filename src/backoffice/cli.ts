@@ -9,6 +9,7 @@ import { loadBackofficeConfig } from '../ops/config.js';
 import { makeGoogleCalendarClient } from '../tools/calendar-client.js';
 import { createApiRouter } from './api.js';
 import { makeRateLimiter } from './auth.js';
+import { makeCalendarReader } from './calendar.js';
 import { makeCostClient } from './cost.js';
 import { makeTurnEnricher } from './journal.js';
 import {
@@ -72,7 +73,8 @@ function main(): void {
     return value;
   };
 
-  const api = createApiRouter({ db, cost, enricher, status });
+  const calendarReader = makeCalendarReader(calendar);
+  const api = createApiRouter({ db, cost, enricher, status, calendar: calendarReader });
 
   const server = createBackofficeServer({
     token: config.token,
