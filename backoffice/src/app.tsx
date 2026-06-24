@@ -4,8 +4,11 @@
 import { useEffect, useState } from 'react';
 import { Icon } from './components/icon';
 import { Badge, Dot } from './components/primitives';
-import { household } from './fixtures';
 import { isRoute, NAV, TITLES, type Route } from './routes';
+
+// Static console branding (not mock data — the household's real group jid is
+// PII and lives behind the allowlist; the console identifies itself generically).
+const HOUSEHOLD = { group: 'Household', members: 2, locale: 'he / en' };
 import { DatabaseScreen } from './screens/database';
 import { CostsScreen } from './screens/costs';
 import { LogsScreen } from './screens/logs';
@@ -40,15 +43,12 @@ function Sidebar({ route, setRoute }: { route: Route; setRoute: (r: Route) => vo
         <div className="household">
           <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
             <Dot status="operational" pulse />
-            <span style={{ fontSize: 12.5, fontWeight: 600 }}>{household.group}</span>
+            <span style={{ fontSize: 12.5, fontWeight: 600 }}>{HOUSEHOLD.group}</span>
           </div>
           <div className="household-meta">
-            <span>{household.members} members</span>
+            <span>{HOUSEHOLD.members} members</span>
             <span>·</span>
-            <span>{household.locale}</span>
-          </div>
-          <div className="household-meta" style={{ fontFamily: 'var(--mono)' }}>
-            {household.jid}
+            <span>{HOUSEHOLD.locale}</span>
           </div>
         </div>
       </div>

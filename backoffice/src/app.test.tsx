@@ -9,12 +9,12 @@ beforeEach(() => {
 });
 
 describe('App shell', () => {
-  it('mounts with the Overview dashboard by default', () => {
+  it('mounts with the Overview route by default', () => {
     render(<App />);
     expect(screen.getByText('Ezra')).toBeInTheDocument();
-    // focus dashboard markers
-    expect(screen.getByText('Spend this month')).toBeInTheDocument();
-    expect(screen.getByText('Awaiting approval')).toBeInTheDocument();
+    // chrome is always present even before the live dashboard data resolves
+    expect(screen.getByText(/WhatsApp household assistant/)).toBeInTheDocument();
+    expect(location.hash).toBe('#dashboard');
   });
 
   it('navigates to every route without error', () => {
@@ -23,8 +23,9 @@ describe('App shell', () => {
       fireEvent.click(screen.getByRole('button', { name: n.label }));
       expect(location.hash).toBe('#' + n.id);
     }
-    // landed on Status last
-    expect(screen.getByText('Reliability edges')).toBeInTheDocument();
+    // landed on Status last (topbar title is always present, even before/if
+    // the live probe fetch resolves)
+    expect(screen.getByText('System status')).toBeInTheDocument();
   });
 
   it('honours the initial location.hash', () => {

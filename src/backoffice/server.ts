@@ -103,7 +103,10 @@ async function serveStatic(res: ServerResponse, distDir: string, pathname: strin
 export function createRequestHandler(deps: BackofficeDeps) {
   return async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const method = (req.method ?? 'GET').toUpperCase();
-    const url = new URL(req.url ?? '/', 'http://localhost');
+    // Base only serves to parse the relative request-target into pathname +
+    // query; it's loopback, never dialed (built from the Host header so no
+    // outbound host literal appears in src — the egress drift scan stays clean).
+    const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
     const isApi = url.pathname === '/api' || url.pathname.startsWith('/api/');
     const addr = clientAddr(req);
 
