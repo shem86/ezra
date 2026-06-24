@@ -22,11 +22,25 @@
 #                      Omit when the host already holds a persistent GHCR login.
 #   HEALTH_TIMEOUT     seconds to wait for the launch marker (default: 180 —
 #                      real startup is ~60s: WhatsApp connect + DBOS launch/recovery)
+#   SECRETS_MODE       how to materialize .env before deploy (V2_NOTES §3): unset
+#                      or `none` (default) keeps the on-disk .env untouched —
+#                      preserves portability + the historical behavior; `ssm`
+#                      pulls it from an SSM SecureString (SECRETS_PARAM); `sops`
+#                      decrypts SOPS_ENV_FILE with an age key from AGE_KEY_PARAM.
+#                      The CD workflow (deploy.yml) sets ssm; a non-AWS host
+#                      (Hetzner) can set sops or leave it none.
+#   SECRETS_PARAM      SECRETS_MODE=ssm: SSM param holding the full .env (default /hh-assistant/env)
+#   AGE_KEY_PARAM      SECRETS_MODE=sops: SSM param holding the SOPS age private key
+#   SOPS_ENV_FILE      SECRETS_MODE=sops: repo-relative encrypted env, e.g. .env.prod.enc
+#   AWS_REGION         region for SSM lookups (default us-east-1; ssm/sops modes only)
 set -euo pipefail
 
 EZRA_TAG="${EZRA_TAG:?set EZRA_TAG to the image tag to deploy}"
 REPO_DIR="${REPO_DIR:-$HOME/hh-assistant}"
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-180}"
+SECRETS_MODE="${SECRETS_MODE:-none}"
+SECRETS_PARAM="${SECRETS_PARAM:-/hh-assistant/env}"
+AWS_REGION="${AWS_REGION:-us-east-1}"
 IMAGE="ghcr.io/shem86/hh-assistant"
 
 cd "$REPO_DIR"
@@ -37,6 +51,44 @@ cd "$REPO_DIR"
 compose() { docker compose --env-file .env -f infra/docker-compose.prod.yml "$@"; }
 
 log() { printf '[deploy] %s\n' "$*"; }
+
+# --- 0. materialize .env from the secret store (V2_NOTES §3) ------------------
+# Mirrors the cloud-init fetch (infra/pulumi/cloud-init/user-data.yaml.tmpl) so
+# the create path and steady-state CD share one source of truth: secrets live
+# in SSM (or a SOPS+age blob), never a hand-scp'd file. The write is atomic
+# (fetch to a temp, require non-empty, then mv) so a failed fetch aborts the
+# deploy BEFORE any pull/swap — the running container is left untouched.
+# POSTGRES_PASSWORD footgun (§3/§9): the stored .env must carry the SAME
+# host-generated POSTGRES_PASSWORD the data dir was initialized with — Postgres
+# binds it at first init, so a divergent value silently breaks app auth.
+materialize_env() {
+  case "$SECRETS_MODE" in
+    none) log "secrets: SECRETS_MODE=none — using the on-disk .env as-is"; return 0 ;;
+    ssm)
+      log "secrets: fetching .env from SSM ${SECRETS_PARAM}"
+      aws ssm get-parameter --name "$SECRETS_PARAM" --with-decryption \
+        --region "$AWS_REGION" --query Parameter.Value --output text > "$REPO_DIR/.env.ssm.tmp"
+      ;;
+    sops)
+      log "secrets: decrypting ${SOPS_ENV_FILE:?set SOPS_ENV_FILE for sops mode} with age key from ${AGE_KEY_PARAM:?set AGE_KEY_PARAM for sops mode}"
+      local keyfile; keyfile="$(mktemp)"
+      aws ssm get-parameter --name "$AGE_KEY_PARAM" --with-decryption \
+        --region "$AWS_REGION" --query Parameter.Value --output text > "$keyfile"
+      SOPS_AGE_KEY_FILE="$keyfile" sops -d "$REPO_DIR/$SOPS_ENV_FILE" > "$REPO_DIR/.env.ssm.tmp"
+      shred -u "$keyfile" 2>/dev/null || rm -f "$keyfile"
+      ;;
+    *) log "secrets: unknown SECRETS_MODE=$SECRETS_MODE"; return 1 ;;
+  esac
+  if [[ ! -s "$REPO_DIR/.env.ssm.tmp" ]]; then
+    log "secrets: fetched .env is empty — aborting before any swap"
+    rm -f "$REPO_DIR/.env.ssm.tmp"
+    return 1
+  fi
+  mv "$REPO_DIR/.env.ssm.tmp" "$REPO_DIR/.env"
+  chmod 600 "$REPO_DIR/.env"
+  log "secrets: .env materialized from $SECRETS_MODE"
+}
+materialize_env
 
 # --- 1. GHCR auth (optional — skipped if the host is already logged in) -------
 if [[ -n "${GHCR_PAT:-}" ]]; then

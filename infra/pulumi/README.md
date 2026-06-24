@@ -126,6 +126,15 @@ future provider port (Hetzner) doesn't relearn them:
 `cloud-init/user-data.yaml.tmpl`. `POSTGRES_PASSWORD` is generated once into the
 store, never edited inline (V2_NOTES §3/§9).
 
+Both the **create path** (cloud-init) **and steady-state CD** materialize `.env`
+the same way: `infra/deploy/on-host-deploy.sh` self-fetches it from
+`SECRETS_PARAM` before every swap (CD sets `SECRETS_MODE=ssm` in `deploy.yml`),
+so the host never relies on a hand-scp'd file. The instance role's
+`hh-read-ghcr-param` policy already covers `parameter/hh-assistant/*`, so the
+new `/hh-assistant/env` needs no IAM change. `on-host-deploy.sh` defaults to
+`SECRETS_MODE=none` (keeps the on-disk `.env`) to stay provider-portable — a
+non-AWS host opts into `sops` or leaves it `none`.
+
 ## Deferred (out of this pass)
 SG-egress tightening (§5), declarative base-backup schedule (§6), a dedicated
 VPC, a standing staging env, and the Hetzner provider impl (the component is
