@@ -1,0 +1,14 @@
+[Unit]
+Description=periodic hh-assistant backup-freshness check (last-base age → dead-man ping)
+
+[Timer]
+Unit=hh-backup-freshness.service
+# Hourly, offset from the 03:00 base run. The healthchecks.io check's grace
+# window should exceed this period (e.g. ~3h) so one transient miss (a slow
+# `aws s3 ls`, a host blip) doesn't flap the alert — only a sustained gap does.
+OnCalendar=*-*-* *:17:00 UTC
+Persistent=true
+RandomizedDelaySec=2min
+
+[Install]
+WantedBy=timers.target

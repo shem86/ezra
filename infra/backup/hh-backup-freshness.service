@@ -1,0 +1,25 @@
+[Unit]
+Description=hh-assistant backup freshness check (ping the dead-man on last-base age)
+Documentation=file:///home/hh/hh-assistant/infra/backup/README.md
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+User=hh
+Group=hh
+WorkingDirectory=/home/hh/hh-assistant
+# Runs freshness.sh INSIDE the sidecar image (carries aws-cli + curl + lib.sh)
+# so the check needs nothing on the host. `run --rm` is a throwaway job; it does
+# not disturb the long-running receivewal sidecar. BACKUP_FRESHNESS_PING_URL
+# (and optional BACKUP_MAX_AGE_HOURS) come from .env via the overlay's env_file.
+# The script pings <url> when fresh and <url>/fail when stale/missing; a separate
+# healthchecks.io check alerts from outside when the fresh ping stops.
+ExecStart=/usr/bin/docker compose --env-file /home/hh/hh-assistant/.env \
+  -f /home/hh/hh-assistant/infra/docker-compose.prod.yml \
+  -f /home/hh/hh-assistant/infra/backup/docker-compose.backup.yml \
+  run --rm backup freshness.sh
+# A stale-backup exit (1) is the freshness signal, not a unit failure to alarm
+# on locally — the /fail ping already routed it to the external check. Treat the
+# stale exit code as a clean finish so systemd doesn't double-report it.
+SuccessExitStatus=0 1

@@ -13,8 +13,12 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/hh-backup
-COPY infra/backup/lib.sh infra/backup/backup.sh ./
-RUN chmod +x backup.sh
+# curl is needed by freshness.sh to ping the healthchecks.io dead-man.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends curl \
+  && rm -rf /var/lib/apt/lists/*
+COPY infra/backup/lib.sh infra/backup/backup.sh infra/backup/freshness.sh ./
+RUN chmod +x backup.sh freshness.sh
 
 # Default: stream WAL continuously and ship completed segments. Base backups
 # run on a schedule via `docker compose ... run --rm backup base` (host cron) —
