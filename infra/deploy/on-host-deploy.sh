@@ -50,6 +50,22 @@ cd "$REPO_DIR"
 # for infra/.env and miss the repo-root file (§4/§9, infra/runtime.md).
 compose() { docker compose --env-file .env -f infra/docker-compose.prod.yml "$@"; }
 
+# Full-project compose: prod + the backup sidecar overlay. The backup container
+# (hh-assistant-backup-1) shares this project via docker-compose.backup.yml
+# (enable-replication.sh / cloud-init bring the stack up with BOTH files). A
+# clean `down`/`up` MUST include the overlay — otherwise `down` orphans the
+# backup and can't remove the shared `internal` network, and `up` wouldn't
+# restore the sidecar. Only the recreate path needs this; the fast in-place
+# swap touches just ezra/backoffice and uses `compose` above.
+BACKUP_OVERLAY="infra/backup/docker-compose.backup.yml"
+compose_full() {
+  if [[ -f "$BACKUP_OVERLAY" ]]; then
+    docker compose --env-file .env -f infra/docker-compose.prod.yml -f "$BACKUP_OVERLAY" "$@"
+  else
+    docker compose --env-file .env -f infra/docker-compose.prod.yml "$@"
+  fi
+}
+
 log() { printf '[deploy] %s\n' "$*"; }
 
 # --- 0. materialize .env from the secret store (V2_NOTES §3) ------------------
@@ -111,45 +127,59 @@ fi
 log "pulling ${IMAGE}:${EZRA_TAG}"
 EZRA_TAG="$EZRA_TAG" compose pull ezra
 
-# --- 4. migrate-gate: run migrations with the NEW image, before the swap ------
-# migrate-cli reads DATABASE_URL from the compose environment block.
-#
-# `--no-recreate postgres` + `--no-deps`: ensure Postgres is up WITHOUT
-# recreating it. A compose change to the postgres service or a network's
-# driver_opts (e.g. the egress bridge-name pin, V2_NOTES §5) would otherwise
-# make `compose run` recreate postgres / reconcile the egress network on the
-# LIVE stack — which Docker can't do with containers attached, erroring
-# "container … is not connected to network …" and wedging the stack mid-deploy
-# (2026-06-24 incident). Any such DEFINITION change is applied once, cleanly, by
-# the swap's down/up fallback below — never by the migrate-gate.
-log "ensuring Postgres is up without recreating it"
-EZRA_TAG="$EZRA_TAG" compose up -d --no-recreate postgres
-log "migrate-gate: applying migrations with ${EZRA_TAG}"
-if ! EZRA_TAG="$EZRA_TAG" compose run --rm --no-deps ezra node dist/memory/migrate-cli.js; then
-  log "MIGRATION FAILED — aborting before swap; old container left running"
-  exit 1
+# --- 4. detect a network-definition change that forces a clean recreate -------
+# Docker can't apply a network driver_opts change (e.g. the egress bridge-name
+# pin, V2_NOTES §5) to a LIVE network with containers attached — ANY compose
+# `up`/`run` then tries to recreate the network and errors "container … is not
+# connected to network …", wedging the deploy (2026-06-24 incident). compose
+# reconciles ALL project networks on every up/run, so even the migrate-gate
+# trips it. Detect the drift UP FRONT (compare the live egress bridge name to
+# the compose spec) and, when present, take the clean down/up path below instead
+# of the in-place migrate-gate — a one-time event: once recreated, live==spec
+# and future deploys take the fast in-place path.
+DESIRED_EGRESS_BRIDGE="$(grep 'com.docker.network.bridge.name' infra/docker-compose.prod.yml | head -1 | awk '{print $NF}')"
+LIVE_EGRESS_BRIDGE="$(docker network inspect hh-assistant_egress \
+  --format '{{index .Options "com.docker.network.bridge.name"}}' 2>/dev/null || echo "")"
+NEED_RECREATE=0
+if [[ -n "$DESIRED_EGRESS_BRIDGE" && "$DESIRED_EGRESS_BRIDGE" != "$LIVE_EGRESS_BRIDGE" ]]; then
+  log "egress network drift: live bridge='${LIVE_EGRESS_BRIDGE:-<none>}' desired='${DESIRED_EGRESS_BRIDGE}' — clean recreate required"
+  NEED_RECREATE=1
 fi
 
-# --- 5. swap the running app to the new tag -----------------------------------
-# Spine + the read-only backoffice (same image, different entry) swap together.
-# In-place first (fast, no downtime for the common case). A compose
-# network/volume DEFINITION change can't be applied to a running stack — `up`
-# then errors recreating the network with containers attached. On that failure,
-# fall back to a clean `down` + `up` (recreates networks correctly; named
-# volumes — pgdata, wa-session — are PRESERVED, never `-v`), a brief planned
-# downtime that the standard release flow then heals + auto-rollbacks like any
-# other.
-log "swapping ezra + backoffice to ${EZRA_TAG}"
-if ! EZRA_TAG="$EZRA_TAG" compose up -d ezra backoffice; then
-  log "in-place swap failed (likely a network/volume-definition change) — clean down/up (named volumes preserved)"
-  EZRA_TAG="$EZRA_TAG" compose down --remove-orphans
-  EZRA_TAG="$EZRA_TAG" compose up -d
-  # The egress network may have been recreated under its pinned bridge name
-  # (hh-egress0); re-apply the host nftables allowlist so it matches the new
-  # interface immediately rather than waiting for the refresh timer. Best-effort
-  # — the hh operator may lack the sudo right, and the timer re-applies anyway.
+if [[ "$NEED_RECREATE" == 1 ]]; then
+  # --- 5a. clean down/up (the only way to apply a network-definition change) ---
+  # Recreates networks correctly with named volumes (pgdata, wa-session)
+  # PRESERVED — never `-v`. ezra applies migrations at launch (main.ts
+  # runMigrations), and the healthcheck + auto-rollback below catch a bad
+  # migration just as they catch a bad swap. A brief, one-time planned downtime.
+  log "clean down/up to ${EZRA_TAG} (full stack incl backup sidecar; named volumes preserved; ezra migrates at launch)"
+  EZRA_TAG="$EZRA_TAG" compose_full down
+  EZRA_TAG="$EZRA_TAG" compose_full up -d
+  # The egress network now carries its pinned bridge name; re-apply the host
+  # nftables allowlist so it matches immediately rather than waiting for the
+  # refresh timer. Best-effort — the hh operator may lack the sudo right.
   sudo systemctl start hh-egress.service 2>/dev/null \
     || log "note: run 'sudo systemctl start hh-egress.service' to re-apply egress for the new bridge"
+else
+  # --- 4. migrate-gate: run migrations with the NEW image, before the swap -----
+  # `--no-recreate postgres` + `--no-deps`: ensure Postgres is up WITHOUT
+  # recreating it, so a postgres-service change doesn't trigger a live recreate
+  # here (that's the clean-recreate path's job).
+  log "ensuring Postgres is up without recreating it"
+  EZRA_TAG="$EZRA_TAG" compose up -d --no-recreate postgres
+  log "migrate-gate: applying migrations with ${EZRA_TAG}"
+  if ! EZRA_TAG="$EZRA_TAG" compose run --rm --no-deps ezra node dist/memory/migrate-cli.js; then
+    log "MIGRATION FAILED — aborting before swap; old container left running"
+    exit 1
+  fi
+  # --- 5. swap the running app + backoffice to the new tag (in-place) ---------
+  log "swapping ezra + backoffice to ${EZRA_TAG}"
+  if ! EZRA_TAG="$EZRA_TAG" compose up -d ezra backoffice; then
+    log "in-place swap failed — clean down/up (full stack; named volumes preserved)"
+    EZRA_TAG="$EZRA_TAG" compose_full down
+    EZRA_TAG="$EZRA_TAG" compose_full up -d
+    sudo systemctl start hh-egress.service 2>/dev/null || true
+  fi
 fi
 
 # --- 6. healthcheck gate: launch markers + no restart-loop ---------------------
