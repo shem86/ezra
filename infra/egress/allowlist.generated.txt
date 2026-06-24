@@ -1,0 +1,18 @@
+# infra/egress/allowlist.generated.txt — GENERATED, DO NOT EDIT BY HAND.
+# Source of truth: src/ops/egress-allowlist.ts. Regenerate with:
+#   node infra/egress/render-allowlist.ts --write
+# Drift is CI-guarded (tests/unit/egress-allowlist-artifact.test.ts).
+# nftables.sh reads this file so the host firewall needs no Node (V2_NOTES §4).
+api.anthropic.com
+api.voyageai.com
+oauth2.googleapis.com
+www.googleapis.com
+cloud.langfuse.com
+api.telegram.org
+hc-ping.com
+healthchecks.io
+whatsapp.net
+whatsapp.com
+fbcdn.net
+s3.us-east-1.amazonaws.com
+s3.amazonaws.com

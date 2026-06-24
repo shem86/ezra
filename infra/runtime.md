@@ -27,8 +27,9 @@ that baseline and runs the on-host drills.
 | `infra/docker-compose.prod.yml` | Hardened `ezra` + `postgres` services, networks, volumes |
 | `.dockerignore` | Keeps `.env`, `.wa-session`, tests out of the build context |
 | `src/ops/egress-allowlist.ts` | **Single source of truth** for allowed egress hosts (unit-tested) |
-| `infra/egress/render-allowlist.ts` | Emits the allowlist as data the firewall consumes |
-| `infra/egress/nftables.sh` | Host egress ruleset, rendered from the allowlist (v0) |
+| `infra/egress/render-allowlist.ts` | Generator: emits the allowlist as data; `--write` regenerates the artifact, `--check`/`--table` for CI/humans (author/CI time, not host) |
+| `infra/egress/allowlist.generated.txt` | Committed static artifact the host firewall reads (drift-guarded; no host Node — V2_NOTES §4) |
+| `infra/egress/nftables.sh` | Host egress ruleset, rendered from the committed artifact |
 
 ## Process hardening (the `ezra` service)
 
@@ -66,6 +67,18 @@ everything else logged + dropped), re-resolving the rotating CDN names on a
 timer (`refresh` subcommand). Because the names sit behind rotating IPs, the
 firewall resolves them into nft sets rather than pinning addresses.
 
+The host firewall reads the **committed static artifact**
+`infra/egress/allowlist.generated.txt` (apex hosts, one per line, plus a
+`#`-comment header the script skips) — **no host Node** (V2_NOTES §4). The app
+is containerized; baking the list into the image alone wouldn't put it where a
+*host* process can read it, so the list is committed to the repo (the CD
+checkout already lands it on the box). `render-allowlist.ts` stays the
+source-of-truth renderer, now run at author/CI time: regenerate with
+`node infra/egress/render-allowlist.ts --write`. Drift is CI-guarded by
+`tests/unit/egress-allowlist-artifact.test.ts` (and `--check` for a script
+gate), so the committed artifact can never silently diverge from
+`src/ops/egress-allowlist.ts`.
+
 ## Deploy (T45 runs this on the host)
 
 All commands run from the repo root (`~/hh-assistant`) as the `hh` user.
@@ -76,8 +89,9 @@ points interpolation back at the repo-root `.env` (the same file the ezra
 service loads via `env_file: ../.env`).
 
 ```
-# 0. host tooling (fresh box): Docker engine + compose plugin, and Node 22 for
-#    the egress render/refresh (the app is containerized — node is for tooling).
+# 0. host tooling (fresh box): Docker engine + compose plugin. The egress
+#    firewall reads the committed allowlist.generated.txt — no host Node needed
+#    (V2_NOTES §4; nft + curl/jq for the S3 CIDRs still come from provision-host).
 #    add hh to the docker group so it runs docker without sudo.
 
 # 1. login/OS baseline (T15), once on a fresh box

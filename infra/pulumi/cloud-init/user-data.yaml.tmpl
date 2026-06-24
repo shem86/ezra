@@ -40,7 +40,7 @@ write_files:
       DEPLOY_KEY_PARAM="@@DEPLOY_KEY_PARAM@@"
       REPO_DIR=/home/hh/hh-assistant
 
-      # --- 1. host tooling: Docker engine + compose plugin, aws-cli, Node 22 ----
+      # --- 1. host tooling: Docker engine + compose plugin, aws-cli -----------
       log "installing docker engine + compose plugin"
       install -m 0755 -d /etc/apt/keyrings
       curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
@@ -58,12 +58,9 @@ write_files:
         ( cd /tmp && unzip -q awscli.zip && ./aws/install )
       fi
 
-      if ! command -v node >/dev/null 2>&1; then
-        log "installing Node 22 (host tooling for the egress render/refresh)"
-        curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-        apt-get install -y nodejs
-      fi
-      corepack enable || true
+      # No host Node: the egress firewall reads the committed
+      # infra/egress/allowlist.generated.txt, not `node render-allowlist.ts`
+      # (V2_NOTES §4). All app `node` runs inside the container.
 
       # --- 2. clone the repo at the pinned ref ---------------------------------
       # Private repo: fetch a read-only deploy key from SSM (instance role) and
@@ -110,6 +107,11 @@ write_files:
       # hh-egress.service + hh-egress-refresh.service (and any future siblings).
       install -m 0644 "${REPO_DIR}"/infra/egress/hh-egress*.service /etc/systemd/system/
       install -m 0644 "${REPO_DIR}/infra/egress/hh-egress.timer" /etc/systemd/system/hh-egress.timer
+      # Backup scheduling (V2_NOTES §6): base-backup timer + freshness dead-man
+      # timer. Run as the hh operator via the docker group (no sudo), so they
+      # need no sudoers entry — install + enable below (after compose is up).
+      install -m 0644 "${REPO_DIR}"/infra/backup/hh-backup-*.service /etc/systemd/system/
+      install -m 0644 "${REPO_DIR}"/infra/backup/hh-backup-*.timer /etc/systemd/system/
       systemctl daemon-reload
       usermod -aG docker hh
 
@@ -144,7 +146,20 @@ write_files:
         docker compose --env-file "${REPO_DIR}/.env" -f "${REPO_DIR}/infra/docker-compose.prod.yml" pull
       sudo -u hh env EZRA_TAG="${EZRA_TAG}" \
         docker compose --env-file "${REPO_DIR}/.env" -f "${REPO_DIR}/infra/docker-compose.prod.yml" up -d
+      # Replication on a FRESH box is already baked by initdb-replication.sh when
+      # postgres first init'd its empty data dir (V2_NOTES §6), so this call is
+      # now belt-and-suspenders / a no-op (idempotent). It still covers the case
+      # of an existing pgdata volume reattached to a fresh box.
       sudo -u hh bash "${REPO_DIR}/infra/backup/enable-replication.sh" || log "replication wiring skipped/failed (non-fatal for first boot)"
+      # Start the continuous WAL sidecar (the RPO-critical stream) + base/freshness
+      # timers (V2_NOTES §6). The sidecar's `up -d` brings up the receivewal loop;
+      # the timers fire the base backup (daily) and freshness check (hourly).
+      sudo -u hh env EZRA_TAG="${EZRA_TAG}" \
+        docker compose --env-file "${REPO_DIR}/.env" \
+          -f "${REPO_DIR}/infra/docker-compose.prod.yml" \
+          -f "${REPO_DIR}/infra/backup/docker-compose.backup.yml" up -d backup \
+        || log "backup sidecar start skipped/failed (non-fatal for first boot)"
+      systemctl enable --now hh-backup-base.timer hh-backup-freshness.timer || true
       # Boot-time apply FIRST (creates the nft table), THEN enable+start the
       # timer: its triggered refresh unit is After=hh-egress.service and only
       # swaps set elements on an already-loaded table, so the table must exist

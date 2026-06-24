@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # infra/egress/nftables.sh — host-level egress allowlist for the Ezra container
 # (T16 v0). Default-deny on the container's forwarded egress; allow only the
-# hosts declared in src/ops/egress-allowlist.ts (via render-allowlist.ts) plus
-# DNS and established flows. Everything else is logged and dropped.
+# hosts declared in src/ops/egress-allowlist.ts — read from the committed,
+# generated allowlist.generated.txt (no host Node; V2_NOTES §4) — plus DNS and
+# established flows. Everything else is logged and dropped.
 #
 # WHY host nftables and not the container layer (CLAUDE.md / infra/host.md):
 # Docker manages its own iptables rules; layering a hostname allowlist inside
@@ -35,6 +36,11 @@ set -euo pipefail
 readonly TABLE="hh_egress"
 readonly HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly RESOLVER="${RESOLVER:-169.254.169.253}" # Docker's embedded DNS / VPC resolver
+# Committed static allowlist artifact, generated from src/ops/egress-allowlist.ts
+# by render-allowlist.ts at author/CI time (V2_NOTES §4). Reading this file
+# instead of shelling out to `node` is what keeps the host firewall Node-free —
+# the app is containerized, and the CD checkout already lands this on the host.
+readonly ALLOWLIST_FILE="${HERE}/allowlist.generated.txt"
 
 # AWS S3 cannot be allowlisted by DNS like the CDN-fronted hosts: its address
 # pool spans several large, per-query-randomized ranges, so a resolved A-record
@@ -49,10 +55,17 @@ readonly S3_REGION="${BACKUP_S3_REGION:-us-east-1}"
 readonly S3_CIDR_CACHE="/var/lib/hh-egress/s3-${S3_REGION}-cidrs.txt"
 
 # Resolve every allowlist apex (and a few well-known service subdomains) to a
-# space-separated IPv4 list. Bare-node render keeps this in lockstep with src.
+# space-separated IPv4 list. The apex list comes from the committed static
+# artifact (ALLOWLIST_FILE) — drift from src is CI-guarded, so reading the file
+# stays in lockstep with src without needing host Node (V2_NOTES §4). Comment
+# (`#…`) and blank lines in the artifact are skipped.
 resolve_ipv4() {
   local hosts extra
-  hosts="$(node "${HERE}/render-allowlist.ts")"
+  if [[ ! -r "$ALLOWLIST_FILE" ]]; then
+    echo "egress allowlist artifact missing: $ALLOWLIST_FILE" >&2
+    exit 1
+  fi
+  hosts="$(grep -v -e '^[[:space:]]*#' -e '^[[:space:]]*$' "$ALLOWLIST_FILE")"
   # Rotating subdomains the apex form won't resolve on its own:
   extra="g.whatsapp.net mmg.whatsapp.net web.whatsapp.com us.cloud.langfuse.com"
   {
