@@ -17,7 +17,7 @@ section below; this table is the index.
 | 1 | CI/CD pipeline (build→GHCR→release→SSM deploy) | ✅ shipped — only README badge automation open (§10 dissolves it) |
 | 2 | IaC (Pulumi TS) | ✅ shipped — prod adopted (0 replacements) + create-from-zero proven |
 | 3 | App secrets → SSM/SOPS | ✅ shipped — both paths wired + prod param seeded (2026-06-24); only the next-deploy log check remains |
-| 4 | Compose ergonomics (`Makefile`) | ✅ shipped — host-Node removal still open |
+| 4 | Compose ergonomics (`Makefile`) | ✅ shipped — host-Node removal done (firewall reads a committed, drift-guarded artifact) |
 | 5 | Egress firewall (units + static bridge pin) | ✅ shipped — cloud-layer SG egress now authored in Pulumi (apply pending — deliberate prod step) |
 | 7 | Pairing (`make pair`) | ✅ shipped |
 | 8 | CI verification smokes (image + config-load) | ✅ shipped |
@@ -187,12 +187,21 @@ allowlist). Apply to live prod is still pending as a deliberate, careful step
   dissolved that friction (`pnpm release vX.Y.Z` → CI image → release → SSM
   deploy), so the old `make deploy` idea is obsolete. Chose `Makefile` over
   `just` to avoid a new host tool (zero-dependency; `make` is universal).
-- **Still open — Node on the host only to render the egress allowlist** is
-  awkward (the app is containerized). `nftables.sh` shells out to host `node
-  render-allowlist.ts`. v2: render the allowlist to a static artifact at
-  image-build time, or run the refresh as a tiny sidecar — drop the host Node
-  dependency entirely. *(Deferred: firewall-adjacent infra, needs host
-  coordination; folds into the §5 systemd workstream.)*
+- **Done — host Node removed from the egress path.** `nftables.sh` no longer
+  shells out to host `node render-allowlist.ts`; it reads a **committed static
+  artifact** `infra/egress/allowlist.generated.txt` (apex hosts + a `#`-comment
+  header the script skips, fails closed if the artifact is missing).
+  `render-allowlist.ts` stays the source-of-truth *generator*, now run at
+  author/CI time (`--write` regenerates, `--check` gates), and a unit drift test
+  (`tests/unit/egress-allowlist-artifact.test.ts`) fails CI if the committed
+  bytes diverge from `src/ops/egress-allowlist.ts` — the same anti-drift
+  discipline as the v1 egress test. Chose the committed artifact over (a)
+  image-build-only baking — the firewall is a **host** process, so a file inside
+  the container image isn't where it can read it; or (b) a refresh sidecar — more
+  moving parts for no benefit, and the CD checkout already lands the repo (hence
+  the artifact) on the box. Cloud-init (`user-data.yaml.tmpl`) no longer installs
+  Node 22 for egress; every remaining `node` invocation on the host runs *inside*
+  the container.
 
 ## 5. Egress firewall automation — ✅ units + static bridge pin shipped (SG egress authored in Pulumi; apply pending)
 

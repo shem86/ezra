@@ -41,7 +41,7 @@ write_files:
       TAILSCALE_AUTHKEY_PARAM="@@TAILSCALE_AUTHKEY_PARAM@@"
       REPO_DIR=/home/hh/hh-assistant
 
-      # --- 1. host tooling: Docker engine + compose plugin, aws-cli, Node 22 ----
+      # --- 1. host tooling: Docker engine + compose plugin, aws-cli -----------
       log "installing docker engine + compose plugin"
       install -m 0755 -d /etc/apt/keyrings
       curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
@@ -59,12 +59,9 @@ write_files:
         ( cd /tmp && unzip -q awscli.zip && ./aws/install )
       fi
 
-      if ! command -v node >/dev/null 2>&1; then
-        log "installing Node 22 (host tooling for the egress render/refresh)"
-        curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-        apt-get install -y nodejs
-      fi
-      corepack enable || true
+      # No host Node: the egress firewall reads the committed
+      # infra/egress/allowlist.generated.txt, not `node render-allowlist.ts`
+      # (V2_NOTES §4). All app `node` runs inside the container.
 
       # --- 2. clone the repo at the pinned ref ---------------------------------
       # Private repo: fetch a read-only deploy key from SSM (instance role) and
