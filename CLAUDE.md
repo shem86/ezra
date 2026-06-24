@@ -91,7 +91,10 @@ alerts, dead-man, tracing, egress-allowlist).
 
 `infra/` holds host provisioning, the hardened Docker Compose prod runtime, the
 nftables egress allowlist (mirrors `src/ops/egress-allowlist.ts`, drift-tested),
-and the PITR backup/restore pipeline.
+and the PITR backup/restore pipeline. `infra/pulumi/` (V2_NOTES §2) is the
+Pulumi IaC that **adopts** the hand-built AWS footprint and **creates** a fresh
+env from zero (cloud-init full-chain bootstrap) — its own isolated TS workspace,
+outside `pnpm build`/`test`; see `infra/pulumi/README.md`.
 
 ## Hard boundaries (full list in SPEC.md)
 

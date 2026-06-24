@@ -1,0 +1,38 @@
+# scratch stack — CREATES a fresh env from zero to PROVE the create path (the
+# reproducibility capability), then `pulumi destroy`. No pinned import ids: the
+# latest Canonical Ubuntu 24.04 AMI resolves at apply; the subnet is pinned to a
+# default subnet in an AZ that offers t3a.medium (the blind default-subnet pick
+# can land on us-east-1e, which doesn't). protectInstance=false so it tears down.
+#
+# PROVEN end-to-end 2026-06-23: cloud-init ran Docker/Node install → deploy-key
+# SSH clone of the PRIVATE repo → provision-host.sh → synthetic secret from SSM
+# → GHCR private-image pull → compose up → running ezra (DBOS launched, 0
+# restarts) at the WhatsApp-pairing ceiling. Re-init with `pulumi stack init
+# scratch` (adds encryptionsalt), then `pulumi up`.
+#
+# Same region as prod on purpose: cloud-init reads SHARED, already-existing SSM
+# params via the instance role — /hh-assistant/ghcr-pat (pull the private
+# image), /hh-assistant/deploy-key (read-only repo clone), /hh-assistant/
+# scratch-env (synthetic secrets, deliberately NOT the prod /hh-assistant/env
+# name). The fresh box gets its own instance/EIP/SG, so it never collides with
+# prod. BILLABLE while up.
+config:
+  aws:region: us-east-1
+  ezra:envName: scratch
+  ezra:instanceType: t3a.medium
+  ezra:volumeSizeGb: "40"
+  ezra:keyName: hh-assistant
+  # pin a default subnet in an AZ that offers t3a.medium (us-east-1a)
+  ezra:subnetId: subnet-0e16bad57c5cf52ff
+  ezra:sshAllowCidr: 0.0.0.0/0
+  ezra:protectInstance: "false"
+  ezra:createBackupBucket: "false"
+  ezra:createCiDeployRole: "false"
+  ezra:repoUrl: https://github.com/shem86/hh-assistant.git
+  ezra:repoRef: main
+  ezra:ezraTag: latest
+  ezra:secretsMode: ssm
+  # scratch-only synthetic secrets — deliberately NOT /hh-assistant/env (that
+  # name is reserved for a future prod SSM .env; keep throwaway secrets separate).
+  ezra:secretsParam: /hh-assistant/scratch-env
+  ezra:deployKeyParam: /hh-assistant/deploy-key

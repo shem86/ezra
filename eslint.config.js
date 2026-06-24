@@ -7,7 +7,10 @@ export default tseslint.config(
   // sessions; each carries its own tsconfig, which otherwise makes the typed
   // parser see "multiple candidate TSConfigRootDirs" and fail every file. They
   // are never source-of-truth — lint the real tree only.
-  { ignores: ['dist/', 'node_modules/', '.claude/'] },
+  // infra/pulumi/ is an isolated IaC workspace (its own package.json + tsconfig,
+  // TS pinned to Pulumi's loader, not the app's) — deliberately outside the app
+  // lint + DBOS-determinism scope (V2_NOTES §2 IaC).
+  { ignores: ['dist/', 'node_modules/', '.claude/', 'infra/pulumi/'] },
   eslint.configs.recommended,
   tseslint.configs.recommended,
   {

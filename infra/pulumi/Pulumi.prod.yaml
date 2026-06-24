@@ -1,0 +1,57 @@
+# prod stack — ADOPTS the live hand-built AWS resources (T15/T17). Every field is
+# pinned to reality (captured 2026-06-23) so that after `pulumi import`
+# (import-prod.sh), `pulumi preview` shows an EMPTY diff. protectInstance guards
+# the box (it holds the Baileys session + pgdata — never force-replace).
+#
+# `pulumi stack init prod` will append an `encryptionsalt` line; that's expected.
+config:
+  aws:region: us-east-1
+  ezra:envName: prod
+  # compute — i-0a7e9f4767666ac9e
+  ezra:instanceType: t3a.medium
+  ezra:volumeSizeGb: "40"
+  ezra:ami: ami-0f8a61b66d1accaee
+  ezra:keyName: hh-assistant
+  ezra:instanceNameTag: hh-assistant
+  # networking — pinned to the live VPC/subnet (immutable on the instance)
+  ezra:vpcId: vpc-0c56300df3ae96690
+  ezra:subnetId: subnet-091b6997ffcbfce02
+  ezra:sshAllowCidr: 0.0.0.0/0
+  ezra:securityGroupName: hh-assistant-ssh
+  # iam — role name == profile name == hh-assistant-backup-ec2
+  ezra:iamRoleName: hh-assistant-backup-ec2
+  ezra:instanceProfileName: hh-assistant-backup-ec2
+  # adopt safety
+  ezra:protectInstance: "true"
+  # backup bucket (T17) + CI deploy role (deploy.yml) — adopt the existing ones
+  ezra:createBackupBucket: "true"
+  ezra:backupBucketName: hh-assistant-backups-001467466089
+  ezra:createCiDeployRole: "true"
+  ezra:ciDeployRoleName: hh-github-deploy
+  ezra:githubRepo: shem86/hh-assistant
+  # cloud-init is IGNORED on adopt (userData in ignoreChanges) — values are here
+  # only so a `pulumi up` that ever recreates would self-bootstrap correctly.
+  ezra:repoUrl: https://github.com/shem86/hh-assistant.git
+  ezra:repoRef: main
+  ezra:ezraTag: latest
+  ezra:secretsMode: ssm
+  ezra:secretsParam: /hh-assistant/env
+  ezra:importIds:
+    sg: sg-058d22ff56c01a528
+    ec2Role: hh-assistant-backup-ec2
+    ssmCore: hh-assistant-backup-ec2/arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+    readSsm: hh-assistant-backup-ec2:hh-read-ghcr-param
+    backupS3: hh-assistant-backup-ec2:hh-backup-s3-rw
+    ec2Profile: hh-assistant-backup-ec2
+    instance: i-0a7e9f4767666ac9e
+    eip: eipalloc-0cc8398f5489537b7
+    bucket: hh-assistant-backups-001467466089
+    bucketVersioning: hh-assistant-backups-001467466089
+    bucketPab: hh-assistant-backups-001467466089
+    bucketPolicy: hh-assistant-backups-001467466089
+    bucketLifecycle: hh-assistant-backups-001467466089
+    oidc: arn:aws:iam::001467466089:oidc-provider/token.actions.githubusercontent.com
+    deployRole: hh-github-deploy
+    deploySsm: hh-github-deploy:hh-deploy-ssm
+    eipAssoc: eipassoc-0d50725598e062828
+encryptionsalt: v1:AvKpugZqQ98=:v1:ozdOJq6X2fkN7NDa:3T1T9iU1QU10YZyqqbicZ89zc7+l2Q==

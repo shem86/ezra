@@ -1,0 +1,8 @@
+# Pulumi workspace local artifacts — never commit state, secrets, or installed deps.
+/bin/
+node_modules/
+# Pulumi self-managed state lives in S3, but guard against an accidental local backend:
+.pulumi/
+# Stack configs (Pulumi.<stack>.yaml) ARE committed — they hold only non-secret
+# config + the encryptionsalt; true secrets are `pulumi config set --secret`
+# (encrypted with the stack's secrets provider) or live in SSM, never plaintext here.

@@ -1,0 +1,161 @@
+#cloud-config
+# hh-assistant (ezra) full-chain bootstrap — V2_NOTES §2 ("invoke
+# provision-host.sh from cloud-init/user-data so a fresh box self-bootstraps").
+#
+# Collapses the hand-typed infra/runtime.md deploy into one declarative artifact.
+# Runs as root on first boot of a FRESH box. End state: the hardened ezra process
+# is up and connecting — the ONLY remaining manual step is WhatsApp QR pairing
+# (`pnpm pair`), which is inherently interactive and (on the single household
+# number) cannot be double-paired from a throwaway box.
+#
+# Double-at placeholders (see cloud-init/render.ts) are filled at `pulumi up`.
+package_update: true
+package_upgrade: true
+packages:
+  - ca-certificates
+  - curl
+  - jq
+  - git
+  - unzip
+  - age
+
+write_files:
+  - path: /opt/ezra/bootstrap.sh
+    permissions: "0750"
+    owner: root:root
+    content: |
+      #!/usr/bin/env bash
+      # Stages 1-7 of the full chain. Idempotent enough to re-run on a stuck boot.
+      set -euo pipefail
+      log() { printf '[ezra-bootstrap %s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
+
+      REPO_URL="@@REPO_URL@@"
+      REPO_REF="@@REPO_REF@@"
+      EZRA_TAG="@@EZRA_TAG@@"
+      AWS_REGION="@@AWS_REGION@@"
+      SECRETS_MODE="@@SECRETS_MODE@@"
+      SECRETS_PARAM="@@SECRETS_PARAM@@"
+      AGE_KEY_PARAM="@@AGE_KEY_PARAM@@"
+      SOPS_ENV_FILE="@@SOPS_ENV_FILE@@"
+      DEPLOY_KEY_PARAM="@@DEPLOY_KEY_PARAM@@"
+      REPO_DIR=/home/hh/hh-assistant
+
+      # --- 1. host tooling: Docker engine + compose plugin, aws-cli, Node 22 ----
+      log "installing docker engine + compose plugin"
+      install -m 0755 -d /etc/apt/keyrings
+      curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+        | gpg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg  # --batch --yes: re-run safe (no TTY overwrite prompt)
+      chmod a+r /etc/apt/keyrings/docker.gpg
+      . /etc/os-release
+      echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu ${VERSION_CODENAME} stable" \
+        > /etc/apt/sources.list.d/docker.list
+      apt-get update -y
+      apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+
+      if ! command -v aws >/dev/null 2>&1; then
+        log "installing aws-cli v2"
+        curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o /tmp/awscli.zip
+        ( cd /tmp && unzip -q awscli.zip && ./aws/install )
+      fi
+
+      if ! command -v node >/dev/null 2>&1; then
+        log "installing Node 22 (host tooling for the egress render/refresh)"
+        curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+        apt-get install -y nodejs
+      fi
+      corepack enable || true
+
+      # --- 2. clone the repo at the pinned ref ---------------------------------
+      # Private repo: fetch a read-only deploy key from SSM (instance role) and
+      # clone over SSH. Without DEPLOY_KEY_PARAM, fall back to an https clone
+      # (works only for a public repo).
+      CLONE_URL="${REPO_URL}"
+      if [[ -n "${DEPLOY_KEY_PARAM}" ]]; then
+        log "fetching read-only deploy key from SSM"
+        install -d -m 700 /root/.ssh
+        aws ssm get-parameter --name "${DEPLOY_KEY_PARAM}" --with-decryption \
+          --region "${AWS_REGION}" --query Parameter.Value --output text > /root/.ssh/deploy_key
+        chmod 600 /root/.ssh/deploy_key
+        export GIT_SSH_COMMAND="ssh -i /root/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+        # https://github.com/owner/repo.git -> git@github.com:owner/repo.git
+        CLONE_URL="$(printf '%s' "${REPO_URL}" | sed -E 's#https://github.com/#git@github.com:#')"
+      fi
+      log "cloning ${CLONE_URL}@${REPO_REF}"
+      if [[ ! -d "${REPO_DIR}/.git" ]]; then
+        git clone "${CLONE_URL}" "${REPO_DIR}"
+      fi
+      git -C "${REPO_DIR}" fetch --tags --prune origin
+      git -C "${REPO_DIR}" checkout --force "${REPO_REF}"
+
+      # --- 3. login/OS baseline: the hh user, SSH lockdown, patching, hostname ---
+      # provision-host.sh runs `sshd -t`, which needs the privilege-separation
+      # dir; it isn't present in cloud-init's early-boot context, so create it.
+      mkdir -p /run/sshd
+      log "running provision-host.sh (login/OS baseline)"
+      bash "${REPO_DIR}/infra/provision-host.sh"
+      # The clone (stage 2) created /home/hh as root BEFORE provision-host added
+      # the hh user, so adduser left /home/hh root-owned ("home dir already
+      # exists, not touching"). Chown the whole home, not just the repo, or hh
+      # can't write ~/.docker (the GHCR login below) etc.
+      chown -R hh:hh /home/hh
+
+      # --- 4. sudoers drop-in + egress systemd unit/timer ----------------------
+      log "installing sudoers drop-in + egress unit/timer"
+      install -m 0440 -o root -g root "${REPO_DIR}/infra/host/sudoers-hh-ops" /etc/sudoers.d/hh-ops
+      visudo -cf /etc/sudoers.d/hh-ops
+      # Install EVERY egress unit the repo ships, not a hardcoded pair: main
+      # carries the apply/refresh split (V2_NOTES §11) where hh-egress.timer has
+      # Unit=hh-egress-refresh.service — install only the apply unit and the
+      # timer refuses to start ("trigger unit not loaded"). The glob picks up
+      # hh-egress.service + hh-egress-refresh.service (and any future siblings).
+      install -m 0644 "${REPO_DIR}"/infra/egress/hh-egress*.service /etc/systemd/system/
+      install -m 0644 "${REPO_DIR}/infra/egress/hh-egress.timer" /etc/systemd/system/hh-egress.timer
+      systemctl daemon-reload
+      usermod -aG docker hh
+
+      # --- 5. fetch secrets → /home/hh/hh-assistant/.env -----------------------
+      # SEAM: SSM is the testable-now default (the box already has the instance
+      # role; the GHCR PAT already lives in SSM). SOPS+age is the flagged
+      # portable alternative (V2_NOTES §3) — confirm at review.
+      log "materializing .env (secretsMode=${SECRETS_MODE})"
+      case "${SECRETS_MODE}" in
+        ssm)
+          aws ssm get-parameter --name "${SECRETS_PARAM}" --with-decryption \
+            --region "${AWS_REGION}" --query Parameter.Value --output text > "${REPO_DIR}/.env"
+          ;;
+        sops)
+          aws ssm get-parameter --name "${AGE_KEY_PARAM}" --with-decryption \
+            --region "${AWS_REGION}" --query Parameter.Value --output text > /root/.sops-age.key
+          chmod 600 /root/.sops-age.key
+          SOPS_AGE_KEY_FILE=/root/.sops-age.key \
+            sops -d "${REPO_DIR}/${SOPS_ENV_FILE}" > "${REPO_DIR}/.env"
+          shred -u /root/.sops-age.key
+          ;;
+        *) log "unknown SECRETS_MODE=${SECRETS_MODE}"; exit 1 ;;
+      esac
+      chown hh:hh "${REPO_DIR}/.env"
+      chmod 600 "${REPO_DIR}/.env"
+
+      # --- 6. runtime: GHCR login → compose up → replication → egress ----------
+      log "bringing up the hardened runtime (EZRA_TAG=${EZRA_TAG})"
+      GHCR_PAT="$(aws ssm get-parameter --name /hh-assistant/ghcr-pat --with-decryption --region "${AWS_REGION}" --query Parameter.Value --output text)"
+      printf '%s' "${GHCR_PAT}" | sudo -u hh docker login ghcr.io -u shem86 --password-stdin
+      sudo -u hh env EZRA_TAG="${EZRA_TAG}" \
+        docker compose --env-file "${REPO_DIR}/.env" -f "${REPO_DIR}/infra/docker-compose.prod.yml" pull
+      sudo -u hh env EZRA_TAG="${EZRA_TAG}" \
+        docker compose --env-file "${REPO_DIR}/.env" -f "${REPO_DIR}/infra/docker-compose.prod.yml" up -d
+      sudo -u hh bash "${REPO_DIR}/infra/backup/enable-replication.sh" || log "replication wiring skipped/failed (non-fatal for first boot)"
+      # Boot-time apply FIRST (creates the nft table), THEN enable+start the
+      # timer: its triggered refresh unit is After=hh-egress.service and only
+      # swaps set elements on an already-loaded table, so the table must exist
+      # before the timer's immediate (OnBootSec-already-elapsed + Persistent)
+      # first firing.
+      systemctl start hh-egress.service || true
+      systemctl enable --now hh-egress.timer
+
+      log "full-chain bootstrap complete — ezra is up; remaining manual step: WhatsApp pairing (pnpm pair)"
+
+runcmd:
+  - [ bash, /opt/ezra/bootstrap.sh ]
+
+final_message: "ezra full-chain bootstrap finished after $UPTIME s — pair WhatsApp to go live"

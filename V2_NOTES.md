@@ -67,6 +67,27 @@ built the production image. **Both gaps are now closed** (PRs #8–#10,
 
 ## 2. Provisioning as code (IaC) — decision locked: Pulumi TS
 
+> **In progress → `infra/pulumi/` (Pulumi, TypeScript).** Decision: **Pulumi**
+> (stays in the repo's one language). Goal reframed with the builder —
+> reproducibility as a *capability* (stand up a new env easily), not just the
+> Hetzner swap. Two stacks: `prod` adopts the live resources (each carries an
+> `import` id + `protect`) and `scratch` proves create-from-zero. cloud-init runs
+> `provision-host.sh` for a full-chain bootstrap (this note's second bullet).
+> **prod adopt APPLIED (2026-06-23):** state backend live (S3); `pulumi up`
+> imported all 17 resources with **0 replacements / 0 destroys** (additive
+> management tags only; instance 🔒 protected, NOT replaced — same original launch
+> time, EIP intact, Baileys/pgdata untouched). Post-apply preview = 21 unchanged
+> (empty-diff gate met). **scratch create path PROVEN end-to-end:** a billable
+> `pulumi up` ran cloud-init's full chain (Docker/Node → deploy-key SSH clone of
+> the private repo → provision-host → SSM synthetic secret → GHCR private pull →
+> compose up) to a running ezra (DBOS launched, 0 restarts) at the WhatsApp-
+> pairing ceiling, then `destroy`ed. **Re-proven by a clean unattended boot of
+> the fixed template (2026-06-23):** cloud-init done/errors:[], 0 failed units,
+> egress timer active on cadence, ezra 0 restarts — no manual touch. Four
+> fresh-box cloud-init bugs found+fixed (/run/sshd, /home/hh ownership, gpg
+> --batch, and the egress timer triggering the §11 refresh unit the bootstrap
+> didn't install). See **Fresh-box cloud-init gotchas** in `infra/pulumi/README.md`.
+
 - The instance, EIP, security group, IAM user, and S3 backup bucket were all
   created by hand via AWS CLI (T15/T17) — plus the §1 deploy additions (the
   OIDC deploy role `AWS_DEPLOY_ROLE_ARN`, the instance role, and the
