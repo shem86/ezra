@@ -181,4 +181,18 @@ export const kpis: Kpis = {
   recovered7d: 1,
 };
 
+export interface PendingAction {
+  id: string;
+  action: string;
+  tool: string;
+  status: string;
+  requested_by: string;
+  ttl: string;
+}
+
+export const pendingActions: PendingAction[] = [
+  { id: 'pnd_17', action: 'Create "Dinner w/ parents" Jun 26 19:00', tool: 'calendar.create', status: 'parked', requested_by: 'Noa', ttl: 'in 3h 41m' },
+  { id: 'pnd_16', action: 'Move "Soccer" → 18:30', tool: 'calendar.update', status: 'parked', requested_by: 'Amir', ttl: 'in 1h 12m' },
+];
+
 export const activity: LogRow[] = logs.slice(0, 9);
