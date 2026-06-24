@@ -239,3 +239,27 @@ in-place migrate-gate/swap can't apply a network `driver_opts` change to a live
 stack. This is a one-time event per such change; afterwards deploys take the
 fast in-place path. (2026-06-24: the egress bridge pin `hh-egress0` was applied
 this way during the v2.2.2 deploy.)
+
+After such a recreate the host nftables allowlist must be re-bound to the new
+bridge. `on-host-deploy.sh` does this automatically (`reapply_egress` →
+`sudo systemctl start hh-egress.service`), which works because `sudoers-hh-ops`
+grants `hh` that exact command NOPASSWD. If the re-apply is **denied** (the
+sudoers drop-in is missing on this host), the deploy keeps running but the box is
+**fail-OPEN on egress** — `on-host-deploy.sh` emits `EGRESS-REAPPLY-FAILED` and
+`deploy.yml` raises a GitHub `::warning::` on the run (degraded, not silent).
+
+### Reconcile an adopted/drifted host to the cloud-init baseline
+The prod host was hand-built and is *adopted* by Pulumi (V2_NOTES §2), so
+**cloud-init never ran on it** — the sudoers drop-in + egress/backup units that a
+fresh box gets can be missing or stale. `infra/host/reconcile-host-config.sh`
+reinstalls that baseline **idempotently**. Run it once on the box (and any time
+the `EGRESS-REAPPLY-FAILED` warning fires):
+
+```
+ssh ubuntu@98.91.67.226 'sudo bash /home/hh/hh-assistant/infra/host/reconcile-host-config.sh'
+```
+
+It validates + installs `/etc/sudoers.d/hh-ops`, installs the egress + backup
+systemd units, `daemon-reload`s, enables the timers, and applies
+`hh-egress.service`. It mirrors the host-config block in
+`infra/pulumi/cloud-init/user-data.yaml.tmpl` (keep the two in sync).

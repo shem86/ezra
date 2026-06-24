@@ -247,6 +247,27 @@ allowlist). Apply to live prod is still pending as a deliberate, careful step
   connectivity): do it with AWS Console / Session-Manager access available as a
   fallback, and ideally validate on a §2 create-from-zero (`scratch`) env first.
 
+- **✅ Done (2026-06-24) — egress re-apply is no longer silent + adopted-host
+  reconcile.** The v2.2.0/v2.2.1 deploys exposed a real gap: after a network
+  recreate (the bridge-name pin), `on-host-deploy.sh` re-applies the host nftables
+  allowlist via `sudo systemctl start hh-egress.service`, but that runs as `hh`
+  and needs the `sudoers-hh-ops` NOPASSWD drop-in — which **cloud-init installs
+  only on a *fresh* box**. The prod host is **adopted** (§2), never ran cloud-init,
+  so the drop-in was missing → the sudo was denied → the firewall stayed unbound:
+  **fail-OPEN egress**, surfaced only as a soft "note". Two fixes:
+  - **Hardening:** `reapply_egress()` in `on-host-deploy.sh` now uses `sudo -n`
+    (fails fast, no hang) and on denial emits a structured `EGRESS-REAPPLY-FAILED`
+    marker + the one-line fix; `deploy.yml` greps the SSM output and raises a
+    GitHub `::warning::` (the app is healthy so the deploy still succeeds —
+    **degraded, never silent**).
+  - **Reconcile:** `infra/host/reconcile-host-config.sh` reproduces the cloud-init
+    host-config baseline (sudoers drop-in + egress/backup units + enable/apply)
+    **idempotently** for an adopted/drifted host. Run once on prod
+    (`ssh ubuntu@<host> 'sudo bash …/reconcile-host-config.sh'`) and the deploy's
+    auto re-apply works thereafter. It mirrors the cloud-init block (cross-noted
+    in both); a future cleanup can DRY cloud-init against it once a `scratch`
+    re-validation is run (the adopted prod is unaffected by that refactor).
+
 ## 6. Backups — ✅ automated in-repo (host timer-enable is the one operator step)
 
 The pipeline (PITR base + continuous WAL, encrypted to S3, restore + drill)
