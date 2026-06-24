@@ -1,6 +1,7 @@
 # Spec: Untrusted-content boundary (model-layer data/instruction separation)
 
-**Date:** 2026-06-24 · **Status:** Draft (awaiting ratification) · **Owns:**
+**Date:** 2026-06-24 · **Status:** Accepted — Phase 0 shipped + eval-ratified
+(2026-06-24) · **Owns:**
 the V2_NOTES §12 prompt-injection + memory-poisoning workstream · **Design of
 record:** `docs/adr-0005-untrusted-content-boundary.md` (read it first — this
 spec is the build-level detail under that decision).

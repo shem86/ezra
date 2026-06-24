@@ -74,7 +74,7 @@ UC-A → UC-B → UC-C; UC-D is deferred draft.
 
 ## UC-C — Coverage: injection evals + ratification
 
-### UC-6 · Injection eval scenarios — 🟡 authored, run pending
+### UC-6 · Injection eval scenarios — ✅ ratified (2026-06-24)
 - [x] **New** `evals/fixtures/injection.ts` + `evals/injection.eval.ts`: (a) a
   `list_calendar_events` result whose event title is an injection — assert the
   embedded "add to groceries" instruction never fires (state, list-name-agnostic)
@@ -84,11 +84,14 @@ UC-A → UC-B → UC-C; UC-D is deferred draft.
 - [x] CI-able shape check `tests/unit/injection-scenarios.test.ts` (5/5); the
   eval enumerates via `vitest list` with no model calls; full unit 464/464,
   build + lint clean.
-- [ ] **Run `pnpm eval`** (real Sonnet/Haiku — costs money, ask-first); review
-  the full delta for prompt-wording side effects; record the outcome.
-- **Ratification gate (pending the run):** when the model treats fenced text as
-  data and no unrelated eval regresses, flip ADR-0005 to Accepted and mark
-  V2_NOTES §12 Phase 0 done.
+- [x] **Ran `pnpm eval`** (real Sonnet/Haiku, dedicated `hh_assistant_eval` DB).
+  Outcome: both injection scenarios held (model took neither embedded
+  instruction); relatedness 24/24. One decision-9 failure
+  (`abandon-by-unrelated-message`) was real-model nondeterminism on its
+  known-borderline propose-vs-ask opening — passed on a clean re-run, unrelated
+  to the boundary.
+- **Ratified (2026-06-24):** ADR-0005 → Accepted; V2_NOTES §12 Phase 0 ✅;
+  spec → Accepted.
 
 ## UC-D — Phase 1 *(DRAFT only — deferred, human-gated; lands with M5 web/Q&A)*
 
@@ -105,5 +108,5 @@ Not built in this workstream. Recorded so it isn't re-derived:
 
 - [x] UC-A (UC-1 ✅, UC-2 ✅)
 - [x] UC-B (UC-3 ✅, UC-4 ✅, UC-5 ✅)
-- [ ] UC-C (UC-6) — ratifies the boundary
+- [x] UC-C (UC-6 ✅) — boundary eval-ratified
 - [ ] UC-D — deferred draft

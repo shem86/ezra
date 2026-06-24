@@ -25,17 +25,18 @@ section below; this table is the index.
 | 6 | Backups automation (initdb bake + scheduled base + freshness) | ⏳ open — deferred (prod-touching DB) |
 | 9 | Footguns burned in v1 | 📌 reference |
 | 10 | Going public (secret/PII scrub, LICENSE) | ⏳ gate — evaluate before flipping |
-| 12 | AI / model-layer guardrails | 🟡 spend limit ✅ set; untrusted-content boundary designed (ADR-0005, Proposed) — Phase 0 impl pending |
+| 12 | AI / model-layer guardrails | 🟢 spend limit ✅ set; untrusted-content boundary Phase 0 ✅ shipped + eval-ratified (ADR-0005 Accepted) — Phase 1 deferred to M5 |
 
 **What's next, ranked:**
 
 1. **§12 — set the Anthropic Console monthly spend limit** (dedicated
    workspace + key). Zero code, biggest risk-reduction-per-effort; the one
    "do this first" item.
-2. **§12 — data/instruction + memory-poisoning boundary.** Design done:
-   `docs/adr-0005-untrusted-content-boundary.md` (Proposed). Calendar already
-   shipped, so Phase 0 (fence calendar/recall/facts output + prompt rule) is a
-   retrofit, ready to implement on ratification.
+2. **§12 — data/instruction + memory-poisoning boundary.** ✅ Phase 0 shipped +
+   eval-ratified (`docs/adr-0005-untrusted-content-boundary.md`, Accepted):
+   fence-at-tool on calendar/recall/facts + the system-prompt rule; injection
+   evals hold. Phase 1 (nonce marker, web/Q&A, forwarded-message provenance)
+   deferred to M5.
 3. **§3 — move app `.env` onto SSM**, now that §2's Pulumi manages the host
    identity and the §1 CD already self-fetches the GHCR PAT from SSM.
 4. **§6 — bake replication into initdb + schedule base backups + surface
@@ -342,24 +343,23 @@ trajectory that changes it.
     a rounds-only counter would miss the "runaway compaction" case it is meant to
     catch. `callModel` (and those sites) must return usage in journaled output
     (today usage only escapes via the non-durable `onUsage` tracer tap).
-- **No prompt-injection / untrusted-content fencing → design in
-  `docs/adr-0005-untrusted-content-boundary.md` (Proposed, 2026-06-23).**
-  WhatsApp message text, recalled history, semantic-memory hits, and the digest
-  all reach the model as authoritative — no provenance separation, no "this is
-  data, not instructions" boundary anywhere. **Calendar already shipped
-  (ADR-0004), so the "design before calendar lands" window has closed —
-  `list_calendar_events` already surfaces third-party event text; this is now a
-  retrofit, not a pre-build.** ADR-0005 proposes one canonical fence helper +
-  a stable system-prompt data/instruction rule, applied at the
-  point-of-provenance tools (calendar, recall, facts) in Phase 0, with web/Q&A
-  fencing + forwarded-message provenance in Phase 1. Treat with memory-poisoning
-  as one workstream (below).
-- **Memory-poisoning is unguarded** (folded into ADR-0005). `set_fact` writes
-  flow back into later turns via `get_fact`/`recall` and the digest, with no
-  validation on the read path — a crafted fact value persists and re-enters
-  context (a self-injection vector). ADR-0005 Phase 0 fences `get_fact` and
-  `recall_history` output as untrusted; same trust caveat and "gets worse as the
-  surface grows" trajectory as the injection gap.
+- **Prompt-injection / untrusted-content fencing → ✅ Phase 0 shipped
+  (`docs/adr-0005-untrusted-content-boundary.md`, Accepted 2026-06-24).** The
+  gap: WhatsApp message text, recalled history, semantic-memory hits, and the
+  digest all reached the model as authoritative, with no "this is data, not
+  instructions" boundary. **Calendar had already shipped (ADR-0004), so this was
+  a retrofit, not a pre-build.** Phase 0 added one canonical fence helper
+  (`src/agent/untrusted.ts`) + a stable system-prompt data/instruction rule,
+  applied at the point-of-provenance tools (calendar, recall, facts); an
+  injection eval proved the model treats fenced third-party text as data. Phase 1
+  (per-turn nonce marker, web/Q&A fencing, forwarded-message provenance) is
+  deferred to M5. One workstream with memory-poisoning (below).
+- **Memory-poisoning → ✅ closed by ADR-0005 Phase 0.** `set_fact` writes flowed
+  back into later turns via `get_fact`/`recall` with no validation on the read
+  path — a crafted value re-entering context (self-injection). Phase 0 fences
+  `get_fact` and `recall_history` output as untrusted, and the poisoned-fact
+  injection eval holds. Same "gets worse as the surface grows" trajectory as the
+  injection gap — Phase 1 covers the growth.
 - **No output moderation before send.** Nothing inspects the assistant's text
   between the model and WhatsApp. Acceptable for a trusted group — flagged only
   to record that the count is zero, not minimal.

@@ -1,8 +1,18 @@
 # ADR-0005: untrusted-content boundary (data/instruction separation)
 
-**Date:** 2026-06-23 · **Status:** Proposed · **Scope:** V2_NOTES §12
-(prompt-injection + memory-poisoning gaps), `src/agent` prompt + render path,
-the third-party-content tools (`calendar`, `recall`, `facts`)
+**Date:** 2026-06-23 · **Status:** Accepted (Phase 0 shipped + eval-ratified
+2026-06-24) · **Scope:** V2_NOTES §12 (prompt-injection + memory-poisoning
+gaps), `src/agent` prompt + render path, the third-party-content tools
+(`calendar`, `recall`, `facts`)
+
+> **Ratification (2026-06-24).** Phase 0 built (UC-1..UC-6, fence-at-tool +
+> fixed marker). `pnpm eval` against the real composition: both injection
+> scenarios held — the model treated a fenced calendar event title and a fenced
+> poisoned fact value as data, taking neither embedded instruction; relatedness
+> 24/24. The only decision-9 failure (`abandon-by-unrelated-message`) was
+> real-model nondeterminism on its known-borderline propose-vs-ask opening —
+> passed on a clean re-run, unrelated to the boundary. Phase 1 (nonce marker,
+> web/Q&A, forwarded-message provenance) remains deferred to M5.
 
 ## Context
 
