@@ -14,6 +14,7 @@ import {
   stableSystemPrompt,
   type PendingActionDigestEntry,
 } from '../../src/agent/prompts.js';
+import { UNTRUSTED_OPEN, UNTRUSTED_CLOSE } from '../../src/agent/untrusted.js';
 
 const entry = (overrides: Partial<PendingActionDigestEntry> = {}): PendingActionDigestEntry => ({
   actionId: 'act-conv-1-tu_9',
@@ -281,5 +282,24 @@ describe('makeProductionSystemPrompt (T42)', () => {
   it('leaves stableSystemPrompt as the dev prefix, byte-stable', () => {
     expect(stableSystemPrompt.startsWith('You are the household assistant')).toBe(true);
     expect(stableSystemPrompt).toContain('like "wife@wa: the message"');
+  });
+});
+
+describe('untrusted-content boundary rule (UC-2, ADR-0005)', () => {
+  const memberJids = { husband: ['15550001111@s.whatsapp.net'], wife: ['15550002222@s.whatsapp.net'] };
+
+  it('both prefixes carry the data/instruction rule, naming the UC-1 fence markers', () => {
+    for (const prompt of [stableSystemPrompt, makeProductionSystemPrompt({ memberJids })]) {
+      // The rule must name the exact literals fenceUntrusted emits, or the
+      // model is told to trust a marker the tools never produce.
+      expect(prompt).toContain(UNTRUSTED_OPEN);
+      expect(prompt).toContain(UNTRUSTED_CLOSE);
+      expect(prompt).toMatch(/never (follow|obey)/i);
+      expect(prompt).toMatch(/\bdata\b|information/i);
+    }
+  });
+
+  it('keeps the production prefix byte-stable after adding the rule (cache discipline)', () => {
+    expect(makeProductionSystemPrompt({ memberJids })).toBe(makeProductionSystemPrompt({ memberJids }));
   });
 });
