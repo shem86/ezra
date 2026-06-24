@@ -192,12 +192,25 @@ const backofficeEnvSchema = z.object({
   // Path to the built SPA (backoffice/dist). In the prod image this is an
   // absolute path baked by the Dockerfile; locally it is repo-relative.
   BACKOFFICE_DIST_DIR: z.string().min(1).default('backoffice/dist'),
+  // The SELECT-only role's connection string (BO-17 migration creates the
+  // role). DISTINCT from the spine's DATABASE_URL: the console must never hold
+  // a write-capable handle. Kept separate so a misconfig fails closed (no
+  // silent fallback to the app's read/write URL).
+  BACKOFFICE_DATABASE_URL: z
+    .string()
+    .min(1, 'required — SELECT-only postgres connection string for the read-only console'),
+  // Costs-screen monthly ceiling for the budget gauge (display only — the real
+  // spend backstop is provider-side, V2 §12). $50 default (Phase 0).
+  BACKOFFICE_MONTHLY_BUDGET_USD: z.coerce.number().positive().default(50),
 });
 
 export interface BackofficeConfig {
   readonly token: string;
   readonly port: number;
   readonly distDir: string;
+  /** SELECT-only role connection string — never the spine's read/write URL. */
+  readonly databaseUrl: string;
+  readonly monthlyBudgetUsd: number;
 }
 
 export function loadBackofficeConfig(
@@ -211,6 +224,8 @@ export function loadBackofficeConfig(
     token: parsed.data.BACKOFFICE_TOKEN,
     port: parsed.data.BACKOFFICE_PORT,
     distDir: parsed.data.BACKOFFICE_DIST_DIR,
+    databaseUrl: parsed.data.BACKOFFICE_DATABASE_URL,
+    monthlyBudgetUsd: parsed.data.BACKOFFICE_MONTHLY_BUDGET_USD,
   };
 }
 
