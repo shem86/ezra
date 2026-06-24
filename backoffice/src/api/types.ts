@@ -44,3 +44,21 @@ export interface CostsResponse {
   tokenSplit: TokenSplitSlice[];
   byUsage: UsageTypeRow[];
 }
+
+// --- Logs (DBOS journal + Langfuse enrichment) ------------------------------
+export interface TurnRow {
+  id: string;
+  ts: string;
+  level: 'info' | 'warn' | 'error';
+  st: string;
+  ms: number | null;
+  tool: string | null;
+  tier: string | null;
+  tokens: number | null;
+  cache: number | null;
+  cost: number | null;
+}
+export interface LogsResponse {
+  turns: TurnRow[];
+  enriched: boolean;
+}

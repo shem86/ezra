@@ -9,6 +9,7 @@ import { loadBackofficeConfig } from '../ops/config.js';
 import { createApiRouter } from './api.js';
 import { makeRateLimiter } from './auth.js';
 import { makeCostClient } from './cost.js';
+import { makeTurnEnricher } from './journal.js';
 import { createBackofficeServer } from './server.js';
 
 function main(): void {
@@ -27,9 +28,15 @@ function main(): void {
     secretKey: config.langfuse.secretKey,
     budgetUsd: config.monthlyBudgetUsd,
   });
+  const enricher = makeTurnEnricher({
+    baseUrl: config.langfuse.baseUrl,
+    publicKey: config.langfuse.publicKey,
+    secretKey: config.langfuse.secretKey,
+  });
   const api = createApiRouter({
     db: { query: (sql, params) => pool.query(sql, params === undefined ? undefined : [...params]) },
     cost,
+    enricher,
   });
 
   const server = createBackofficeServer({

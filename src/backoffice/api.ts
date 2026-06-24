@@ -6,12 +6,15 @@
 import type { ApiResponse, ApiRouter } from './server.js';
 import { isTableKey, queryTable, tableCatalogue, type Queryable } from './queries.js';
 import type { CostClient } from './cost.js';
+import { getLogs, type TurnEnricher } from './journal.js';
 
 export interface ApiDeps {
   /** SELECT-only pool in production (BACKOFFICE_DATABASE_URL → SELECT-only role). */
   readonly db: Queryable;
   /** Langfuse-derived costs (Costs screen); absent until BO-9 wires it. */
   readonly cost?: CostClient | undefined;
+  /** Langfuse per-turn enrichment (Logs screen); degrades to `—` if absent. */
+  readonly enricher?: TurnEnricher | undefined;
 }
 
 function clampLimit(raw: string | null): number | undefined {
@@ -34,6 +37,13 @@ export function createApiRouter(deps: ApiDeps): ApiRouter {
       if (path === '/api/costs') {
         if (deps.cost === undefined) return { status: 503, body: { error: 'costs unavailable' } };
         return { status: 200, body: await deps.cost.getCosts() };
+      }
+
+      // GET /api/logs → durable turn list (DBOS journal) + Langfuse enrichment.
+      if (path === '/api/logs') {
+        const limit = clampLimit(url.searchParams.get('limit'));
+        const logs = await getLogs(deps.db, deps.enricher, limit === undefined ? {} : { limit });
+        return { status: 200, body: logs };
       }
 
       // GET /api/db/:table → one table's rows (paged via ?limit).
