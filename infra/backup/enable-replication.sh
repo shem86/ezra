@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
-# infra/backup/enable-replication.sh — the one open T45 wiring item: let the
-# backup sidecar stream WAL from the PRODUCTION postgres.
+# infra/backup/enable-replication.sh — the T45 wiring item: let the backup
+# sidecar stream WAL from the PRODUCTION postgres.
+#
+# SUPERSEDED FOR FRESH BOXES (V2_NOTES §6): a rebuild / create-from-zero now bakes
+# this into initdb via infra/backup/initdb-replication.sh (mounted into the
+# postgres service), which also creates a least-priv `hh_backup` role. This
+# script stays for the EXISTING prod box (whose data dir was already initialized,
+# so the initdb script never runs there) and for a reattached pgdata volume —
+# both cases where initdb is skipped. Idempotent, so it is safe belt-and-braces.
 #
 # The stock pgvector/postgres image already accepts normal SQL connections from
 # the internal network (`host all all all scram-sha-256` — that is how ezra and

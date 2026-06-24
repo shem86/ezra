@@ -73,11 +73,20 @@ services:
       POSTGRES_USER: hh
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: hh_assistant_prod
+      # Backup sidecar's replication role password (V2_NOTES §6). Defaults to
+      # POSTGRES_PASSWORD inside the init script when unset, so a fresh box needs
+      # no extra secret. Read ONLY by the initdb script below, ONLY at first init.
+      BACKUP_ROLE_PASSWORD: ${BACKUP_ROLE_PASSWORD:-}
     security_opt:
       - no-new-privileges:true
     # No `ports:` — the DB is never exposed to the host or the internet.
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # Bakes the replication role + pg_hba line into a FRESH cluster on first
+      # init (V2_NOTES §6) — runs ONLY when pgdata is empty, so it helps rebuilds
+      # / create-from-zero and never mutates the live prod data dir. The existing
+      # prod box was wired by enable-replication.sh (T45) and is unaffected.
+      - ./backup/initdb-replication.sh:/docker-entrypoint-initdb.d/10-replication.sh:ro
     networks:
       - internal
     healthcheck:
