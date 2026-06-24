@@ -16,13 +16,13 @@ section below; this table is the index.
 |---|---|---|
 | 1 | CI/CD pipeline (build→GHCR→release→SSM deploy) | ✅ shipped — only README badge automation open (§10 dissolves it) |
 | 2 | IaC (Pulumi TS) | ✅ shipped — prod adopted (0 replacements) + create-from-zero proven |
-| 4 | Compose ergonomics (`Makefile`) | ✅ shipped — host-Node removal still open |
+| 4 | Compose ergonomics (`Makefile`) | ✅ shipped — host-Node removal done (firewall reads a committed, drift-guarded artifact) |
 | 5 | Egress firewall (units + static bridge pin) | ✅ shipped — cloud-layer SG egress now authored in Pulumi (apply pending — deliberate prod step) |
 | 7 | Pairing (`make pair`) | ✅ shipped |
 | 8 | CI verification smokes (image + config-load) | ✅ shipped |
 | 11 | Egress refresh split (no fail-open window) | ✅ shipped |
 | 3 | App secrets → SSM/SOPS | ⏳ open — deferred (prod-touching) |
-| 6 | Backups automation (initdb bake + scheduled base + freshness) | ⏳ open — deferred (prod-touching DB) |
+| 6 | Backups automation (initdb bake + scheduled base + freshness) | ✅ shipped in-repo — host enable of the timers is the one operator step |
 | 9 | Footguns burned in v1 | 📌 reference |
 | 10 | Going public (secret/PII scrub, LICENSE) | ⏳ gate — evaluate before flipping |
 | 12 | AI / model-layer guardrails | 🟢 spend limit ✅ set; untrusted-content boundary Phase 0 ✅ shipped + eval-ratified (ADR-0005 Accepted) — Phase 1 deferred to M5 |
@@ -39,11 +39,15 @@ section below; this table is the index.
    deferred to M5.
 3. **§3 — move app `.env` onto SSM**, now that §2's Pulumi manages the host
    identity and the §1 CD already self-fetches the GHCR PAT from SSM.
-4. **§6 — bake replication into initdb + schedule base backups + surface
-   freshness** so continuous WAL survives a rebuild with no hand-run step.
-5. **§4 / §5 — drop host Node** (render the allowlist at image-build). The
-   **cloud-layer SG egress** defense-in-depth is now authored in §2's Pulumi SG
-   (443/80/53/123); applying it to live prod is the remaining deliberate step.
+4. ~~**§6 — bake replication into initdb + schedule base backups + surface
+   freshness**~~ ✅ shipped in-repo (initdb bake + `hh_backup` role + base/
+   freshness timers + dead-man ping); the one operator step left is enabling the
+   timers on the live host (the PR doesn't touch prod).
+5. ~~**§4 — drop host Node**~~ ✅ done: `nftables.sh` reads the committed,
+   drift-guarded `infra/egress/allowlist.generated.txt`, so the box needs no
+   Node (cloud-init no longer installs it). **§5 cloud-layer SG egress**
+   defense-in-depth is now authored in §2's Pulumi SG (443/80/53/123); applying
+   it to live prod is the remaining deliberate step.
 6. **§10 — the going-public gate** (history secret scan, PII audit, LICENSE);
    flipping dissolves the §1 badge workarounds and unlocks branch protection.
 
@@ -183,12 +187,20 @@ allowlist). Apply to live prod is still pending as a deliberate, careful step
   dissolved that friction (`pnpm release vX.Y.Z` → CI image → release → SSM
   deploy), so the old `make deploy` idea is obsolete. Chose `Makefile` over
   `just` to avoid a new host tool (zero-dependency; `make` is universal).
-- **Still open — Node on the host only to render the egress allowlist** is
-  awkward (the app is containerized). `nftables.sh` shells out to host `node
-  render-allowlist.ts`. v2: render the allowlist to a static artifact at
-  image-build time, or run the refresh as a tiny sidecar — drop the host Node
-  dependency entirely. *(Deferred: firewall-adjacent infra, needs host
-  coordination; folds into the §5 systemd workstream.)*
+- **Done — host Node removed from the egress path.** `nftables.sh` no longer
+  shells out to host `node render-allowlist.ts`; it reads a **committed static
+  artifact** `infra/egress/allowlist.generated.txt` (apex hosts + a `#`-comment
+  header the script skips). `render-allowlist.ts` stays the source-of-truth
+  *generator*, now run at author/CI time (`--write` regenerates, `--check`
+  gates), and a unit drift test (`tests/unit/egress-allowlist-artifact.test.ts`)
+  fails CI if the committed bytes diverge from `src/ops/egress-allowlist.ts` —
+  the same anti-drift discipline as the v1 egress test. Chose the committed
+  artifact over (a) image-build-only baking — the firewall is a **host**
+  process, so a file inside the container image isn't where it can read it; or
+  (b) a refresh sidecar — more moving parts for no benefit, and the CD checkout
+  already lands the repo (hence the artifact) on the box. Cloud-init
+  (`user-data.yaml.tmpl`) no longer installs Node 22 for egress; every remaining
+  `node` invocation on the host runs *inside* the container.
 
 ## 5. Egress firewall automation — ✅ units + static bridge pin shipped (SG egress authored in Pulumi; apply pending)
 
@@ -234,19 +246,46 @@ allowlist). Apply to live prod is still pending as a deliberate, careful step
   connectivity): do it with AWS Console / Session-Manager access available as a
   fallback, and ideally validate on a §2 create-from-zero (`scratch`) env first.
 
-## 6. Backups — close the open wiring (manual script exists; automation open)
+## 6. Backups — ✅ automated in-repo (host timer-enable is the one operator step)
 
-- The backup sidecar needs a replication `pg_hba` line; the stock pgvector image
-  only trusts replication from localhost (the T17 open item).
-  `infra/backup/enable-replication.sh` exists and closes this **as an idempotent
-  manual post-step** (appends `host replication hh samenet scram-sha-256`,
-  reloads). Still open: bake the line (+ ideally a least-priv `hh_backup
-  REPLICATION` role rather than reusing the `hh` superuser) into a Postgres init
-  script (`/docker-entrypoint-initdb.d/`) so continuous WAL works on **first
-  boot**, not as a hand-run step after every rebuild.
-- **Still open:** schedule base backups declaratively (host timer /
-  compose-managed cron), and surface backup-freshness to the monitoring channel.
-  *(Deferred: prod-touching DB infra.)*
+The pipeline (PITR base + continuous WAL, encrypted to S3, restore + drill)
+already existed (T17/T45, `infra/backup/`). This pass closed the three open
+automation items so continuous WAL survives a rebuild with **no hand-run step**.
+All artifacts are in-repo; nothing here touched the live host.
+
+- **✅ Replication baked into initdb.** `infra/backup/initdb-replication.sh` is
+  mounted into the postgres service (`docker-compose.prod.yml`, into
+  `/docker-entrypoint-initdb.d/`). On a FRESH data dir it creates a
+  **least-privilege `hh_backup` role** (`REPLICATION LOGIN`, *not* the `hh`
+  superuser) and appends `host replication hh_backup samenet scram-sha-256` to
+  `pg_hba.conf`, so a rebuild / create-from-zero box streams WAL on first boot —
+  no `enable-replication.sh` post-step. **It runs ONLY on an empty PGDATA** (the
+  entrypoint's initdb contract), so it helps rebuilds and **cannot** mutate the
+  already-initialized live prod data dir — that box stays wired for `hh` by the
+  T45 `enable-replication.sh` (kept, idempotent, for the existing box +
+  reattached volumes). The role password defaults to `POSTGRES_PASSWORD` (no new
+  secret; `POSTGRES_PASSWORD` is never regenerated — §3/§9 footgun respected),
+  overridable via `BACKUP_ROLE_PASSWORD`. The sidecar's role is `BACKUP_PGUSER`
+  (defaults to `hh` for the existing box; set `hh_backup` on a rebuilt one).
+- **✅ Base backups scheduled declaratively.** `hh-backup-base.{service,timer}`
+  (daily 03:00 UTC) mirrors the egress systemd-unit pattern and replaces the
+  hand-installed crontab line — runs `docker compose … run --rm backup
+  backup.sh base` as the `hh` operator via the docker group (no sudo, so no
+  sudoers entry needed).
+- **✅ Freshness surfaced to the monitoring channel.** `infra/backup/freshness.sh`
+  reads the latest base age from S3 and pings a **second** healthchecks.io
+  dead-man — `BACKUP_FRESHNESS_PING_URL` (distinct from the process
+  `DEADMAN_PING_URL`): `<url>` when within `BACKUP_MAX_AGE_HOURS` (default 30h),
+  `<url>/fail` when stale/missing. `hh-backup-freshness.{service,timer}` (hourly)
+  drives it inside the sidecar image; the external check alerts when the fresh
+  ping stops — catching a stalled base cron the WAL stream can't.
+- **Cloud-init (create-from-zero)** installs + enables both timers and starts the
+  sidecar on a fresh box (`user-data.yaml.tmpl`).
+- **Operator step (deliberately not done — prod-touching):** on the existing
+  live host, install + enable the two timers once, set `BACKUP_FRESHNESS_PING_URL`
+  in `.env` (create the hc-ping check first), retire the old crontab line; the
+  initdb bake + `hh_backup` migration land on the next full rebuild. Steps in
+  `infra/backup/README.md` "Automated wiring".
 
 ## 7. Pairing / session lifecycle — ✅ BUILT (`make pair`)
 
