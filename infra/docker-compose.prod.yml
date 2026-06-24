@@ -23,8 +23,9 @@
 #    it sits on an internal-only network with no route to the internet.
 
 # Fixed project name so volume/network names are stable across invocations
-# (otherwise they'd take the compose file's parent dir, `infra_*`) and match
-# the `hh-assistant_egress` bridge the nftables deploy step looks up.
+# (otherwise they'd take the compose file's parent dir, `infra_*`). The egress
+# network additionally pins its kernel bridge interface name (see `networks:`
+# below) so the nftables allowlist matches a STATIC iifname.
 name: hh-assistant
 
 services:
@@ -88,7 +89,16 @@ services:
 networks:
   internal:
     internal: true # no route to the internet; app⇄postgres only
-  egress: {}
+  egress:
+    driver: bridge
+    driver_opts:
+      # Pin the kernel bridge interface name so the host nftables allowlist
+      # (infra/egress/nftables.sh) matches a STATIC iifname instead of
+      # re-deriving br-<network-id> via `docker network inspect` at every
+      # apply/refresh (V2_NOTES §5). Must be ≤15 chars (Linux IFNAMSIZ).
+      # Takes effect when the network is (re)created — i.e. the next
+      # `compose down && up`, not on a running stack.
+      com.docker.network.bridge.name: hh-egress0
 
 volumes:
   wa-session:

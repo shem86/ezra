@@ -11,6 +11,7 @@ Wants=hh-egress.service
 
 [Service]
 Type=oneshot
-# Same bridge re-derivation as the apply unit (the name tracks the docker
-# network id), then `refresh` instead of `apply`.
-ExecStart=/usr/bin/env bash -c 'EG=br-$(docker network inspect hh-assistant_egress -f "{{slice .Id 0 12}}") && EGRESS_IFACE="$EG" bash /home/hh/hh-assistant/infra/egress/nftables.sh refresh'
+# Same STATIC bridge name as the apply unit (pinned in docker-compose.prod.yml,
+# V2_NOTES §5), then `refresh` instead of `apply`.
+Environment=EGRESS_IFACE=hh-egress0
+ExecStart=/usr/bin/env bash /home/hh/hh-assistant/infra/egress/nftables.sh refresh
