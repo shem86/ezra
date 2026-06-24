@@ -16,12 +16,12 @@ section below; this table is the index.
 |---|---|---|
 | 1 | CI/CD pipeline (build→GHCR→release→SSM deploy) | ✅ shipped — only README badge automation open (§10 dissolves it) |
 | 2 | IaC (Pulumi TS) | ✅ shipped — prod adopted (0 replacements) + create-from-zero proven |
+| 3 | App secrets → SSM/SOPS | ✅ shipped — both paths wired + prod param seeded (2026-06-24); only the next-deploy log check remains |
 | 4 | Compose ergonomics (`Makefile`) | ✅ shipped — host-Node removal still open |
 | 5 | Egress firewall (units + static bridge pin) | ✅ shipped — cloud-layer SG tightening open |
 | 7 | Pairing (`make pair`) | ✅ shipped |
 | 8 | CI verification smokes (image + config-load) | ✅ shipped |
 | 11 | Egress refresh split (no fail-open window) | ✅ shipped |
-| 3 | App secrets → SSM/SOPS | ⏳ open — deferred (prod-touching) |
 | 6 | Backups automation (initdb bake + scheduled base + freshness) | ⏳ open — deferred (prod-touching DB) |
 | 9 | Footguns burned in v1 | 📌 reference |
 | 10 | Going public (secret/PII scrub, LICENSE) | ⏳ gate — evaluate before flipping |
@@ -37,14 +37,16 @@ section below; this table is the index.
    fence-at-tool on calendar/recall/facts + the system-prompt rule; injection
    evals hold. Phase 1 (nonce marker, web/Q&A, forwarded-message provenance)
    deferred to M5.
-3. **§3 — move app `.env` onto SSM**, now that §2's Pulumi manages the host
-   identity and the §1 CD already self-fetches the GHCR PAT from SSM.
-4. **§6 — bake replication into initdb + schedule base backups + surface
+3. **§6 — bake replication into initdb + schedule base backups + surface
    freshness** so continuous WAL survives a rebuild with no hand-run step.
-5. **§4 / §5 — drop host Node** (render the allowlist at image-build) and add
+4. **§4 / §5 — drop host Node** (render the allowlist at image-build) and add
    **cloud-layer SG egress** as defense-in-depth (lands with §2 Pulumi).
-6. **§10 — the going-public gate** (history secret scan, PII audit, LICENSE);
+5. **§10 — the going-public gate** (history secret scan, PII audit, LICENSE);
    flipping dissolves the §1 badge workarounds and unlocks branch protection.
+
+*(§3 closed 2026-06-24 — `.env`-from-SSM wired on both paths and the prod
+param seeded; the only remainder is a one-line check that the next release's
+deploy log shows `secrets: .env materialized from ssm`, not a build task.)*
 
 ## 1. CI/CD — ✅ BUILT (badge automation still open)
 
