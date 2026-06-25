@@ -112,5 +112,16 @@ jobs:
           done
 
           echo "----- on-host deploy output -----"
-          aws ssm get-command-invocation --command-id "$CID" --instance-id "$INSTANCE_ID" \
-            --region "$AWS_REGION" --query StandardOutputContent --output text
+          OUT=$(aws ssm get-command-invocation --command-id "$CID" --instance-id "$INSTANCE_ID" \
+            --region "$AWS_REGION" --query StandardOutputContent --output text)
+          echo "$OUT"
+
+          # Surface a fail-OPEN egress as a visible warning. on-host-deploy.sh
+          # re-applies the host firewall after a network recreate; if that sudo
+          # is denied (e.g. the sudoers drop-in is missing on an adopted host —
+          # V2_NOTES §2/§5) the box is left fail-open. The app is healthy so the
+          # deploy still succeeds, but this must never be silent. The runner (not
+          # the SSM shell) emits the annotation, so ::warning:: actually renders.
+          if printf '%s' "$OUT" | grep -q 'EGRESS-REAPPLY-FAILED'; then
+            echo "::warning title=Egress fail-open::Host egress firewall was NOT re-applied after a network recreate — fail-OPEN until fixed. Run 'sudo bash infra/host/reconcile-host-config.sh' on the host (installs the missing sudoers drop-in), then redeploy."
+          fi

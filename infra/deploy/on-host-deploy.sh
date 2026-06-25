@@ -68,6 +68,26 @@ compose_full() {
 
 log() { printf '[deploy] %s\n' "$*"; }
 
+# Re-apply the host egress firewall to the (possibly recreated) docker bridge.
+# This script runs as the `hh` deploy user (deploy.yml: `sudo -u hh … bash`), so
+# the re-apply needs the NOPASSWD sudoers right from infra/host/sudoers-hh-ops.
+# If that drop-in is missing — e.g. the adopted prod host that never ran
+# cloud-init (V2_NOTES §2) — the sudo is DENIED and the firewall stays unbound to
+# the new bridge: FAIL-OPEN egress. That must never be silent: emit a structured
+# marker the CD workflow (deploy.yml) annotates as a warning, with the one-line
+# fix (run the reconcile script). `sudo -n` fails fast instead of hanging on a
+# password prompt under the non-interactive SSM shell.
+EGRESS_DEGRADED=0
+reapply_egress() {
+  if sudo -n systemctl start hh-egress.service 2>/dev/null; then
+    log "egress re-applied to the live bridge (hh-egress.service)"
+  else
+    EGRESS_DEGRADED=1
+    log "EGRESS-REAPPLY-FAILED: 'sudo systemctl start hh-egress.service' was denied/failed — host is FAIL-OPEN on egress until fixed"
+    log "  fix: run 'sudo bash ${REPO_DIR}/infra/host/reconcile-host-config.sh' on the host (installs the missing sudoers drop-in), then redeploy"
+  fi
+}
+
 # --- 0. materialize .env from the secret store (V2_NOTES §3) ------------------
 # Mirrors the cloud-init fetch (infra/pulumi/cloud-init/user-data.yaml.tmpl) so
 # the create path and steady-state CD share one source of truth: secrets live
@@ -157,9 +177,9 @@ if [[ "$NEED_RECREATE" == 1 ]]; then
   EZRA_TAG="$EZRA_TAG" compose_full up -d
   # The egress network now carries its pinned bridge name; re-apply the host
   # nftables allowlist so it matches immediately rather than waiting for the
-  # refresh timer. Best-effort — the hh operator may lack the sudo right.
-  sudo systemctl start hh-egress.service 2>/dev/null \
-    || log "note: run 'sudo systemctl start hh-egress.service' to re-apply egress for the new bridge"
+  # refresh timer. A failure here is a fail-OPEN security regression, not a
+  # cosmetic note — reapply_egress surfaces it loudly (see above).
+  reapply_egress
 else
   # --- 4. migrate-gate: run migrations with the NEW image, before the swap -----
   # `--no-recreate postgres` + `--no-deps`: ensure Postgres is up WITHOUT
@@ -178,7 +198,7 @@ else
     log "in-place swap failed — clean down/up (full stack; named volumes preserved)"
     EZRA_TAG="$EZRA_TAG" compose_full down
     EZRA_TAG="$EZRA_TAG" compose_full up -d
-    sudo systemctl start hh-egress.service 2>/dev/null || true
+    reapply_egress
   fi
 fi
 
@@ -212,6 +232,12 @@ done
 
 if [[ "$ezra_up" == true && "$bo_up" == true ]]; then
   log "healthy: ${EZRA_TAG} spine + backoffice are up (steady-state via the hc-ping dead-man)"
+  # App is up, so the deploy succeeds — but if egress couldn't be re-applied the
+  # host is fail-OPEN and the CD workflow annotates this as a warning. Repeat the
+  # marker at the tail so it's the last thing in the deploy log, not buried.
+  if [[ "$EGRESS_DEGRADED" == 1 ]]; then
+    log "DEGRADED: deploy succeeded but EGRESS-REAPPLY-FAILED — re-apply the firewall (see fix above) ASAP"
+  fi
   exit 0
 fi
 

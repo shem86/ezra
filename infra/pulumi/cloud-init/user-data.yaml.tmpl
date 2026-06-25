@@ -98,6 +98,10 @@ write_files:
       chown -R hh:hh /home/hh
 
       # --- 4. sudoers drop-in + egress systemd unit/timer ----------------------
+      # This host-config block (install here + enable at §6 below) is the BASELINE
+      # a fresh box gets. infra/host/reconcile-host-config.sh reproduces the same
+      # artifact set idempotently for an *adopted*/drifted host that never ran
+      # cloud-init (V2_NOTES §2/§5) — keep the two in sync when adding host units.
       log "installing sudoers drop-in + egress unit/timer"
       install -m 0440 -o root -g root "${REPO_DIR}/infra/host/sudoers-hh-ops" /etc/sudoers.d/hh-ops
       visudo -cf /etc/sudoers.d/hh-ops
