@@ -28,4 +28,11 @@ export default tseslint.config(
     files: ['vite.config.ts', 'eslint.config.js'],
     rules: { 'no-restricted-syntax': 'off' },
   },
+  {
+    // Node ops scripts (the ui-debug script) — Node globals, not the browser.
+    files: ['scripts/**/*.mjs'],
+    languageOptions: {
+      globals: { console: 'readonly', process: 'readonly' },
+    },
+  },
 );
