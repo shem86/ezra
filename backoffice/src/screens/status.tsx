@@ -1,5 +1,6 @@
 // Status — LIVE service probes grouped by area + static reliability edges
 // (recovery-runbook copy). Fetches /api/status (BO-11).
+import { useState } from 'react';
 import { Icon } from '../components/icon';
 import { Badge, Card, Dot } from '../components/primitives';
 import { api, type ApiClient } from '../api/client';
@@ -7,7 +8,9 @@ import { useAsync } from '../api/use-async';
 import type { StatusResponse } from '../api/types';
 
 export function StatusScreen({ client = api }: { client?: ApiClient }): React.JSX.Element {
-  const { data, error, loading } = useAsync<StatusResponse>((signal) => client.status(signal));
+  // Re-run the probes when the refresh button is pressed (useAsync re-loads on key change).
+  const [reload, setReload] = useState(0);
+  const { data, error, loading } = useAsync<StatusResponse>((signal) => client.status(signal), reload);
 
   if (error !== null) {
     return (
@@ -47,7 +50,13 @@ export function StatusScreen({ client = api }: { client?: ApiClient }): React.JS
               Agent live · {data.turnsToday} turns today · avg latency {data.avgLatency}
             </div>
           </div>
-          <button className="iconbtn">
+          <button
+            className="iconbtn"
+            onClick={() => setReload((n) => n + 1)}
+            disabled={loading}
+            aria-label="Refresh probes"
+            title="Refresh probes"
+          >
             <Icon name="refresh" size={16} />
           </button>
         </div>

@@ -67,7 +67,9 @@ function Topbar({ route }: { route: Route }): React.JSX.Element {
         <Badge tone="ok">
           <Dot status="operational" size={7} /> live
         </Badge>
-        <div className="avatar">N</div>
+        {/* The console has no per-operator identity; the avatar carries the Ezra
+            brand mark (matches the sidebar) rather than a stray placeholder. */}
+        <div className="avatar" title="Ezra">ע</div>
       </div>
     </header>
   );

@@ -5,16 +5,36 @@ import type { ReactNode } from 'react';
 import { Icon, type IconName } from '../components/icon';
 import { Badge, BarChart, Card, Dot, SectionTitle } from '../components/primitives';
 import { sColor, tierTone } from '../components/status';
-import { api, type ApiClient } from '../api/client';
+import { api, ApiError, type ApiClient } from '../api/client';
 import { useAsync } from '../api/use-async';
 import type { CostsResponse, LogsResponse, Row, ServiceRow, StatusResponse } from '../api/types';
 import type { Route } from '../routes';
 
+// Each tile/card sources its own endpoint; a section is either loaded or carries
+// the reason it failed, so one bad endpoint degrades a single card — never the
+// whole page (that was the Promise.all bug).
+type Section<T> = { ok: true; value: T } | { ok: false; error: string };
+
 interface OverviewData {
-  costs: CostsResponse;
-  status: StatusResponse;
-  logs: LogsResponse;
-  pending: Row[];
+  costs: Section<CostsResponse>;
+  status: Section<StatusResponse>;
+  logs: Section<LogsResponse>;
+  pending: Section<Row[]>;
+}
+
+function errOf(r: PromiseRejectedResult): string {
+  return r.reason instanceof Error ? r.reason.message : 'failed to load';
+}
+
+function CardError({ title, error }: { title: string; error: string }): React.JSX.Element {
+  return (
+    <Card>
+      <SectionTitle>{title}</SectionTitle>
+      <span style={{ color: 'var(--err)', fontSize: 13 }}>
+        {error === 'unauthorized' ? 'Unauthorized — open with ?token=…' : `Couldn't load: ${error}`}
+      </span>
+    </Card>
+  );
 }
 
 function KpiTile({
@@ -212,13 +232,25 @@ function HealthCard({ services, onOpen }: { services: ServiceRow[]; onOpen: (r: 
 
 export function OverviewScreen({ onOpen, client = api }: { onOpen: (r: Route) => void; client?: ApiClient }): React.JSX.Element {
   const { data, error, loading } = useAsync<OverviewData>(async (signal) => {
-    const [costs, status, logs, pending] = await Promise.all([
+    const [costs, status, logs, pending] = await Promise.allSettled([
       client.costs(signal),
       client.status(signal),
       client.logs(60, signal),
       client.table('pending_actions', 200, signal),
     ]);
-    return { costs, status, logs, pending: pending.rows };
+    // If every section is 401 the whole console is unauthed — surface the single
+    // sign-in prompt instead of four identical per-card errors.
+    const all = [costs, status, logs, pending];
+    if (all.every((r) => r.status === 'rejected' && r.reason instanceof ApiError && r.reason.status === 401)) {
+      throw new ApiError(401, 'unauthorized');
+    }
+    return {
+      costs: costs.status === 'fulfilled' ? { ok: true, value: costs.value } : { ok: false, error: errOf(costs) },
+      status: status.status === 'fulfilled' ? { ok: true, value: status.value } : { ok: false, error: errOf(status) },
+      logs: logs.status === 'fulfilled' ? { ok: true, value: logs.value } : { ok: false, error: errOf(logs) },
+      pending:
+        pending.status === 'fulfilled' ? { ok: true, value: pending.value.rows } : { ok: false, error: errOf(pending) },
+    };
   });
 
   if (error !== null) {
@@ -234,20 +266,25 @@ export function OverviewScreen({ onOpen, client = api }: { onOpen: (r: Route) =>
     return <Card>{loading ? 'Loading overview…' : 'No data.'}</Card>;
   }
 
-  const parked = data.pending.filter((p) => p['status'] === 'pending');
-  const errors = data.logs.turns.filter((t) => t.level === 'error').length;
+  const costs = data.costs.ok ? data.costs.value : null;
+  const status = data.status.ok ? data.status.value : null;
+  const logs = data.logs.ok ? data.logs.value : null;
+  const pending = data.pending.ok ? data.pending.value : null;
+
+  const parked = (pending ?? []).filter((p) => p['status'] === 'pending');
+  const errCount = (logs?.turns ?? []).filter((t) => t.level === 'error').length;
   const tiles: { label: string; value: ReactNode; sub?: ReactNode; tone?: 'amber'; icon?: IconName; go?: Route }[] = [
-    { label: 'Spend (MTD, est.)', value: '$' + data.costs.monthCostUsd.toFixed(2), sub: `of $${data.costs.budgetUsd}`, icon: 'costs' },
-    { label: 'Turns today', value: data.status.turnsToday, sub: `avg ${data.status.avgLatency}`, icon: 'flow' },
-    { label: 'Pending approvals', value: parked.length, sub: 'awaiting', tone: 'amber', icon: 'pause', go: 'database' },
-    { label: 'Errors · recent', value: errors, sub: 'of last 60 turns', icon: 'alert' },
+    { label: 'Spend (MTD, est.)', value: costs ? '$' + costs.monthCostUsd.toFixed(2) : '—', ...(costs ? { sub: `of $${costs.budgetUsd}` } : {}), icon: 'costs' },
+    { label: 'Turns today', value: status ? status.turnsToday : '—', ...(status ? { sub: `avg ${status.avgLatency}` } : {}), icon: 'flow' },
+    { label: 'Pending approvals', value: pending ? parked.length : '—', sub: 'awaiting', tone: 'amber', icon: 'pause', go: 'database' },
+    { label: 'Errors · recent', value: logs ? errCount : '—', sub: 'of last 60 turns', icon: 'alert' },
   ];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr', gap: 18 }}>
-        <SpendCard costs={data.costs} />
-        <ApprovalsCard parked={parked} />
+        {costs ? <SpendCard costs={costs} /> : <CardError title="Spend this month (est.)" error={data.costs.ok ? '' : data.costs.error} />}
+        {pending ? <ApprovalsCard parked={parked} /> : <CardError title="Awaiting approval" error={data.pending.ok ? '' : data.pending.error} />}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12 }}>
         {tiles.map((t) => (
@@ -268,10 +305,14 @@ export function OverviewScreen({ onOpen, client = api }: { onOpen: (r: Route) =>
             <SectionTitle>Recent turns</SectionTitle>
           </div>
           <div style={{ padding: '4px 18px 12px' }}>
-            <ActivityFeed logs={data.logs} onOpen={onOpen} />
+            {logs ? <ActivityFeed logs={logs} onOpen={onOpen} /> : (
+              <span style={{ color: 'var(--err)', fontSize: 13 }}>
+                {data.logs.ok ? '' : data.logs.error === 'unauthorized' ? 'Unauthorized — open with ?token=…' : `Couldn't load: ${data.logs.error}`}
+              </span>
+            )}
           </div>
         </Card>
-        <HealthCard services={data.status.services} onOpen={onOpen} />
+        {status ? <HealthCard services={status.services} onOpen={onOpen} /> : <CardError title="Service health" error={data.status.ok ? '' : data.status.error} />}
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
-import { cleanup, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { StatusScreen } from './status';
 import type { ApiClient } from '../api/client';
 import type { StatusResponse } from '../api/types';
@@ -42,5 +42,16 @@ describe('StatusScreen (live)', () => {
     };
     render(<StatusScreen client={client(allOk)} />);
     expect(await screen.findByText('All systems operational')).toBeInTheDocument();
+  });
+
+  it('re-runs the probes when the refresh button is pressed', async () => {
+    const status = vi.fn(async () => data);
+    const c: ApiClient = { ...client(data), status };
+    render(<StatusScreen client={c} />);
+    await screen.findByText('Postgres');
+    expect(status).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh probes' }));
+    await waitFor(() => expect(status).toHaveBeenCalledTimes(2));
   });
 });

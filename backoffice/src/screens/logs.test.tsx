@@ -42,6 +42,11 @@ describe('LogsScreen (live)', () => {
 
     fireEvent.click(screen.getByText('turn-one'));
     expect(screen.getByText('Total tokens')).toBeInTheDocument(); // detail row opened
+    // status is labelled "Status" (was mislabelled "Workflow")
+    expect(screen.getByText('Status')).toBeInTheDocument();
+    expect(screen.queryByText('Workflow')).not.toBeInTheDocument();
+    // no dead "Langfuse" trace link (there is no trace URL to link to)
+    expect(screen.queryByText('Langfuse')).not.toBeInTheDocument();
   });
 
   it('notes when Langfuse enrichment is unavailable', async () => {

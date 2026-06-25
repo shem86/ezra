@@ -50,4 +50,18 @@ describe('createApiRouter', () => {
     const api = createApiRouter({ db: fakeDb([]) });
     expect(await api.handle('GET', url('/api/nope'))).toBeUndefined();
   });
+
+  it('GET /api/costs degrades to 503 when the Langfuse read fails (never a 500)', async () => {
+    // Costs come entirely from Langfuse; a transient read failure (429/timeout)
+    // must not bubble to a 500 that blanks the dashboard — it degrades to 503.
+    const cost = {
+      getCosts: async (): Promise<never> => {
+        throw new Error('langfuse 429: rate limited');
+      },
+    };
+    const api = createApiRouter({ db: fakeDb([]), cost });
+    const res = await api.handle('GET', url('/api/costs'));
+    expect(res?.status).toBe(503);
+    expect((res!.body as { error: string }).error).toMatch(/temporarily unavailable/);
+  });
 });

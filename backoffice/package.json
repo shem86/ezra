@@ -9,7 +9,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "ui:debug": "node scripts/ui-debug.mjs"
   },
   "dependencies": {
     "react": "18.3.1",
@@ -24,6 +25,7 @@
     "@vitejs/plugin-react": "6.0.3",
     "eslint": "10.4.1",
     "jsdom": "29.1.1",
+    "playwright": "1.61.1",
     "typescript": "6.0.3",
     "typescript-eslint": "8.61.0",
     "vite": "8.1.0",

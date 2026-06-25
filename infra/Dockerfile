@@ -27,7 +27,11 @@ RUN pnpm build
 # kept out of the app's deps — same isolation pattern as infra/pulumi). Emits
 # backoffice/dist, which the runtime stage serves via dist/backoffice/cli.js.
 COPY backoffice ./backoffice
-RUN pnpm -C backoffice install --frozen-lockfile && pnpm -C backoffice build
+# PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: the ui-debug script (backoffice/scripts) is
+# a dev/ops tool that drives the *installed* Chrome (channel:'chrome') and never
+# runs in the image — so skip Playwright's browser download here to keep the
+# image build lean. The npm package (driver only) still installs from the lockfile.
+RUN PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 pnpm -C backoffice install --frozen-lockfile && pnpm -C backoffice build
 
 # --- runtime -----------------------------------------------------------------
 FROM node:22-bookworm-slim AS runtime
