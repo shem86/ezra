@@ -45,6 +45,16 @@ describe('primitives render without error', () => {
     // outer flex + 3 bars
     expect(container.querySelectorAll('div').length).toBe(4);
   });
+
+  it('BarChart keeps finite heights on an all-zero series (no NaN%)', () => {
+    const { container } = render(<BarChart data={[0, 0, 0]} />);
+    const flex = container.querySelector('div')!; // outer flex wrapper
+    const bars = flex.querySelectorAll<HTMLDivElement>(':scope > div');
+    expect(bars.length).toBe(3);
+    for (const bar of bars) {
+      expect(bar.style.height).not.toContain('NaN');
+    }
+  });
 });
 
 describe('status helpers', () => {

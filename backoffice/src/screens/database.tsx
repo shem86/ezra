@@ -169,7 +169,7 @@ export function DatabaseScreen({ client = api }: { client?: ApiClient }): React.
           >
             <span>{loading ? 'loading…' : `${rows.length} of ${listing?.rows.length ?? 0} rows`}</span>
             <span style={{ fontFamily: 'var(--mono)' }}>
-              SELECT * FROM {listing?.label ?? active}
+              SELECT * FROM {listing?.table ?? active}
               {q ? ` WHERE … '${q}'` : ''}
             </span>
           </div>

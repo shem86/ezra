@@ -155,20 +155,12 @@ export function LogsScreen({ client = api }: { client?: ApiClient }): React.JSX.
                       <td colSpan={9}>
                         <div style={{ padding: '4px 8px 14px', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 18 }}>
                           <Detail k="Turn id" v={r.id} mono />
-                          <Detail k="Workflow" v={r.st} />
+                          <Detail k="Status" v={r.st} />
                           <Detail k="Tool tier" v={r.tier ?? '—'} mono />
                           <Detail k="Latency" v={r.ms !== null ? r.ms + ' ms' : '—'} mono />
                           <Detail k="Total tokens" v={r.tokens ? r.tokens.toLocaleString() : '—'} mono />
                           <Detail k="Cache read" v={r.cache !== null ? r.cache + '%' : '—'} mono />
                           <Detail k="Est. cost" v={r.cost ? '$' + r.cost.toFixed(4) : '—'} mono />
-                          <Detail
-                            k="Trace"
-                            v={
-                              <span className="link">
-                                Langfuse <Icon name="ext" size={12} />
-                              </span>
-                            }
-                          />
                         </div>
                       </td>
                     </tr>
@@ -179,7 +171,7 @@ export function LogsScreen({ client = api }: { client?: ApiClient }): React.JSX.
           </table>
         </div>
         <div style={{ padding: '10px 16px', borderTop: '1px solid var(--border)', fontSize: 12, color: 'var(--muted)' }}>
-          {loading ? 'loading…' : `${rows.length} turns · click a row for the trace`}
+          {loading ? 'loading…' : `${rows.length} turns · click a row for details`}
         </div>
       </Card>
     </div>

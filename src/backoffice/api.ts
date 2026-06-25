@@ -51,7 +51,14 @@ export function createApiRouter(deps: ApiDeps): ApiRouter {
       // GET /api/costs → Langfuse-derived (estimated) spend + token economics.
       if (path === '/api/costs') {
         if (deps.cost === undefined) return { status: 503, body: { error: 'costs unavailable' } };
-        return { status: 200, body: await deps.cost.getCosts() };
+        try {
+          return { status: 200, body: await deps.cost.getCosts() };
+        } catch {
+          // The whole payload comes from Langfuse — there is no journal fallback
+          // the way /api/logs has, so a transient read failure (429/timeout/outage)
+          // degrades to 503 rather than bubbling to a 500 that blanks the overview.
+          return { status: 503, body: { error: 'costs temporarily unavailable' } };
+        }
       }
 
       // GET /api/logs → durable turn list (DBOS journal) + Langfuse enrichment.

@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { OverviewScreen } from './overview';
-import type { ApiClient } from '../api/client';
+import { ApiError, type ApiClient } from '../api/client';
 import type { CostsResponse, LogsResponse, StatusResponse, TableListing } from '../api/types';
 
 afterEach(cleanup);
@@ -70,5 +70,27 @@ describe('OverviewScreen (composed live)', () => {
     expect(screen.getByText('turn-ok')).toBeInTheDocument();
     // Approve disabled (read-only)
     expect(screen.getByRole('button', { name: 'Approve' })).toBeDisabled();
+  });
+
+  it('degrades per-card when one endpoint fails — not a full-page blank', async () => {
+    // Costs fails; status/logs/pending still resolve. The page must keep
+    // rendering the sections that loaded, with an inline error for the one
+    // that didn't — the old Promise.all blanked everything on any failure.
+    const failing: ApiClient = {
+      ...client,
+      costs: async () => {
+        throw new ApiError(500, 'HTTP 500');
+      },
+    };
+    render(<OverviewScreen onOpen={vi.fn()} client={failing} />);
+
+    // sections from the endpoints that succeeded still render
+    expect(await screen.findByText('turn-ok')).toBeInTheDocument();
+    expect(screen.getByText('1 down')).toBeInTheDocument();
+    expect(screen.getByText('1 pending')).toBeInTheDocument();
+    // no full-page failure
+    expect(screen.queryByText(/Could not load overview/)).not.toBeInTheDocument();
+    // the failed section shows its own inline error
+    expect(screen.getByText(/HTTP 500/)).toBeInTheDocument();
   });
 });

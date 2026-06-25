@@ -189,7 +189,10 @@ export function BarChart({
   color?: string;
   fmt?: (v: number) => string;
 }): React.JSX.Element {
-  const max = data.length > 0 ? Math.max(...data) : 1;
+  // Guard the divisor: an all-zero series (e.g. a zero-spend day) would make
+  // `peak` 0 and every `v / peak` NaN → `height: 'NaN%'`. Floor it at 1.
+  const peak = data.length > 0 ? Math.max(...data) : 0;
+  const max = peak > 0 ? peak : 1;
   return (
     <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height }}>
       {data.map((v, i) => (
