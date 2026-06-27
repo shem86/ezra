@@ -63,8 +63,8 @@ export function DatabaseScreen({ client = api }: { client?: ApiClient }): React.
   }, [listing, q]);
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '210px 1fr', gap: 18, alignItems: 'start' }}>
-      <Card pad={8} style={{ position: 'sticky', top: 0 }}>
+    <div className="grid-db">
+      <Card pad={8} className="db-rail">
         <div
           style={{
             fontSize: 11,
@@ -77,7 +77,7 @@ export function DatabaseScreen({ client = api }: { client?: ApiClient }): React.
         >
           Tables
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <div className="db-tablist">
           {tables.map((t) => (
             <button
               key={t.table}
