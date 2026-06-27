@@ -66,7 +66,7 @@ export function StatusScreen({ client = api }: { client?: ApiClient }): React.JS
         <div style={{ marginBottom: 14, fontSize: 13, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--muted)' }}>
           Reliability edges
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12 }}>
+        <div className="grid-status-edges">
           {data.edges.map((e) => (
             <div key={e.name} style={{ padding: 14, background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 10 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8 }}>
@@ -84,7 +84,7 @@ export function StatusScreen({ client = api }: { client?: ApiClient }): React.JS
           <div style={{ marginBottom: 14, fontSize: 13, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--muted)' }}>
             {g}
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
+          <div className="grid-status-services">
             {data.services
               .filter((s) => s.group === g)
               .map((s) => (

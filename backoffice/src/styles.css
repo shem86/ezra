@@ -119,6 +119,22 @@ table.grid tbody tr.on { background: var(--accent-soft); }
 table.grid.logs tbody tr.detail, table.grid.logs tbody tr.detail:hover { background: var(--surface-2); cursor: default; }
 table.grid.logs tbody tr.detail td { border-bottom: 2px solid var(--border); }
 
+/* ---- responsive screen grids ----
+   The per-screen layouts use these classes (not inline grid-template styles) so
+   the mobile breakpoint below can collapse them — an inline style would win over
+   the media query and leave the right-hand columns clipped off a phone screen. */
+.grid-ov-hero { display: grid; grid-template-columns: 1.3fr 1fr; gap: 18px; }
+.grid-ov-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.grid-ov-feed { display: grid; grid-template-columns: 1.6fr 1fr; gap: 18px; }
+.grid-db { display: grid; grid-template-columns: 210px 1fr; gap: 18px; align-items: start; }
+.db-rail { position: sticky; top: 0; }
+.db-tablist { display: flex; flex-direction: column; gap: 2px; }
+.grid-costs { display: grid; grid-template-columns: 1.2fr 1fr 1fr; gap: 16px; }
+.grid-status-edges { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+.grid-status-services { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+/* Wide tables scroll inside their card instead of overflowing the viewport. */
+.table-scroll { overflow-x: auto; }
+
 /* ---- actrow ---- */
 .actrow:hover { background: var(--surface-2) !important; border-radius: 8px; }
 
@@ -134,6 +150,27 @@ table.grid.logs tbody tr.detail td { border-bottom: 2px solid var(--border); }
 ::-webkit-scrollbar-track { background: transparent; }
 
 @media (max-width: 900px) {
-  .shell { grid-template-columns: 1fr; }
-  .sidebar { display: none; }
+  /* Single column, sidebar stacked above main as a horizontal nav strip.
+     We keep the sidebar (rather than hiding it) so there's exactly one set of
+     nav buttons — a duplicate mobile nav would be the only way to navigate but
+     would also double every nav control. */
+  .shell { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+
+  .sidebar { flex-direction: row; align-items: center; gap: 8px; padding: 8px 12px; overflow-x: auto; }
+  .sidebar .brand, .sidebar .side-foot { display: none; }
+  .nav { flex-direction: row; gap: 4px; }
+  .navitem { white-space: nowrap; flex: none; }
+
+  /* Tighter chrome — 30px side padding eats a phone's width. */
+  .topbar { padding: 14px 16px 12px; }
+  .content { padding: 14px 16px 56px; }
+
+  /* Collapse every multi-column screen grid so columns can't be clipped. */
+  .grid-ov-hero, .grid-ov-feed, .grid-db, .grid-costs, .grid-status-services { grid-template-columns: 1fr; }
+  .grid-ov-kpis, .grid-status-edges { grid-template-columns: repeat(2, 1fr); }
+
+  /* The database table rail becomes a horizontal picker above the grid. */
+  .db-rail { position: static; }
+  .db-tablist { flex-direction: row; overflow-x: auto; padding-bottom: 4px; }
+  .db-tablist .tablebtn { flex: none; }
 }

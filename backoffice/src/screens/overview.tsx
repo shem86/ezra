@@ -282,11 +282,11 @@ export function OverviewScreen({ onOpen, client = api }: { onOpen: (r: Route) =>
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr', gap: 18 }}>
+      <div className="grid-ov-hero">
         {costs ? <SpendCard costs={costs} /> : <CardError title="Spend this month (est.)" error={data.costs.ok ? '' : data.costs.error} />}
         {pending ? <ApprovalsCard parked={parked} /> : <CardError title="Awaiting approval" error={data.pending.ok ? '' : data.pending.error} />}
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12 }}>
+      <div className="grid-ov-kpis">
         {tiles.map((t) => (
           <KpiTile
             key={t.label}
@@ -299,7 +299,7 @@ export function OverviewScreen({ onOpen, client = api }: { onOpen: (r: Route) =>
           />
         ))}
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: 18 }}>
+      <div className="grid-ov-feed">
         <Card pad={0}>
           <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)' }}>
             <SectionTitle>Recent turns</SectionTitle>

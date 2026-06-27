@@ -40,7 +40,7 @@ export function CostsScreen({ client = api }: { client?: ApiClient }): React.JSX
         Spend is <strong>estimated</strong> from token volume × Sonnet-class pricing — Langfuse records
         usage but not cost or model for this project. Token counts and the cache split are exact.
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: 16 }}>
+      <div className="grid-costs">
         <Card>
           <SectionTitle right={<Badge tone={overBudget ? 'amber' : 'ok'}>{overBudget ? 'over budget' : 'under budget'}</Badge>}>
             Month to date (est.)
@@ -110,6 +110,7 @@ export function CostsScreen({ client = api }: { client?: ApiClient }): React.JSX
         <div style={{ padding: '16px 18px', borderBottom: '1px solid var(--border)' }}>
           <SectionTitle>Estimated cost by usage type</SectionTitle>
         </div>
+        <div className="table-scroll">
         <table className="grid">
           <thead>
             <tr>
@@ -143,6 +144,7 @@ export function CostsScreen({ client = api }: { client?: ApiClient }): React.JSX
             ))}
           </tbody>
         </table>
+        </div>
         <div
           style={{
             padding: '12px 18px',
