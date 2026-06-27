@@ -1,9 +1,9 @@
 // Status — LIVE health probes (not stored snapshots). Postgres SELECT 1 +
 // latency, pgvector row count, cheap auth pings to Anthropic/Voyage/Langfuse,
 // a Google Calendar read, and Baileys/spine liveness DERIVED from the
-// scheduler heartbeat (the minute-cadence reminderSweepCron in the spine
-// process — the backoffice can't see the socket, so it reads the journal the
-// spine writes). External pings respect the egress allowlist (BO-16 adds the
+// scheduler heartbeat (the minute-cadence `reminderSweep` scheduled workflow in
+// the spine process — the backoffice can't see the socket, so it reads the
+// journal the spine writes). External pings respect the egress allowlist (BO-16 adds the
 // new hosts). Reliability edges are static copy from the recovery runbook.
 
 import type { Queryable } from './queries.js';
@@ -141,13 +141,17 @@ export async function runProbes(deps: ProbeDeps): Promise<StatusResponse> {
     }
   }
 
-  // Spine + Baileys liveness from the scheduler heartbeat (reminderSweepCron,
-  // every minute, runs in the spine process that hosts the WhatsApp socket).
+  // Spine + Baileys liveness from the scheduler heartbeat: the `reminderSweep`
+  // scheduled workflow (every minute, runs in the spine process that hosts the
+  // WhatsApp socket). The name MUST match src/main.ts's registration —
+  // DBOS.registerScheduled(reminderSweep, { name: 'reminderSweep' }) — or the
+  // query finds no rows and reports a false "no heartbeat seen" while the sweep
+  // is in fact running. `created_at` is epoch-ms (bigint), so now()-last is ms.
   async function livenessProbes(): Promise<ServiceRow[]> {
     let ageMs: number | null = null;
     try {
       const { rows } = await deps.db.query(
-        `SELECT max(created_at) AS last FROM dbos.workflow_status WHERE name = 'reminderSweepCron'`,
+        `SELECT max(created_at) AS last FROM dbos.workflow_status WHERE name = 'reminderSweep'`,
       );
       const last = (rows[0] as { last?: string | number | null } | undefined)?.last;
       if (last !== null && last !== undefined) ageMs = now() - Number(last);
