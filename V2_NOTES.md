@@ -308,6 +308,20 @@ All artifacts are in-repo; nothing here touched the live host.
   `<url>/fail` when stale/missing. `hh-backup-freshness.{service,timer}` (hourly)
   drives it inside the sidecar image; the external check alerts when the fresh
   ping stops — catching a stalled base cron the WAL stream can't.
+- **✅ Sidecar image is now CI-built + pulled from GHCR (2026-06-28).** The
+  backup sidecar image was the **lone exception** to the CI→GHCR→pull lifecycle:
+  it was hand-built on the host (`docker compose build backup`) and silently
+  drifted. `freshness.sh` shipped in-repo (2026-06-24) but the prod image was
+  never rebuilt — *and* `.dockerignore` excluded `freshness.sh` from the build
+  context, so any rebuild failed at `COPY` (`freshness.sh: not found`, exit 127).
+  Net effect: the freshness timer failed **every hour** from the moment the §5
+  reconcile enabled it (2026-06-27), surfaced only when we went to verify it.
+  Fix (this pass): `.dockerignore` re-includes `freshness.sh`; `ci.yml` builds +
+  pushes `ghcr.io/shem86/hh-assistant-backup` with the **same immutable tags** as
+  the app (matched app+backup pair per release); the overlay references the GHCR
+  image (`${EZRA_TAG:-latest}`, `build:` kept for dev/drill); and
+  `on-host-deploy.sh` pulls + recreates the sidecar each deploy (the slot retains
+  WAL across the brief `receivewal` reconnect). The host no longer builds images.
 - **Cloud-init (create-from-zero)** installs + enables both timers and starts the
   sidecar on a fresh box (`user-data.yaml.tmpl`).
 - **Operator step — partially done.** ✅ The two timers were **installed +

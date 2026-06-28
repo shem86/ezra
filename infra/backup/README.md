@@ -171,6 +171,15 @@ The three open §6 items are now in-repo artifacts:
    `BACKUP_MAX_AGE_HOURS` (default 30h), `<url>/fail` when stale/missing. The
    check alerts from outside if the fresh ping stops.
 
+**Sidecar image (2026-06-28):** built + pushed by CI to
+`ghcr.io/shem86/hh-assistant-backup` (same immutable tags as the app), pulled +
+recreated on the host by `on-host-deploy.sh` — **no host-side `docker compose
+build` anymore.** The old host-build was the lone exception to the CI→GHCR→pull
+lifecycle and silently drifted (the image shipped *without* `freshness.sh`,
+since both the Dockerfile `COPY` *and* `.dockerignore` had to know about it and
+only the former did). `build:` is retained in the overlay so the restore drill /
+dev can still build locally and tag it as the same GHCR ref offline.
+
 Cloud-init (`infra/pulumi/cloud-init/user-data.yaml.tmpl`) installs + enables both
 timers and starts the sidecar on a fresh box. **Operator steps remain** (this PR
 does NOT touch the live host): on the existing prod box, install + enable the two

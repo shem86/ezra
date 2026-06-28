@@ -177,3 +177,32 @@ jobs:
       - name: Push image to GHCR
         if: github.event_name != 'pull_request'
         run: echo "${{ steps.meta.outputs.tags }}" | xargs -rL1 docker push
+
+      # --- backup sidecar image (V2_NOTES §6) ---------------------------------
+      # Built + pushed alongside the app image so the HOST PULLS it (like ezra)
+      # instead of building it on the box. The host-build was the lone exception
+      # to the CI→GHCR→pull lifecycle and silently drifted: freshness.sh shipped
+      # in-repo but the prod image was never rebuilt (and .dockerignore even
+      # excluded the script), so the freshness timer failed every hour. Same
+      # immutable tag scheme as the app ⇒ a matched app+backup pair per release.
+      # PRs build it (catch a broken Dockerfile/.dockerignore) but never push.
+      - id: meta-backup
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}-backup
+          tags: |
+            type=sha,prefix=sha-,format=short
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      - name: Build + push the backup sidecar image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: infra/backup/Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta-backup.outputs.tags }}
+          labels: ${{ steps.meta-backup.outputs.labels }}
+          cache-from: type=gha,scope=backup
+          cache-to: type=gha,mode=max,scope=backup

@@ -202,6 +202,22 @@ else
   fi
 fi
 
+# --- 5b. refresh the backup sidecar to the released image (V2_NOTES §6) --------
+# The sidecar image now ships from GHCR (CI-built, like ezra) instead of being
+# hand-built on the host — so pull the matched tag and recreate the long-running
+# `receivewal` container if it moved. `up -d backup` is a no-op when the tag is
+# unchanged; when it moved, the brief reconnect loses no WAL (the replication
+# slot retains it server-side). Fail-soft: a backup-image hiccup must not fail an
+# otherwise-healthy app deploy — a genuinely stalled sidecar is caught by the
+# freshness dead-man (hh-backup-freshness.*), not here.
+if EZRA_TAG="$EZRA_TAG" compose_full pull backup 2>/dev/null; then
+  log "refreshing backup sidecar to ${EZRA_TAG}"
+  EZRA_TAG="$EZRA_TAG" compose_full up -d backup \
+    || log "WARN: backup sidecar recreate failed — left running on the prior image"
+else
+  log "WARN: backup image pull failed (${IMAGE}-backup:${EZRA_TAG}) — sidecar left as-is"
+fi
+
 # --- 6. healthcheck gate: launch markers + no restart-loop ---------------------
 # No HTTP endpoint exists (src/ops/health.ts is a socket/alert monitor), so the
 # readiness signal is the launch lines the processes print (`ezra up:` and
