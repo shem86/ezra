@@ -22,7 +22,7 @@ section below; this table is the index.
 | 7 | Pairing (`make pair`) | ✅ shipped |
 | 8 | CI verification smokes (image + config-load) | ✅ shipped |
 | 11 | Egress refresh split (no fail-open window) | ✅ shipped |
-| 6 | Backups automation (initdb bake + scheduled base + freshness) | ✅ shipped in-repo — host enable of the timers is the one operator step |
+| 6 | Backups automation (initdb bake + scheduled base + freshness) | ✅ shipped in-repo — timers enabled on prod 2026-06-27 (via the §5 reconcile); only the freshness hc-ping URL + retiring the old crontab line remain |
 | 9 | Footguns burned in v1 | 📌 reference |
 | 10 | Going public (secret/PII scrub, LICENSE) | ⏳ gate — evaluate before flipping |
 | 12 | AI / model-layer guardrails | 🟢 spend limit ✅ set; untrusted-content boundary Phase 0 ✅ shipped + eval-ratified (ADR-0005 Accepted) — Phase 1 deferred to M5 |
@@ -264,11 +264,18 @@ allowlist). Apply to live prod is still pending as a deliberate, careful step
     host-config baseline (sudoers drop-in + egress/backup units + enable/apply)
     **idempotently** for an adopted/drifted host. Run once on prod
     (`ssh ubuntu@<host> 'sudo bash …/reconcile-host-config.sh'`) and the deploy's
-    auto re-apply works thereafter. It mirrors the cloud-init block (cross-noted
+    auto re-apply works thereafter. **✅ Run on prod 2026-06-27 (after v2.2.3
+    put the script on the host) and verified live:** the `/etc/sudoers.d/hh-ops`
+    drop-in installed + validated, and `hh` can now `sudo -n systemctl start
+    hh-egress.service` (the exact call `reapply_egress` makes, as the exact user)
+    with **no denial** — the fail-OPEN path is closed; the firewall re-binds on
+    any future bridge recreate. (`systemctl is-active` reads `inactive` — correct
+    for the `Type=oneshot` apply-and-exit unit; the nft rules load into the
+    kernel and persist.) It mirrors the cloud-init block (cross-noted
     in both); a future cleanup can DRY cloud-init against it once a `scratch`
     re-validation is run (the adopted prod is unaffected by that refactor).
 
-## 6. Backups — ✅ automated in-repo (host timer-enable is the one operator step)
+## 6. Backups — ✅ automated in-repo (prod timers enabled 2026-06-27; freshness ping URL + crontab retirement remain)
 
 The pipeline (PITR base + continuous WAL, encrypted to S3, restore + drill)
 already existed (T17/T45, `infra/backup/`). This pass closed the three open
@@ -303,11 +310,15 @@ All artifacts are in-repo; nothing here touched the live host.
   ping stops — catching a stalled base cron the WAL stream can't.
 - **Cloud-init (create-from-zero)** installs + enables both timers and starts the
   sidecar on a fresh box (`user-data.yaml.tmpl`).
-- **Operator step (deliberately not done — prod-touching):** on the existing
-  live host, install + enable the two timers once, set `BACKUP_FRESHNESS_PING_URL`
-  in `.env` (create the hc-ping check first), retire the old crontab line; the
-  initdb bake + `hh_backup` migration land on the next full rebuild. Steps in
-  `infra/backup/README.md` "Automated wiring".
+- **Operator step — partially done.** ✅ The two timers were **installed +
+  enabled on prod 2026-06-27**, as a side effect of the §5
+  `reconcile-host-config.sh` run (its output created the
+  `hh-backup-base.timer` + `hh-backup-freshness.timer` symlinks under
+  `timers.target.wants`). **Still remaining (prod-touching):** set
+  `BACKUP_FRESHNESS_PING_URL` in `.env` (create the hc-ping check first) and
+  retire the old crontab line (until then base runs twice daily — redundant, not
+  harmful); the initdb bake + `hh_backup` migration land on the next full
+  rebuild. Steps in `infra/backup/README.md` "Automated wiring".
 
 ## 7. Pairing / session lifecycle — ✅ BUILT (`make pair`)
 
