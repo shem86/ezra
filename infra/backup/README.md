@@ -144,11 +144,15 @@ infra/backup/enable-replication.sh
 # 2. start the sidecar (continuous WAL streaming + ship)
 docker compose --env-file .env -f infra/docker-compose.prod.yml \
                -f infra/backup/docker-compose.backup.yml up -d backup
-# 3. base backups on hh's crontab — daily 03:00 UTC (installed on the host)
-0 3 * * *  cd /home/hh/hh-assistant && docker compose --env-file .env \
-           -f infra/docker-compose.prod.yml \
-           -f infra/backup/docker-compose.backup.yml \
-           run --rm backup backup.sh base >> backup-base.log 2>&1
+# 3. base backups — NOW via the systemd timer, NOT this crontab. The crontab
+#    line below was RETIRED on prod 2026-06-28 (V2_NOTES §6); base runs daily
+#    03:00 UTC through hh-backup-base.timer (see "Automated wiring" below).
+#    Kept here for history only — do NOT re-install it: it double-runs alongside
+#    the timer.
+#    0 3 * * *  cd /home/hh/hh-assistant && docker compose --env-file .env \
+#               -f infra/docker-compose.prod.yml \
+#               -f infra/backup/docker-compose.backup.yml \
+#               run --rm backup backup.sh base >> backup-base.log 2>&1
 ```
 
 ### Automated wiring (V2_NOTES §6) — what's declarative now
