@@ -4,12 +4,19 @@ import type { Queryable } from '../../../src/backoffice/queries.js';
 
 const NOW = Date.UTC(2026, 5, 24, 12, 0, 0);
 
+// The name the spine actually registers + writes the minute-cadence heartbeat
+// under (src/main.ts: DBOS.registerScheduled(reminderSweep, { name: 'reminderSweep' })).
+// The fixture models a REAL Postgres: it returns the heartbeat row only when the
+// probe queries this exact name. A probe asking for any other name gets [] —
+// exactly the false "no heartbeat seen" seen in prod while the sweep ran fine.
+const SWEEP_WORKFLOW_NAME = 'reminderSweep';
+
 function fakeDb(sweepAgeMs: number | null): Queryable {
   return {
     query: async (sql: string) => {
       if (sql.includes('SELECT 1')) return { rows: [{ '?column?': 1 }] };
       if (sql.includes('semantic_memories')) return { rows: [{ n: 1234 }] };
-      if (sql.includes('reminderSweepCron')) {
+      if (sql.includes(`'${SWEEP_WORKFLOW_NAME}'`) && sql.includes('max(created_at)')) {
         return { rows: [{ last: sweepAgeMs === null ? null : NOW - sweepAgeMs }] };
       }
       if (sql.includes('handleTurn')) return { rows: [{ turns: 42, avg_ms: 1400 }] };
