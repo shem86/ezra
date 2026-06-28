@@ -22,7 +22,7 @@ section below; this table is the index.
 | 7 | Pairing (`make pair`) | ✅ shipped |
 | 8 | CI verification smokes (image + config-load) | ✅ shipped |
 | 11 | Egress refresh split (no fail-open window) | ✅ shipped |
-| 6 | Backups automation (initdb bake + scheduled base + freshness) | ✅ shipped in-repo — timers enabled on prod 2026-06-27 (via the §5 reconcile); only the freshness hc-ping URL + retiring the old crontab line remain |
+| 6 | Backups automation (initdb bake + scheduled base + freshness) | ✅ shipped + fully wired on prod (2026-06-28): timers enabled, freshness dead-man green, old crontab retired; only the initdb-bake/`hh_backup` migration awaits the next full rebuild (passive) |
 | 9 | Footguns burned in v1 | 📌 reference |
 | 10 | Going public (secret/PII scrub, LICENSE) | ⏳ gate — evaluate before flipping |
 | 12 | AI / model-layer guardrails | 🟢 spend limit ✅ set; untrusted-content boundary Phase 0 ✅ shipped + eval-ratified (ADR-0005 Accepted) — Phase 1 deferred to M5 |
@@ -275,7 +275,7 @@ allowlist). Apply to live prod is still pending as a deliberate, careful step
     in both); a future cleanup can DRY cloud-init against it once a `scratch`
     re-validation is run (the adopted prod is unaffected by that refactor).
 
-## 6. Backups — ✅ automated in-repo (prod timers enabled 2026-06-27; freshness ping URL + crontab retirement remain)
+## 6. Backups — ✅ automated in-repo + fully wired on prod (2026-06-28)
 
 The pipeline (PITR base + continuous WAL, encrypted to S3, restore + drill)
 already existed (T17/T45, `infra/backup/`). This pass closed the three open
@@ -324,15 +324,29 @@ All artifacts are in-repo; nothing here touched the live host.
   WAL across the brief `receivewal` reconnect). The host no longer builds images.
 - **Cloud-init (create-from-zero)** installs + enables both timers and starts the
   sidecar on a fresh box (`user-data.yaml.tmpl`).
-- **Operator step — partially done.** ✅ The two timers were **installed +
-  enabled on prod 2026-06-27**, as a side effect of the §5
-  `reconcile-host-config.sh` run (its output created the
-  `hh-backup-base.timer` + `hh-backup-freshness.timer` symlinks under
-  `timers.target.wants`). **Still remaining (prod-touching):** set
-  `BACKUP_FRESHNESS_PING_URL` in `.env` (create the hc-ping check first) and
-  retire the old crontab line (until then base runs twice daily — redundant, not
-  harmful); the initdb bake + `hh_backup` migration land on the next full
-  rebuild. Steps in `infra/backup/README.md` "Automated wiring".
+- **Operator wiring — ✅ done on prod (2026-06-28).** The sequence, for the
+  record:
+  - **Timers enabled (2026-06-27)** as a side effect of the §5
+    `reconcile-host-config.sh` run (it created the `hh-backup-base.timer` +
+    `hh-backup-freshness.timer` symlinks under `timers.target.wants`).
+  - **Freshness dead-man wired + green (2026-06-28).** `BACKUP_FRESHNESS_PING_URL`
+    set in the **SSM `/hh-assistant/env` blob** (the durable source — a host-only
+    `.env` edit would be wiped by the next §3 deploy materialization) and on the
+    live `.env`. This surfaced the latent break that made it worth it: the prod
+    sidecar image predated `freshness.sh` *and* `.dockerignore` excluded the
+    script, so the hourly timer failed exit-127 from the moment it was enabled —
+    fixed by moving the sidecar image to CI→GHCR (see the bullet above), shipped
+    in **v2.2.7**, after which `freshness.sh` runs clean (`FRESH: latest base
+    within 30h`) and pings the second healthchecks.io check.
+  - **Old crontab retired (2026-06-28).** The hand-installed `0 3 * * * … backup.sh
+    base` line is removed (`crontab -r`; a `.bak` is kept on the host), so base
+    now runs **once** daily via `hh-backup-base.timer` (confirmed firing on its
+    own at 03:03) instead of twice. `systemctl list-timers` shows the two timers
+    as the sole schedulers.
+  - **Remaining (passive, not an operator action):** the initdb bake + the
+    least-priv `hh_backup` role land on the next full rebuild; until then the
+    existing box keeps streaming WAL as `hh` (`BACKUP_PGUSER` unset). Steps in
+    `infra/backup/README.md` "Automated wiring".
 
 ## 7. Pairing / session lifecycle — ✅ BUILT (`make pair`)
 
