@@ -24,10 +24,17 @@ services:
     # relative to infra/, exactly like the prod compose (`..`, `../.env`). The
     # earlier standalone image build (overlay alone ⇒ project dir = infra/backup/)
     # masked this; combined, `../..`/`../../.env` overshot to /home/hh.
+    # Image lifecycle mirrors the app (V2_NOTES §6): CI builds + pushes it to
+    # GHCR with the same immutable tags, the host PULLS it (on-host-deploy.sh),
+    # and the timers' `run --rm backup` use it — no host-side image build, which
+    # is what silently drifted before (freshness.sh shipped but the prod image
+    # was never rebuilt). `build:` is kept so dev / the restore drill can still
+    # build locally and tag it as this same ref offline. ${EZRA_TAG} pins the
+    # release; the timers (which don't set EZRA_TAG) track :latest.
+    image: ghcr.io/shem86/hh-assistant-backup:${EZRA_TAG:-latest}
     build:
       context: ..
       dockerfile: infra/backup/Dockerfile
-    image: hh-assistant-backup:prod
     restart: unless-stopped
     depends_on:
       postgres:

@@ -17,13 +17,16 @@ spikes
 evals
 docs
 # Keep infra out of the (app) build context for leanness, BUT the backup sidecar
-# image (infra/backup/Dockerfile, context = repo root) needs its two scripts —
+# image (infra/backup/Dockerfile, context = repo root) needs its scripts —
 # re-include them (the nested-exception pattern: re-include the dir, then the
 # files). Without this the sidecar image fails to build (COPY: file not found).
+# Keep this list in sync with the Dockerfile's COPY: freshness.sh (V2_NOTES §6)
+# was added to the COPY but not here, so the image silently failed to rebuild.
 infra/*
 !infra/backup
 infra/backup/*
 !infra/backup/lib.sh
 !infra/backup/backup.sh
+!infra/backup/freshness.sh
 .claude
 *.log
