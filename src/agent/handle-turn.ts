@@ -130,6 +130,25 @@ export interface CompactionDeps extends CompactionConfig {
     readonly embedding: number[];
     readonly sourceKey: string;
   }) => Promise<boolean>;
+  /** Model id behind `summarize` — captured per compaction so a Haiku-vs-Sonnet
+   *  comparison on identical inputs is queryable (docs/compaction-eval-spec.md). */
+  readonly summarizerModelId: string;
+  /**
+   * Registered datasource transaction, idempotent on sourceKey (recovery replay
+   * re-calls it) — same discipline as writeMemory. Durably captures the
+   * summarized HEAD and the result so the mechanism can be evaluated after the
+   * fact; the head is discarded everywhere else (docs/compaction-eval-spec.md).
+   */
+  readonly writeCompactionLog: (input: {
+    readonly workflowId: string;
+    readonly conversationId: string;
+    readonly sourceKey: string;
+    readonly head: readonly TurnMessage[];
+    readonly summary: string;
+    readonly cutIndex: number;
+    readonly tailCount: number;
+    readonly summarizerModel: string;
+  }) => Promise<boolean>;
 }
 
 export type TurnStatus = 'completed' | 'parked' | 'cap-hit';
@@ -365,11 +384,25 @@ export function makeHandleTurnWorkflow(
         });
         // Keyed on the workflowID (≤ one compaction per turn): a crash-replay
         // re-derives the same key and the write is a no-op, never a duplicate.
+        const sourceKey = `compact-${workflowId}`;
         await compaction.writeMemory({
           conversationId,
           content: summary,
           embedding,
-          sourceKey: `compact-${workflowId}`,
+          sourceKey,
+        });
+        // Capture the input+output of this compaction for evaluation — same
+        // sourceKey, so the log row and the semantic row co-key and a replay
+        // is idempotent here too (docs/compaction-eval-spec.md).
+        await compaction.writeCompactionLog({
+          workflowId,
+          conversationId,
+          sourceKey,
+          head,
+          summary,
+          cutIndex: cut,
+          tailCount: msgs.length - cut,
+          summarizerModel: compaction.summarizerModelId,
         });
         await deps.persistContext(
           conversationId,

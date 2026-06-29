@@ -62,6 +62,7 @@ import {
   type InboxItem,
 } from './memory/store.js';
 import { writeSemanticMemory, type SemanticMemoryInput } from './memory/semantic.js';
+import { writeCompactionLog, type CompactionLogInput } from './memory/compaction-log.js';
 import { makeVoyageEmbedder } from './memory/embedder.js';
 import { makeV1ToolRegistry } from './tools/index.js';
 import { makeGoogleCalendarClient } from './tools/calendar-client.js';
@@ -176,6 +177,11 @@ async function main(): Promise<void> {
     'writeSemanticMemory',
     async (db, input: SemanticMemoryInput): Promise<boolean> => writeSemanticMemory(db, input),
   );
+  const writeCompactionLogStep = registerTransactionalStep(
+    dataSource,
+    'writeCompactionLog',
+    async (db, input: CompactionLogInput): Promise<boolean> => writeCompactionLog(db, input),
+  );
 
   // --- The turn workflow (T22 seam) ------------------------------------------
   const handleTurn = DBOS.registerWorkflow(
@@ -203,6 +209,8 @@ async function main(): Promise<void> {
           return vector!;
         }),
         writeMemory: writeMemoryStep,
+        summarizerModelId: config.cheapModelId,
+        writeCompactionLog: writeCompactionLogStep,
       },
     }),
     { name: 'handleTurn' },
