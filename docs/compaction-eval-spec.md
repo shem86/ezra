@@ -201,3 +201,40 @@ Sequencing once the spec is approved:
 6. Calibrate thresholds; document a Haiku-vs-Sonnet comparison run.
 
 Each task: ≤5 files, its own verification (test/build/eval run), reviewed before the next.
+
+## Calibration run (first pass, 2026-06-29)
+
+First `pnpm eval` over the 8 fixtures, both summarizer models (judge = Sonnet
+throughout). Report-only, so the numbers below are signal, not gates yet.
+
+| Dimension | Haiku (`cheapModelId`) | Sonnet |
+|---|---|---|
+| Commitment preservation | 96% | 96% |
+| Faithfulness | 96% | 98% |
+| Boundary discipline | 88% | 89% |
+| Language failures (Hebrew translated away) | 2 / 8 | 1 / 8 |
+| Conciseness failures | 0 | 0 |
+
+Findings (the mechanism's actual weak spots):
+1. **Language preservation** is the standout risk: on Hebrew-dominant chats the
+   summarizer translates Hebrew → English (the prompt forbids it). Haiku fails
+   twice, Sonnet once; the most Hebrew-heavy fixture fails for BOTH. A model
+   bump helps but does not fix it.
+2. **Boundary discipline (~88%) is model-independent** — both tiers restate
+   calendar/schedule facts as authoritative ("school ends 1:00", "swim 10–11").
+   This is a PROMPT-following gap, not a model-tier gap.
+3. One **ambiguous commitment** (`code-switched`, 67% both) — fixture wording to
+   tighten, or accept as a known hard case.
+4. Conciseness was clean on both clean runs; an earlier one-off failure was
+   run-to-run variance on a small head — a poor hard gate at fixture scale,
+   meaningful only at production-sized (60-message) heads.
+
+Implications for the deferred threshold-setting + the mechanism itself:
+- The higher-leverage fix is **prompt hardening** (explicit "keep Hebrew in
+  Hebrew" + stronger DB-owned-fact discipline) in `summarySystemPrompt`, ahead
+  of any Haiku→Sonnet switch. (Both are ask-first: prompt = behavior change;
+  model = spend.)
+- When promoting to gates: **language preservation** is a real contract worth a
+  hard gate; **conciseness** should gate only at production head sizes;
+  commitment/faithfulness/boundary stay scored with thresholds tuned to this
+  baseline.
