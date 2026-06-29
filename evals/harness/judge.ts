@@ -47,7 +47,12 @@ Be conservative: if a commitment is vague, misattributed, or only implied, it is
 export interface JudgeInput {
   readonly head: readonly TurnMessage[];
   readonly summary: string;
-  readonly mustPreserve: readonly string[];
+  /**
+   * Planted ground-truth commitments (fixture mode). Omit or leave empty for
+   * the prod spot-check, where there is no ground truth: the judge then EXTRACTS
+   * the open commitments from the head itself before checking each survived.
+   */
+  readonly mustPreserve?: readonly string[];
   readonly mustNotInvent?: readonly string[];
 }
 
@@ -55,6 +60,7 @@ export function makeCompactionJudge(deps: {
   readonly model: LanguageModel;
 }): (input: JudgeInput) => Promise<JudgeVerdict> {
   return async function judge(input) {
+    const planted = input.mustPreserve ?? [];
     const sections = [
       'ORIGINAL CONVERSATION (the head that was summarized):',
       renderForSummary(input.head),
@@ -62,9 +68,19 @@ export function makeCompactionJudge(deps: {
       'SUMMARY UNDER EVALUATION:',
       input.summary,
       '',
-      'CLAIMS THAT MUST BE PRESERVED (check each: present in the summary AND attributed to the right person):',
-      ...input.mustPreserve.map((c, i) => `${i + 1}. ${c}`),
     ];
+    if (planted.length > 0) {
+      // Fixture mode — check the known ground truth.
+      sections.push(
+        'CLAIMS THAT MUST BE PRESERVED (check each: present in the summary AND attributed to the right person):',
+        ...planted.map((c, i) => `${i + 1}. ${c}`),
+      );
+    } else {
+      // Prod spot-check — no ground truth; discover it.
+      sections.push(
+        'No claims were pre-specified. First identify EVERY open commitment, promise, and unresolved question in the ORIGINAL conversation, then for each, report whether it survived in the summary and is attributed to the right person. Populate `commitments` with what you found.',
+      );
+    }
     if (input.mustNotInvent !== undefined && input.mustNotInvent.length > 0) {
       sections.push('', 'MUST NOT INVENT OR RESTATE AS AUTHORITATIVE:');
       sections.push(...input.mustNotInvent.map((c, i) => `${i + 1}. ${c}`));

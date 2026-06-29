@@ -49,6 +49,15 @@ export function containsLanguage(text: string, lang: 'he' | 'en'): boolean {
   return (lang === 'he' ? HEBREW : LATIN).test(text);
 }
 
+/** Which scripts a head actually uses — the prod spot-check has no declared
+ *  languages, so it derives the no-translate expectation from the head text. */
+export function detectLanguages(text: string): ('he' | 'en')[] {
+  const langs: ('he' | 'en')[] = [];
+  if (containsLanguage(text, 'he')) langs.push('he');
+  if (containsLanguage(text, 'en')) langs.push('en');
+  return langs;
+}
+
 /** Every language present in the head must still appear in the summary — the
  *  bite against "translated everything to one language" (the prompt forbids it). */
 export function languagePreserved(

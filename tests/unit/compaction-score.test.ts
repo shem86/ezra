@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   commitmentScore,
   containsLanguage,
+  detectLanguages,
   isConcise,
   languagePreserved,
   scoreScenario,
@@ -39,6 +40,14 @@ describe('languagePreserved', () => {
 
   it('does not require a language the head never used', () => {
     expect(languagePreserved('hello world', 'a summary', ['he'])).toBe(true);
+  });
+});
+
+describe('detectLanguages', () => {
+  it('reports the scripts present in a head (the prod spot-check expectation)', () => {
+    expect(detectLanguages('shem: אני אאסוף the kids')).toEqual(['he', 'en']);
+    expect(detectLanguages('just english here')).toEqual(['en']);
+    expect(detectLanguages('רק עברית כאן')).toEqual(['he']);
   });
 });
 
