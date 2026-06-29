@@ -28,7 +28,9 @@ import {
   type JudgeVerdict,
   type ScenarioScore,
 } from './harness/compaction-score.ts';
+import { readCompactionEvalEnv } from './harness/eval-env.ts';
 
+const evalEnv = readCompactionEvalEnv();
 let summarize: (head: readonly TurnMessage[]) => Promise<string>;
 let judge: (input: JudgeInput) => Promise<JudgeVerdict>;
 let summarizerModel = '';
@@ -40,7 +42,7 @@ describe('compaction summary quality (eval)', () => {
     // (e.g. `vitest list`) needs no env (same contract as harness/runner.ts).
     const config = loadConfig();
     const anthropic = createAnthropic({ apiKey: config.anthropicApiKey });
-    summarizerModel = process.env.COMPACTION_SUMMARIZER_MODEL ?? config.cheapModelId;
+    summarizerModel = evalEnv.summarizerModelOverride ?? config.cheapModelId;
     summarize = makeSummarize({ model: anthropic(summarizerModel) });
     judge = makeCompactionJudge({ model: anthropic(config.reasoningModelId) });
   });
@@ -48,10 +50,11 @@ describe('compaction summary quality (eval)', () => {
   afterAll(() => {
     // One table for the whole run — the point of the eval is the report. The
     // vitest run reporter swallows console.log, so also write it to a file when
-    // COMPACTION_EVAL_REPORT is set (one artifact per model — compare runs).
+    // a report path is set (one artifact per model — compare runs).
     const report = formatReport(scores, summarizerModel);
-    const path = process.env.COMPACTION_EVAL_REPORT;
-    if (path !== undefined && path.length > 0) writeFileSync(path, report);
+    if (evalEnv.reportPath !== undefined && evalEnv.reportPath.length > 0) {
+      writeFileSync(evalEnv.reportPath, report);
+    }
     console.log('\n' + report);
   });
 

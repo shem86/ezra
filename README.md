@@ -216,7 +216,8 @@ eslint-rules/       custom rule: no nondeterminism in workflow bodies
 spikes/             de-risking + real-wire smoke scripts
 infra/              host provisioning, hardened compose, egress nftables, backups
 tests/              unit + integration (integration gated on DATABASE_URL)
-evals/              model-in-the-loop approval scenarios (on-demand)
+evals/              model-in-the-loop evals: approval scenarios + compaction
+                    summary quality (on-demand)
 docs/               ADRs, spike results, runbooks, drill logs, launch checklist
 ```
 
@@ -233,6 +234,7 @@ docs/               ADRs, spike results, runbooks, drill logs, launch checklist
 | [`docs/launch-checklist.md`](docs/launch-checklist.md) | SPEC success criteria, each box closed with evidence |
 | [`docs/recovery-runbook.md`](docs/recovery-runbook.md) | The four loss scenarios + mechanical reconciliation |
 | [`docs/spike-results.md`](docs/spike-results.md) | Spike verdicts, version pins, gotchas |
+| [`docs/compaction-eval-spec.md`](docs/compaction-eval-spec.md) | How transcript compaction is captured + evaluated (summary quality) |
 | [`CLAUDE.md`](CLAUDE.md) + `.claude/rules/` | Working agreements for AI-assisted sessions |
 
 Build history lives in [`PLAN.md`](PLAN.md) (milestones M0–M6) and

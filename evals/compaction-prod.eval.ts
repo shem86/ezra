@@ -27,12 +27,11 @@ import {
   type JudgeVerdict,
   type ScenarioScore,
 } from './harness/compaction-score.ts';
+import { readCompactionEvalEnv } from './harness/eval-env.ts';
 
-const SPOTCHECK_URL =
-  process.env.COMPACTION_SPOTCHECK_DATABASE_URL ?? process.env.BACKOFFICE_DATABASE_URL;
-const LIMIT = Number.parseInt(process.env.COMPACTION_SPOTCHECK_LIMIT ?? '20', 10);
+const evalEnv = readCompactionEvalEnv();
 
-describe.skipIf(SPOTCHECK_URL === undefined)('compaction prod spot-check (eval)', () => {
+describe.skipIf(evalEnv.spotcheckDatabaseUrl === undefined)('compaction prod spot-check (eval)', () => {
   let db: Client;
   let judge: (input: JudgeInput) => Promise<JudgeVerdict>;
   const scores: ScenarioScore[] = [];
@@ -42,22 +41,24 @@ describe.skipIf(SPOTCHECK_URL === undefined)('compaction prod spot-check (eval)'
     judge = makeCompactionJudge({
       model: createAnthropic({ apiKey: config.anthropicApiKey })(config.reasoningModelId),
     });
-    db = new Client({ connectionString: SPOTCHECK_URL });
+    db = new Client({ connectionString: evalEnv.spotcheckDatabaseUrl });
     await db.connect();
   });
 
   afterAll(async () => {
     if (scores.length > 0) {
-      const report = formatReport(scores, `prod spot-check (${SPOTCHECK_URL?.split('@').pop()})`);
-      const path = process.env.COMPACTION_EVAL_REPORT;
-      if (path !== undefined && path.length > 0) writeFileSync(path, report);
+      const source = evalEnv.spotcheckDatabaseUrl?.split('@').pop();
+      const report = formatReport(scores, `prod spot-check (${source})`);
+      if (evalEnv.reportPath !== undefined && evalEnv.reportPath.length > 0) {
+        writeFileSync(evalEnv.reportPath, report);
+      }
       console.log('\n' + report);
     }
     if (db !== undefined) await db.end();
   });
 
   it('scores recent real compactions in extract mode', async () => {
-    const rows = await readRecentCompactions(db, { limit: Number.isFinite(LIMIT) ? LIMIT : 20 });
+    const rows = await readRecentCompactions(db, { limit: evalEnv.spotcheckLimit });
     if (rows.length === 0) {
       console.log('compaction prod spot-check: no compaction_log rows to score yet.');
       return; // nothing captured yet — a pass, not a failure (prod is near-empty)
