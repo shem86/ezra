@@ -50,11 +50,13 @@ until §5 acceptance passes.
    `120363426855017212@g.us` with a fabricated placeholder
    (`<household-group-jid>` or a clearly-synthetic value), preserving the
    drill's meaning.
-5. `tests/unit/send-class.test.ts:30,327` (`232155984703662@lid`) and
-   `tests/unit/transport-protocol.test.ts:120` (`67427329167522@lid`) —
-   **verify** these are synthetic. If either is a real linked-device ID, replace
-   with a fabricated value in the same shape and re-run the affected unit tests.
-   If confirmed synthetic, leave and note it in the PR.
+5. ✅ **DONE.** The two oddly-specific `@lid` values in `send-class.test.ts` and
+   `transport-protocol.test.ts` were replaced with clearly-synthetic values
+   (`100000000000001@lid`, `100000000000002@lid`) rather than investigated —
+   the assertions only exercise format/routing, so the digits are semantically
+   irrelevant and the swap is behavior-preserving. Removes the real-vs-fake
+   question permanently. `pnpm lint` clean, 505 unit tests pass. (Also renamed a
+   test from "accepts a *real* @lid" → "well-formed" to drop the misleading word.)
 
 **Phase C — Showcase prose trim (presentation only)**
 6. Trim **incidental** host-specific operational narrative from prose docs so the
