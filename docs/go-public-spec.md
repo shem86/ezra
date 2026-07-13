@@ -80,10 +80,15 @@ until §5 acceptance passes.
    visitor (these are raw working ledgers; start at README/SPEC) without removing
    any body content or disturbing any anchor. Decisions confirmed with owner.
 
-**Phase D — Branch hygiene**
-7. Review the 45 remote branches. Delete stale/experimental/WIP remote branches
-   that shouldn't be publicly visible. Every surviving branch's full history
-   goes public — so this is a conscious keep-list, not a default.
+**Phase D — Branch hygiene** — ✅ DONE (2026-07-13)
+7. ✅ Pruned. After `git fetch --prune`, the real count was **23** (not 45 —
+   stale). Deleted **21**: 18 fully merged into `main` (zero risk — content is in
+   `main`, GitHub retains PR history) + 3 unmerged-but-superseded
+   (`v2-s4-host-node-egress` superseded by merged `v2-s4-host-node-clean`;
+   `worktree-readme-refresh` landed another way; `claude/agent-message-indication-ulfmlf`
+   an unadopted `🤖`-on-wire experiment). Remote now holds only `main` and the
+   active PR branch `worktree-go-public-spec` (deletes on merge). Owner approved
+   the full prune.
 
 **Phase E — Security hardening (the one real security action)**
 8. Harden the SSH surface on `98.91.67.226` *before* flipping public, since the
