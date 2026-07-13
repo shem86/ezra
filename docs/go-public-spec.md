@@ -59,16 +59,26 @@ until §5 acceptance passes.
    question permanently. `pnpm lint` clean, 505 unit tests pass. (Also renamed a
    test from "accepts a *real* @lid" → "well-formed" to drop the misleading word.)
 
-**Phase C — Showcase prose trim (presentation only)**
-6. Trim **incidental** host-specific operational narrative from prose docs so the
-   repo reads as a project, not an ops diary: the long host-build/firewall/IMDS
-   detail in `TASKS.md` (esp. T44/T45), `V2_NOTES.md`, `docs/ops-drills.md`,
-   `docs/backoffice-tasks.md`. Keep architecture and rationale; cut the
-   step-by-step host minutiae and incidental identifier mentions in prose.
-   **Load-bearing identifiers stay** (see §3) — they are config, not narrative.
-   Explicitly acknowledged: because history is not rewritten, this trim improves
-   *readability at HEAD only*; it does not hide anything already in history, and
-   the spec does not pretend otherwise.
+**Phase C — Showcase readability** — ✅ DONE (light-touch, revised from original plan)
+6. ✅ **Reading-note headers only; no body content removed.** The original plan
+   was to gut host-specific narrative. Reading the four target docs revised that:
+   - `TASKS.md` — T-numbers are indexed by commit messages **and code comments**
+     (CLAUDE.md); trimming entries breaks that "why" trail.
+   - `V2_NOTES.md` — its own header declares section numbers are **stable anchors
+     that code comments and systemd units reference as `V2_NOTES §N`**;
+     restructuring breaks live references. (§10 *is* the going-public gate.)
+   - `docs/ops-drills.md` — the drill logs are the evidence behind the reliability
+     story the README advertises.
+   - `docs/backoffice-tasks.md` — kept as-is (owner decision): forward-planning
+     for the Phase-3 backoffice; non-secret.
+
+   Combined with the *accept-identifiers* topology decision (§6), there was no
+   sensitive-data reason left to trim — only working-ledger verbosity, whose
+   removal is low-value (history keeps every word — not rewritten) and risks the
+   T-number/§N cross-references. So Phase C became a **light-touch** pass: a brief
+   "reading note" added atop `TASKS.md` and `V2_NOTES.md` orienting a public
+   visitor (these are raw working ledgers; start at README/SPEC) without removing
+   any body content or disturbing any anchor. Decisions confirmed with owner.
 
 **Phase D — Branch hygiene**
 7. Review the 45 remote branches. Delete stale/experimental/WIP remote branches

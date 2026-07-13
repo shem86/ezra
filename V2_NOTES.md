@@ -1,5 +1,11 @@
 # V2 Notes — streamlining build, deploy & ops
 
+> *Reading note:* a working ops/planning ledger, kept verbatim as history. Its
+> section numbers are stable anchors that code comments and systemd units
+> reference as `V2_NOTES §N`, so they don't renumber as items close. It reads as
+> a working document, not a polished narrative, on purpose. For the project
+> overview start with the [README](README.md) and [`SPEC.md`](SPEC.md).
+
 Captured during the v1 production deploy (T45, 2026-06-15) while standing the
 agent up on the EC2 host by hand. Each item is grounded in friction that
 actually bit, not speculation. The north star: **one command (or one merged
