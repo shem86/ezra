@@ -139,8 +139,7 @@ margin.
   inbox-driven re-drain redid the work. (Strengthens the T44 reconciliation
   story.)
 - **Note:** three reminder messages (2 drill + the stale "go to sleep") landed
-  in the household test group `120363426855017212@g.us` during the drill —
-  expected, clearly labeled.
+  in the household test group during the drill — expected, clearly labeled.
 
 **Verdict: PROX-SEND-001 fix confirmed in situ.** The remaining T45 item is the
 folded T44 restore drill (backup sidecar `pg_hba` + WAL + real S3/calendar).

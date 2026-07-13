@@ -10,3 +10,4 @@ baileys-session/
 .wa-session/
 *.creds.json
 age.key
+.DS_Store

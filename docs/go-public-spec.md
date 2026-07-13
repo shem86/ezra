@@ -36,20 +36,21 @@ purging the non-secret AWS/host identifiers (decision: accept them — see §6).
 Ordered. Each is a discrete, reviewable unit. Nothing here flips visibility
 until §5 acceptance passes.
 
-**Phase A — Hygiene (safe, mechanical)**
-1. Add `LICENSE` at repo root: **MIT**, `Copyright (c) 2026 Shem Mahluf`.
-2. Add `.DS_Store` to `.gitignore` (currently untracked but un-ignored).
-3. `README.md` — pass for public first-impression: what the project is, that it
-   is a personal/learning project, architecture pointer, and an explicit "this
-   documents a real deployment; operational identifiers shown are for a host
-   that is firewalled — do not treat as an invitation" note. (Light edit; keep
-   scope tight.)
+**Phase A — Hygiene (safe, mechanical)** — ✅ DONE
+1. ✅ Added `LICENSE` at repo root: **MIT**, `Copyright (c) 2026 Shem Mahluf`.
+2. ✅ Added `.DS_Store` to `.gitignore` (was untracked but un-ignored).
+3. ✅ `README.md` — **assessed, no change needed.** It already frames the repo as
+   a personal, live, learn-in-public system with no secrets. Deliberately did
+   **not** add a "the host is firewalled, don't attack it" note: naming/pointing
+   at the prod IP in the README advertises the target — worse than silence. The
+   real control is Phase E hardening, not a disclaimer.
 
 **Phase B — Targeted redactions (identifying data, not topology)**
-4. `docs/ops-drills.md:142` — replace the real WhatsApp **group JID**
-   `120363426855017212@g.us` with a fabricated placeholder
-   (`<household-group-jid>` or a clearly-synthetic value), preserving the
-   drill's meaning.
+4. ✅ **DONE.** `docs/ops-drills.md:142` — removed the real WhatsApp **group JID**
+   `120363426855017212@g.us`. The prose already names it "the household test
+   group," so dropping the raw JID and keeping that label preserves the drill's
+   meaning with no awkward placeholder and no lost information. Confirmed it was
+   the only occurrence in the repo.
 5. ✅ **DONE.** The two oddly-specific `@lid` values in `send-class.test.ts` and
    `transport-protocol.test.ts` were replaced with clearly-synthetic values
    (`100000000000001@lid`, `100000000000002@lid`) rather than investigated —
