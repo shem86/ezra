@@ -92,7 +92,16 @@ async function main(): Promise<void> {
     botToken: config.alertChannelToken,
     chatId: config.alertChannelChatId,
   });
-  const health = createHealthMonitor({ alertChannel });
+  const health = createHealthMonitor({
+    alertChannel,
+    // The module default (60s) trips on ordinary Baileys reconnects: WhatsApp
+    // resets the socket server-side and the retry backoff routinely needs >60s
+    // to reach 'open' again, firing a benign down+reconnected pair (~daily in
+    // prod). 3min clears normal reconnects while staying inside the SPEC 5-min
+    // socket-drop bound; a real outage holds the socket not-open far longer
+    // (the retry loop gives up at ~4.3min, then stays 'closed').
+    downGraceMs: 180_000,
+  });
   const deadman = createDeadmanPinger({
     pingUrl: config.deadmanPingUrl,
     // A missed ping is exactly what the external dead-man exists to catch, but
@@ -212,7 +221,13 @@ async function main(): Promise<void> {
   const transport = createBaileysTransport({
     sessionStore: createSessionStore({ dir: config.waSessionDir }),
   });
-  transport.onStateChange((state) => health.onStateChange(state));
+  // Log every socket transition: the health monitor only alerts (to Telegram),
+  // so without this the lifecycle is invisible in `docker logs` and a reconnect
+  // flap can only be reconstructed from the alert channel. Mirrors [deadman].
+  transport.onStateChange((state) => {
+    console.log(`[socket] ${state}`);
+    health.onStateChange(state);
+  });
   // Plain client for reply-path reads and prompt stamping inside steps —
   // same pattern as dev/main's post-turn reads.
   const replyDb = new Client({ connectionString: config.databaseUrl });
