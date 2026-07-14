@@ -117,7 +117,7 @@ describe('normalizeJid', () => {
   it('leaves plain user, group, and lid JIDs untouched', () => {
     expect(normalizeJid('15551234567@s.whatsapp.net')).toBe('15551234567@s.whatsapp.net');
     expect(normalizeJid('120363001234567890@g.us')).toBe('120363001234567890@g.us');
-    expect(normalizeJid('67427329167522@lid')).toBe('67427329167522@lid');
+    expect(normalizeJid('100000000000002@lid')).toBe('100000000000002@lid');
   });
 });
 

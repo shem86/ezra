@@ -27,7 +27,7 @@ describe('selectSendClass', () => {
   });
 
   it('classifies a human reply as at-most-once', () => {
-    expect(selectSendClass({ kind: 'human', senderId: '232155984703662@lid' })).toBe(
+    expect(selectSendClass({ kind: 'human', senderId: '100000000000001@lid' })).toBe(
       'at-most-once',
     );
   });
@@ -323,8 +323,8 @@ describe('isTransientSendError', () => {
 // the same recipe PROX-SEND-001 uses for `transport not connected` — so the
 // classifier never has to guess from Baileys' fragile internal error text.
 describe('isUnroutableDestination', () => {
-  it('accepts a real @lid jid as routable', () => {
-    expect(isUnroutableDestination('232155984703662@lid')).toBe(false);
+  it('accepts a well-formed @lid jid as routable', () => {
+    expect(isUnroutableDestination('100000000000001@lid')).toBe(false);
   });
 
   it('accepts a real @s.whatsapp.net jid and a @g.us group as routable', () => {
