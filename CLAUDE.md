@@ -164,7 +164,7 @@ deploy picks it up, no host touch. Steady-state health is the hc-ping dead-man
 - Dev Mac containers run via Colima (occasionally flaky); **CI (Linux) is the
   arbiter** for anything container-dependent. Dead-database failures read as
   ECONNREFUSED — Colima is the usual local suspect, not the code.
-- GitHub `shem86/hh-assistant` (private). CI = build+lint+test+recovery with a
+- GitHub `shem86/ezra` (public). CI = build+lint+test+recovery with a
   pgvector service container, **plus prod-image build/smoke/push to GHCR**; CD
   deploys on release over SSM (see Deploying). Branch protection unavailable on
   the free plan — treat red CI as merge-blocking by discipline.

@@ -1,6 +1,6 @@
-# hh-assistant
+# Ezra
 
-![CI](https://github.com/shem86/hh-assistant/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/shem86/ezra/actions/workflows/ci.yml/badge.svg)
 ![status](https://img.shields.io/badge/status-live-success)
 ![lines of code](https://img.shields.io/badge/lines%20of%20code-7k-blue)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)

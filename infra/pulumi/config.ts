@@ -92,7 +92,7 @@ export function loadEnvConfig(): EnvConfig {
     ciDeployRoleName: c.get("ciDeployRoleName"),
     githubRepo: c.get("githubRepo"),
 
-    repoUrl: c.get("repoUrl") ?? "https://github.com/shem86/hh-assistant.git",
+    repoUrl: c.get("repoUrl") ?? "https://github.com/shem86/ezra.git",
     repoRef: c.get("repoRef") ?? "main",
     ezraTag: c.get("ezraTag") ?? "latest",
 

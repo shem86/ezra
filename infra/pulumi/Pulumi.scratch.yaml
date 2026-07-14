@@ -28,7 +28,7 @@ config:
   ezra:protectInstance: "false"
   ezra:createBackupBucket: "false"
   ezra:createCiDeployRole: "false"
-  ezra:repoUrl: https://github.com/shem86/hh-assistant.git
+  ezra:repoUrl: https://github.com/shem86/ezra.git
   ezra:repoRef: main
   ezra:ezraTag: latest
   ezra:secretsMode: ssm

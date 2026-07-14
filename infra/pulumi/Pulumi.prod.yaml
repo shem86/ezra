@@ -28,10 +28,10 @@ config:
   ezra:backupBucketName: hh-assistant-backups-001467466089
   ezra:createCiDeployRole: "true"
   ezra:ciDeployRoleName: hh-github-deploy
-  ezra:githubRepo: shem86/hh-assistant
+  ezra:githubRepo: shem86/ezra
   # cloud-init is IGNORED on adopt (userData in ignoreChanges) — values are here
   # only so a `pulumi up` that ever recreates would self-bootstrap correctly.
-  ezra:repoUrl: https://github.com/shem86/hh-assistant.git
+  ezra:repoUrl: https://github.com/shem86/ezra.git
   ezra:repoRef: main
   ezra:ezraTag: latest
   ezra:secretsMode: ssm
