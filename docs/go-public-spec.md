@@ -90,15 +90,37 @@ until §5 acceptance passes.
    active PR branch `worktree-go-public-spec` (deletes on merge). Owner approved
    the full prune.
 
-**Phase E — Security hardening (the one real security action)**
-8. Harden the SSH surface on `98.91.67.226` *before* flipping public, since the
-   public IP + `ubuntu` login user become known: confirm key-only auth (no
-   passwords), restrict inbound SSH in security group `sg-058d22ff56c01a528` to
-   known source IPs (or move to SSM-only / no public SSH if feasible), and
-   confirm `fail2ban`/equivalent or that SSH isn't broadly exposed. Record the
-   resulting posture. **This is host work, done via `ssh ubuntu@98.91.67.226`
-   (see host-sudo memory) or the AWS console — ask before changing prod SG
-   rules.**
+**Phase E — SSH hardening — DEFERRED to future hardening (not a pre-flip gate)**
+8. **Assessed 2026-07-14 (read-only). The host is already key-only, so the flip
+   creates no urgent hole — Phase E is downgraded from a hard pre-flip gate to
+   post-flip defense-in-depth.**
+
+   *Current-state assessment (only the SSH surface — WhatsApp is unaffected; it
+   runs over an outbound socket the host initiates, governed by the egress
+   allowlist, not by any ingress rule):*
+   - **Security group `sg-058d22ff56c01a528`** — its **only** ingress rule is TCP
+     **22 open to `0.0.0.0/0`**. No inbound HTTP/HTTPS or WhatsApp rule at all
+     (app is outbound-only + Tailscale for the backoffice).
+   - **`sshd` effective config** — `passwordauthentication no`,
+     `pubkeyauthentication yes`, `permitrootlogin no`,
+     `kbdinteractiveauthentication no`, `permitemptypasswords no`,
+     `maxauthtries 6`. **Key-only; no password vector to brute-force.**
+   - **Gaps:** `fail2ban` not installed; host ufw/nft ingress inactive (SG is the
+     sole gate); no `AllowUsers`/`AllowGroups` scoping.
+
+   *Why deferring is safe:* with password auth off, a world-open port 22 is not a
+   credential-compromise risk — only a holder of a valid private key gets in.
+   Residual risk from publishing the IP is bot noise on 22, an OpenSSH-zero-day
+   surface, and a future misconfig going instantly internet-facing.
+
+   *Chosen future hardening (owner decision 2026-07-14):* **SSH over Tailscale,
+   then close public port 22.** Tailscale is already on this host (backoffice), so
+   move admin SSH onto the tailnet and remove the `0.0.0.0/0` rule → the public IP
+   becomes fully inert (zero inbound). **Sequencing to avoid lockout:** verify
+   tailnet SSH end-to-end *before* removing the SG rule; keep a break-glass path
+   (SSM Session Manager / EC2 serial console) ready. Live-prod work, **ask-first**
+   on any SG or sshd change, and best done with the operator at the keyboard.
+   Does **not** touch egress, so WhatsApp connectivity is unaffected throughout.
 
 **Phase F — Flip visibility (irreversible-ish; do last, explicit go)**
 9. After §5 acceptance passes and with explicit user go-ahead:
@@ -168,8 +190,9 @@ Publication is gated on ALL of these passing:
 5. **`@lid` values confirmed** synthetic or replaced.
 6. **Branch keep-list applied** — remote branch list reviewed, stale ones
    deleted, survivors are intentional.
-7. **SSH surface hardened** (Phase E) and its posture recorded — this is a
-   pre-flip gate, not a post-flip nicety.
+7. ✅ **SSH surface assessed and posture recorded** (Phase E) — host is key-only,
+   so this is **no longer a pre-flip gate**; the Tailscale-only hardening is
+   deferred to post-flip defense-in-depth.
 8. **Explicit user go-ahead** for the visibility flip (§2 Phase F).
 9. **Post-flip:** repo confirmed public, CI green, deploy pipeline still
    functional (GHCR/SSM unaffected by visibility).
@@ -197,8 +220,9 @@ Publication is gated on ALL of these passing:
   surgery + rotation becomes mandatory before any flip.
 - Remove load-bearing identifiers from deploy/IaC config for cosmetic reasons
   (§3) — breaks the pipeline for no security gain.
-- Flip to public with `pnpm lint && pnpm test` red, or with the SSH surface
-  unhardened.
+- Flip to public with `pnpm lint && pnpm test` red. (The SSH surface being
+  world-open is acceptable at flip time *only because* auth is key-only — if that
+  ever regresses to password auth, hardening becomes a hard gate again.)
 - Treat the prose trim as a security control — it is presentation only.
 
 ---
