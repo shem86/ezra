@@ -32,7 +32,7 @@ export default tseslint.config(
     // Node ops scripts (the ui-debug script) — Node globals, not the browser.
     files: ['scripts/**/*.mjs'],
     languageOptions: {
-      globals: { console: 'readonly', process: 'readonly' },
+      globals: { console: 'readonly', process: 'readonly', URL: 'readonly' },
     },
   },
 );
