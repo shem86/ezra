@@ -1,0 +1,147 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Ezra — chat mock</title>
+<style>
+  /* A WhatsApp-style group thread used only to render docs/assets/chat.png for
+     the README. Data is fictional (Amir/Noa) — no real household PII. The look
+     evokes WhatsApp's light theme; Ezra's replies carry a terracotta accent to
+     tie back to the project's own palette. */
+  @import url('https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&display=swap');
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #d8ccc0; display: flex; justify-content: center; padding: 48px;
+         font-family: 'Hanken Grotesk', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+
+  .phone { width: 430px; border-radius: 46px; background: #111; padding: 12px;
+           box-shadow: 0 40px 90px -20px rgba(40,25,15,.55), 0 0 0 2px rgba(0,0,0,.35); }
+  .screen { border-radius: 36px; overflow: hidden; background: #e6ddd3; position: relative; }
+
+  /* status bar */
+  .status { background: #0b5e52; color: #fff; display: flex; justify-content: space-between;
+            align-items: center; padding: 10px 26px 6px; font-size: 13px; font-weight: 600; }
+  .status .dots { display: flex; gap: 5px; align-items: center; }
+
+  /* chat header */
+  .hdr { background: #0b5e52; color: #fff; display: flex; align-items: center; gap: 12px; padding: 8px 16px 12px; }
+  .hdr .back { font-size: 22px; opacity: .9; }
+  .hdr .grp { width: 42px; height: 42px; border-radius: 50%; background: #c9772f; display: flex;
+              align-items: center; justify-content: center; font-size: 22px; }
+  .hdr .meta { flex: 1; }
+  .hdr .name { font-size: 16px; font-weight: 700; }
+  .hdr .sub { font-size: 12px; opacity: .85; }
+  .hdr .ic { opacity: .9; font-size: 18px; }
+
+  /* messages */
+  .chat { padding: 16px 14px 20px; display: flex; flex-direction: column; gap: 8px;
+          background:
+            radial-gradient(circle at 20% 10%, rgba(255,255,255,.35), transparent 40%),
+            #e6ddd3; }
+  .day { align-self: center; background: #d9e8e4; color: #5a6b66; font-size: 11px; font-weight: 600;
+         padding: 4px 12px; border-radius: 10px; margin: 4px 0 8px; }
+
+  .row { display: flex; }
+  .row.right { justify-content: flex-end; }
+  .bubble { max-width: 78%; padding: 7px 10px 6px; border-radius: 12px; font-size: 14.5px;
+            line-height: 1.34; color: #1f2c28; box-shadow: 0 1px 1px rgba(0,0,0,.09); position: relative; }
+  .in  { background: #fff; border-top-left-radius: 4px; }
+  .out { background: #d6f2c4; border-top-right-radius: 4px; }
+  .ezra { background: #fff; border-top-left-radius: 4px; box-shadow: 0 1px 1px rgba(0,0,0,.09), inset 3px 0 0 #c9772f; }
+  .who { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+  .who.noa  { color: #2c7873; }
+  .who.ez   { color: #c9772f; display: flex; align-items: center; gap: 5px; }
+  .who.ez .v { background: #c9772f; color: #fff; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 6px; letter-spacing: .3px; }
+  .he { direction: rtl; text-align: right; }
+  .t { font-size: 10.5px; color: #8a9691; float: right; margin: 4px 0 -2px 10px; font-weight: 500; }
+  .tick { color: #2f9bff; }
+  .quote { border-left: 3px solid #c9772f; background: #f2ede7; border-radius: 5px;
+           padding: 4px 8px; margin-bottom: 5px; font-size: 12.5px; color: #5b524a; }
+  .quote b { color: #c9772f; display: block; font-size: 11.5px; }
+  .pill { display: inline-block; margin-top: 5px; font-size: 11px; font-weight: 700; color: #9a5a24;
+          background: #f6e4d0; border: 1px solid #e6c9a8; padding: 2px 8px; border-radius: 999px; }
+
+  /* input bar */
+  .input { display: flex; align-items: center; gap: 10px; padding: 9px 12px 12px; background: #e6ddd3; }
+  .input .box { flex: 1; background: #fff; border-radius: 22px; padding: 10px 16px; color: #9aa39f; font-size: 14px; }
+  .input .send { width: 42px; height: 42px; border-radius: 50%; background: #0b5e52; color: #fff;
+                 display: flex; align-items: center; justify-content: center; font-size: 18px; }
+</style>
+<div class="phone"><div class="screen">
+  <div class="status"><span>9:41</span><span class="dots">●●● &nbsp; ▮▮ &nbsp; 100%</span></div>
+
+  <div class="hdr">
+    <span class="back">‹</span>
+    <div class="grp">🏡</div>
+    <div class="meta">
+      <div class="name">Household</div>
+      <div class="sub">Amir, Noa, Ezra</div>
+    </div>
+    <span class="ic">⋮</span>
+  </div>
+
+  <div class="chat">
+    <div class="day">TODAY</div>
+
+    <div class="row"><div class="bubble in">
+      <div class="who noa">Noa</div>
+      <div class="he">תוסיף חלב ולחם לרשימת הקניות</div>
+      <span class="t">9:02</span>
+    </div></div>
+
+    <div class="row"><div class="bubble ezra">
+      <div class="who ez">Ezra <span class="v">BOT</span></div>
+      <div class="he">✅ הוספתי <b>חלב</b> ו<b>לחם</b> לרשימת הקניות. יש עכשיו 3 פריטים.</div>
+      <span class="t">9:02</span>
+    </div></div>
+
+    <div class="row right"><div class="bubble out">
+      what's on the shopping list?
+      <span class="t">9:03 <span class="tick">✓✓</span></span>
+    </div></div>
+
+    <div class="row"><div class="bubble ezra">
+      <div class="who ez">Ezra <span class="v">BOT</span></div>
+      🛒 <b>Groceries</b> — milk, bread, oat milk.
+      <span class="t">9:03</span>
+    </div></div>
+
+    <div class="row right"><div class="bubble out">
+      remind me tomorrow at 7am to take out the trash
+      <span class="t">9:04 <span class="tick">✓✓</span></span>
+    </div></div>
+
+    <div class="row"><div class="bubble ezra">
+      <div class="who ez">Ezra <span class="v">BOT</span></div>
+      ⏰ Done — I'll remind you <b>tomorrow at 7:00 AM</b> to take out the trash.
+      <span class="t">9:04</span>
+    </div></div>
+
+    <div class="row right"><div class="bubble out">
+      add a dentist appointment thursday 3pm to the calendar
+      <span class="t">9:06 <span class="tick">✓✓</span></span>
+    </div></div>
+
+    <div class="row"><div class="bubble ezra">
+      <div class="who ez">Ezra <span class="v">BOT</span></div>
+      📅 I'd like to add <b>Dentist · Thu 3:00–4:00 PM</b> to the shared calendar.
+      Reply to this message with ✅ to confirm.
+      <span class="pill">CONFIRM-BEFORE · parked</span>
+      <span class="t">9:06</span>
+    </div></div>
+
+    <div class="row right"><div class="bubble out">
+      <div class="quote"><b>Ezra</b>I'd like to add Dentist · Thu 3:00–4:00 PM…</div>
+      ✅ yes go ahead
+      <span class="t">9:07 <span class="tick">✓✓</span></span>
+    </div></div>
+
+    <div class="row"><div class="bubble ezra">
+      <div class="who ez">Ezra <span class="v">BOT</span></div>
+      ✔︎ Added <b>Dentist</b> to the shared calendar for Thursday.
+      <span class="t">9:07</span>
+    </div></div>
+  </div>
+
+  <div class="input">
+    <div class="box">Message</div>
+    <div class="send">➤</div>
+  </div>
+</div></div>
