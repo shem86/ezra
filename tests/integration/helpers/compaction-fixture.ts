@@ -17,6 +17,7 @@ import {
 } from '../../../src/agent/context.ts';
 import { loadContext, saveContext } from '../../../src/memory/store.ts';
 import { writeSemanticMemory } from '../../../src/memory/semantic.ts';
+import { writeCompactionLog, type CompactionLogInput } from '../../../src/memory/compaction-log.ts';
 import { hashEmbed } from './fake-embedder.ts';
 
 const connectionString = process.env.DATABASE_URL;
@@ -71,6 +72,12 @@ const writeMemoryStep = registerTransactionalStep(
   ): Promise<boolean> => writeSemanticMemory(db, input),
 );
 
+const writeCompactionLogStep = registerTransactionalStep(
+  dataSource,
+  'writeCompactionLog',
+  async (db, input: CompactionLogInput): Promise<boolean> => writeCompactionLog(db, input),
+);
+
 /** No tools needed: compaction triggers on transcript length, not content. */
 async function scriptedCallModel(
   _msgs: readonly TurnMessage[],
@@ -101,6 +108,8 @@ const compactionDeps = {
   summarize: scriptedSummarize,
   embedSummary: async (summary: string) => hashEmbed(summary),
   writeMemory: writeMemoryStep,
+  summarizerModelId: 'scripted-summarizer',
+  writeCompactionLog: writeCompactionLogStep,
 };
 
 export const compactingTurnWorkflow = DBOS.registerWorkflow(

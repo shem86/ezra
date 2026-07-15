@@ -66,6 +66,25 @@ async function memoryRows(conversationId: string): Promise<Array<{ content: stri
   return res.rows as Array<{ content: string; source_key: string }>;
 }
 
+interface CompactionLogRow {
+  source_key: string;
+  summary: string;
+  cut_index: number;
+  head_count: number;
+  tail_count: number;
+  summarizer_model: string;
+  head: TurnMessage[];
+}
+
+async function compactionLogRows(conversationId: string): Promise<CompactionLogRow[]> {
+  const res = await db.query(
+    `SELECT source_key, summary, cut_index, head_count, tail_count, summarizer_model, head
+     FROM compaction_log WHERE conversation_id = $1 ORDER BY created_at`,
+    [conversationId],
+  );
+  return res.rows as CompactionLogRow[];
+}
+
 async function waitFor(probe: () => Promise<boolean>, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -127,6 +146,13 @@ describe('compaction (T29)', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]!.source_key).toBe(sourceKey);
 
+    // The capture log co-keys on the same sourceKey, so its replayed write was
+    // also a no-op: exactly one row survives the kill (Success Criterion 1).
+    const logs = await compactionLogRows(conversationId);
+    expect(logs).toHaveLength(1);
+    expect(logs[0]!.source_key).toBe(sourceKey);
+    expect(logs[0]!.head_count).toBe(8); // head = msgs[0..8), the user-boundary cut
+
     const messages = await transcript(conversationId);
     expect(messages[0]).toMatchObject({ role: 'user', senderId: compactionSenderId });
     expect(messages).toHaveLength(1 + (thresholdMessages + 2 - 8)); // summary + tail from cut at 8
@@ -161,6 +187,23 @@ describe('compaction (T29)', () => {
     });
     expect(recalled[0]?.content).toBe(rows[0]!.content);
     expect(recalled[0]?.distance).toBeCloseTo(0, 5);
+
+    // The capture log records this compaction's INPUT (head) and output — the
+    // substrate the eval scores against (Success Criterion 2). It joins to the
+    // semantic row on source_key, and the summary it holds is identical.
+    const logs = await compactionLogRows(conversationId);
+    expect(logs).toHaveLength(1);
+    expect(logs[0]!.source_key).toBe(rows[0]!.source_key);
+    expect(logs[0]!.summary).toBe(rows[0]!.content);
+    expect(logs[0]!.cut_index).toBe(8);
+    expect(logs[0]!.head_count).toBe(8);
+    expect(logs[0]!.tail_count).toBe(6);
+    expect(logs[0]!.summarizer_model).toBe('scripted-summarizer');
+    // The head is the actual summarized messages, captured verbatim — this is
+    // what was previously discarded everywhere else.
+    expect(logs[0]!.head).toHaveLength(8);
+    expect(logs[0]!.head[0]).toMatchObject({ role: 'user' });
+    expect(logs[0]!.head[0]!.content).toContain('happy 0');
   }, 30_000);
 
   it('under threshold: transcript persists unchanged shape, no compaction artifacts', async () => {
@@ -174,6 +217,7 @@ describe('compaction (T29)', () => {
     expect(messages).toHaveLength(6);
     expect(messages.some((m) => m.role === 'user' && m.senderId === compactionSenderId)).toBe(false);
     expect(await memoryRows(conversationId)).toHaveLength(0);
+    expect(await compactionLogRows(conversationId)).toHaveLength(0);
   }, 30_000);
 
   it('chained compaction: a prior summary folds into the next one', async () => {
@@ -220,6 +264,9 @@ describe('compaction (T29)', () => {
     expect(messages[messages.length - 1]).toMatchObject({ role: 'assistant', content: 'ok.' });
     expect(messages.some((m) => m.role === 'user' && m.senderId === compactionSenderId)).toBe(false);
     expect(await memoryRows(conversationId)).toHaveLength(0);
+    // Nothing half-written: the capture log is part of the same all-or-nothing
+    // compaction effect, so a summarize failure leaves no log row either.
+    expect(await compactionLogRows(conversationId)).toHaveLength(0);
   }, 30_000);
 
   it('the journaled summary step records the summary, never the whole head', async () => {
