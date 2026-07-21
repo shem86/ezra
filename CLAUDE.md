@@ -170,4 +170,11 @@ deploy picks it up, no host touch. Steady-state health is the hc-ping dead-man
   the free plan — treat red CI as merge-blocking by discipline.
 - Household: mixed Hebrew + English (fixtures must cover code-switching);
   timezone Eastern — reminders/compaction anchor to it, never server time.
-- Prod host root is via `ssh ubuntu@98.91.67.226` (the `hh` user can't sudo).
+- Prod host root is via `ssh ubuntu@98.91.67.226` (the `hh` user can't sudo),
+  and it authorizes **only** the dedicated `~/.ssh/hh-assistant-aws` key — a
+  default `~/.ssh/id_ed25519` is rejected. Pin it in `~/.ssh/config` (a `Host
+  ezra-prod 98.91.67.226` block with `IdentityFile`+`IdentitiesOnly`, placed
+  **above** any `Host *` that sets an IdentityFile, since ssh tries them in
+  encounter order). Without that pin a bare `ssh` only succeeds while the agent
+  happens to hold the key, so it fails *intermittently* with `Permission denied
+  (publickey)` and reads as a host outage rather than local key selection.
