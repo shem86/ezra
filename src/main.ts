@@ -228,6 +228,21 @@ async function main(): Promise<void> {
   // --- Transport (declared early: the reply step below closes over it) ------
   const transport = createBaileysTransport({
     sessionStore: createSessionStore({ dir: config.waSessionDir }),
+    // The [socket] transitions below say the socket went away; they never say
+    // why, so a multi-minute 'connecting' stretch (2 in prod over 3.5 days,
+    // 4.1 and 5.5 min — past the 3-min alert grace) read as an unexplained
+    // hole in the log. Status code + backoff make that gap legible: mostly
+    // it should be our own retry sleep, and `gaveUp` marks the point the
+    // adapter stopped trying, which is the real outage boundary.
+    onDisconnect: ({ statusCode, action, attempt, retryDelayMs, gaveUp }) => {
+      const code = statusCode ?? 'none';
+      const detail = gaveUp
+        ? `giving up after ${String(attempt - 1)} retries`
+        : retryDelayMs === null
+          ? action
+          : `${action} #${String(attempt)} in ${String(retryDelayMs)}ms`;
+      console.warn(`[socket] disconnected: code=${String(code)} ${detail}`);
+    },
   });
   // Log every socket transition: the health monitor only alerts (to Telegram),
   // so without this the lifecycle is invisible in `docker logs` and a reconnect

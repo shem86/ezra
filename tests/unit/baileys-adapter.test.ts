@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createBaileysTransport, type WaSocketLike } from '../../src/transport/baileys.ts';
+import {
+  createBaileysTransport,
+  type DisconnectInfo,
+  type WaSocketLike,
+} from '../../src/transport/baileys.ts';
 import type { SessionStore } from '../../src/transport/session-store.ts';
 import type { InboundMessage, TransportState } from '../../src/transport/types.ts';
 
@@ -48,8 +52,10 @@ function harness(overrides: { maxAttempts?: number } = {}) {
   const states: TransportState[] = [];
   const messages: InboundMessage[] = [];
   const sleeps: number[] = [];
+  const disconnects: DisconnectInfo[] = [];
   const transport = createBaileysTransport({
     sessionStore: fakeSessionStore(),
+    onDisconnect: (info) => disconnects.push(info),
     createSocket: () => {
       const s = fakeSocket();
       sockets.push(s);
@@ -70,7 +76,7 @@ function harness(overrides: { maxAttempts?: number } = {}) {
   });
   transport.onStateChange((s) => states.push(s));
   transport.onMessage((m) => messages.push(m));
-  return { transport, sockets, states, messages, sleeps };
+  return { transport, sockets, states, messages, sleeps, disconnects };
 }
 
 async function connectOpen(h: ReturnType<typeof harness>): Promise<void> {
@@ -233,6 +239,103 @@ describe('baileys adapter: connection lifecycle', () => {
     await pending;
 
     expect(qrs).toEqual(['QR-DATA']);
+  });
+});
+
+// The socket lifecycle was observable only as bare 'connecting'/'open'
+// transitions, so a multi-minute reconnect (2 seen in prod over 3.5 days,
+// 4.1 and 5.5 min — past the 3-min alert grace) left no trace of WHY it
+// dropped or how much of the gap was backoff. These assert the reason and
+// the backoff are surfaced to the composing caller.
+describe('baileys adapter: disconnect reasons', () => {
+  it('reports the status code, action, attempt and backoff for a transient drop', async () => {
+    const h = harness();
+    await connectOpen(h);
+
+    h.sockets[0]!.emit('connection.update', {
+      connection: 'close',
+      lastDisconnect: { error: { output: { statusCode: 408 } } },
+    });
+    await flush();
+
+    expect(h.disconnects).toEqual([
+      { statusCode: 408, action: 'retry', attempt: 1, retryDelayMs: 100, gaveUp: false },
+    ]);
+  });
+
+  it('reports a 515 as a restart with no backoff', async () => {
+    const h = harness();
+    await connectOpen(h);
+
+    h.sockets[0]!.emit('connection.update', {
+      connection: 'close',
+      lastDisconnect: { error: { output: { statusCode: 515 } } },
+    });
+    await flush();
+
+    expect(h.disconnects).toEqual([
+      { statusCode: 515, action: 'restart', attempt: 0, retryDelayMs: null, gaveUp: false },
+    ]);
+  });
+
+  it('reports a 401 as re-pair', async () => {
+    const h = harness();
+    await connectOpen(h);
+
+    h.sockets[0]!.emit('connection.update', {
+      connection: 'close',
+      lastDisconnect: { error: { output: { statusCode: 401 } } },
+    });
+    await flush();
+
+    expect(h.disconnects).toEqual([
+      { statusCode: 401, action: 're-pair', attempt: 0, retryDelayMs: null, gaveUp: false },
+    ]);
+  });
+
+  // The give-up is the transition the alert grace actually cares about:
+  // it's the moment a long 'connecting' stretch becomes a real outage.
+  it('flags the attempt that exhausts the retry budget', async () => {
+    const h = harness({ maxAttempts: 2 });
+    await connectOpen(h);
+
+    for (let i = 0; i < 3; i++) {
+      h.sockets.at(-1)!.emit('connection.update', {
+        connection: 'close',
+        lastDisconnect: { error: { output: { statusCode: 408 } } },
+      });
+      await flush();
+    }
+
+    expect(h.disconnects.map((d) => [d.attempt, d.retryDelayMs, d.gaveUp])).toEqual([
+      [1, 100, false],
+      [2, 200, false],
+      [3, null, true],
+    ]);
+  });
+
+  it('surfaces an unknown status code rather than dropping it', async () => {
+    const h = harness();
+    await connectOpen(h);
+
+    h.sockets[0]!.emit('connection.update', {
+      connection: 'close',
+      lastDisconnect: { error: {} },
+    });
+    await flush();
+
+    expect(h.disconnects[0]).toMatchObject({ statusCode: undefined, action: 'retry' });
+  });
+
+  it('stays silent on an intentional disconnect (not an incident)', async () => {
+    const h = harness();
+    await connectOpen(h);
+
+    await h.transport.disconnect();
+    h.sockets[0]!.emit('connection.update', { connection: 'close' });
+    await flush();
+
+    expect(h.disconnects).toEqual([]);
   });
 });
 
