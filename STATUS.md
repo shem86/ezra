@@ -1,7 +1,8 @@
 # STATUS — what's open right now
 
 **Last full reconcile: 2026-07-21** (validated against `git log`, `gh`, and the
-source tree — not against the other docs).
+source tree — not against the other docs). Secret scan clean the same day
+(see Open item 2).
 
 This is the **single source of truth for current state**. Everything else is
 history:
@@ -46,24 +47,35 @@ fallback, ideally validated on a §2 create-from-zero (`scratch`) env first.
 live. That run mattered — the adopted host never ran cloud-init, so the
 `sudoers-hh-ops` drop-in was missing and **egress was silently failing open**.
 
-### 2. Go-public acceptance criteria that were never met
-**Status:** open · **verified** 2026-07-21 (read `0b4f008`; grepped the tree for
-scanner configs and CI steps).
+### 2. Go-public: broad PII sweep still unrecorded
+**Status:** partially closed · **verified** 2026-07-21.
 
-The repo is already public, so these are verify-after-the-fact:
+- ~~**Tool-based secret re-scan**~~ ✅ **CLOSED 2026-07-21 — clean, zero
+  findings.** gitleaks v8.30.1 over the **entire public history**, run twice:
+  the local repo (294 commits) and, separately, a fresh clone with every GitHub
+  PR head ref fetched (298 commits) — the second run because 21 branches were
+  pruned in go-public Phase D, leaving **13 commits reachable only via
+  `refs/pull/*/head`**, which are public on GitHub but invisible to a local
+  scan. Both reports empty. Coverage is provably complete: 328 reachable
+  commits = 294 scanned + 33 merges (no unique diff) + 1 empty commit
+  (`844d6e1`). This retires §5 acceptance item 1 and confirms the original
+  manual audit's conclusion.
 
-- **Tool-based secret re-scan — never run.** §5 acceptance item 1 ("Secret
-  re-scan clean") is unchecked; of 9 criteria only item 7 (SSH assessed) carries
-  a ✅. No gitleaks/trufflehog/detect-secrets config or CI step exists anywhere
-  in the repo — the only occurrences of those names are the aspirational
-  sentence at `V2_NOTES.md` §10. What *was* done is a manual `git log -p --all`
-  review across 310 commits concluding zero real secrets. That is a strong
-  premise given the repo's discipline, but it is not a tool run.
-- **Broad PII sweep — not recorded.** §10 asks for a sweep of fixtures, tests,
-  and committed logs for real phone numbers, JIDs, names, addresses, and
+  Repeat with:
+  ```
+  git clone https://github.com/shem86/ezra.git /tmp/prscan
+  git -C /tmp/prscan fetch origin '+refs/pull/*/head:refs/remotes/pr/*'
+  docker run --rm -v /tmp/prscan:/repo:ro zricethezav/gitleaks:latest \
+    git /repo --redact --log-opts="--all"
+  ```
+
+- **Broad PII sweep — still not recorded.** §10 asks for a sweep of fixtures,
+  tests, and committed logs for real phone numbers, JIDs, names, addresses, and
   calendar contents. What happened was two targeted redactions (a real group JID
   in `docs/ops-drills.md`, two `@lid` values in tests). No commit or doc records
-  the broad sweep.
+  the broad sweep. **Note gitleaks does not cover this** — it detects
+  credential-shaped strings, not household PII, so the clean scan above says
+  nothing about it.
 
 ### 3. Ledger #14 — durable `wasSentByBot` (restart-surviving echo guard)
 **Status:** open, builder decision (schema vs adapter-id) · **verified**
