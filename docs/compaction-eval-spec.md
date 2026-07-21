@@ -1,8 +1,20 @@
 # Spec: Compaction & Embedding Evaluation Harness
 
-**Status:** DRAFT — awaiting human review (Phase 1 of spec-driven workflow; do not implement until approved).
-**Date:** 2026-06-29
+**Status:** ✅ **SHIPPED** — all 5 tasks landed 2026-06-29 → 2026-07-06
+(`4eb18c1` capture substrate, `aeafdd2` turn wiring, `e8ab1d7` fixtures,
+`859de30` judge + scorer, `601174d` prod spot-check, `c3c0b7f` eval-env reader).
+The harness is **report-only** — no threshold is promoted to a CI gate.
+**Open quality finding** from the calibration run below: Hebrew→English
+translation in summaries, *not* fixed by a model bump. Tracked in
+[`STATUS.md`](../STATUS.md).
+**Date:** 2026-06-29 (spec) · last verified 2026-07-21
 **Owner:** Shem
+
+> *Reading note:* this file stays at `docs/compaction-eval-spec.md` — 11 source
+> files (`src/memory/compaction-log.ts`, `src/agent/handle-turn.ts`, `evals/*`,
+> `tests/integration/compaction-log.test.ts`) reference this path in comments, so
+> it is a stable anchor like the `V2_NOTES §N` numbers. The task list below is
+> kept verbatim as the build trail; it is history, not a to-do list.
 
 ## Objective
 

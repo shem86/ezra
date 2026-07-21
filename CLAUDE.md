@@ -7,16 +7,18 @@ shared lists, Google Calendar, household Q&A. Dual goal: production-grade
 agentic-systems learning and daily utility. **Reliability beats sophistication
 in every v1 trade-off.** v1 is built and launched (M0–M6 complete, all SPEC
 success criteria verified — `docs/launch-checklist.md`); the system runs on an
-AWS EC2 host. Work now is operation, hardening, and v2 (`V2_NOTES.md`).
+AWS EC2 host. Work now is operation, hardening, and v2 — **start at `STATUS.md`**
+for what is actually open; `V2_NOTES.md` is the journal behind it.
 
 ## Source-of-truth documents (read before changing anything)
 
 | Doc | Owns | Status |
 |---|---|---|
+| **`STATUS.md`** | **What's open *right now*** — the ONLY file that asserts current state | **read first** |
 | `household-ai-agent-architecture-v3_5.md` | *Why* — locked decisions 1–11 | LOCKED |
 | `SPEC.md` | *Building* — scope, conventions, boundaries | APPROVED |
 | `PLAN.md` | Milestones M0–M6 + verification gates | DONE |
-| `TASKS.md` | Per-task ledger + live progress checkboxes | M0–M6 complete |
+| `TASKS.md` | Per-task ledger (T-numbers are stable anchors) | complete — history |
 | `docs/spike-results.md` | Spike verdicts, pinned versions, gotchas | reference |
 | `docs/launch-checklist.md` · `docs/recovery-runbook.md` · `docs/ops-drills.md` | Launch/ops runbooks | reference |
 | `docs/adr-000*.md` | Reversed/locked decisions (router removed, Voyage, service-account calendar) | reference |
@@ -26,6 +28,17 @@ implementation detail. `TASKS.md` carries a per-task trail (the "T-numbers" in
 commit messages and code comments index into it) — read the relevant T-entry
 before changing the code it describes; it records *why* the code is shaped the
 way it is and what already bit us.
+
+**Status discipline (why `STATUS.md` exists).** Current state lives in exactly
+ONE file. `V2_NOTES.md`, `TASKS.md`, and the specs are append-only history —
+never add a status table to them, and treat their inline ✅/⏳ markers as
+historical. This rule was earned: status was duplicated across four documents
+and every copy drifted (V2_NOTES §10 still read "gate — evaluate before
+flipping" a week after the repo went public; §5's heading contradicted §11's
+body). When you close something, update `STATUS.md` **in the same PR**, and give
+every claim a date plus how it was verified. Never delete a spec — archive it
+under `docs/specs/archive/` (the go-public audit record was lost to a delete and
+had to be recovered from `0b4f008`).
 
 ## Commands
 
@@ -147,8 +160,8 @@ going green**, then `gh release create`s — which fires the deploy — and foll
 it to its outcome. The blocking step is the point: the deploy doesn't wait for
 the image, so publishing by hand risks deploying a tag whose image isn't in GHCR
 yet. A `-rc.N` suffix cuts a prerelease (still fires the deploy — an rc dry-run).
-Only cut off **green `main`** (branch protection is unavailable while private —
-the CD gate is discipline). Redeploy or roll an already-released tag via Actions
+Only cut off **green `main`** (the CD gate is discipline — see the branch-protection
+note under Environment notes). Redeploy or roll an already-released tag via Actions
 → Deploy → Run workflow (`workflow_dispatch` with the `tag`), **not** `pnpm
 release`. PAT rotation is just `aws ssm put-parameter --overwrite`; the next
 deploy picks it up, no host touch. Steady-state health is the hc-ping dead-man
@@ -166,8 +179,10 @@ deploy picks it up, no host touch. Steady-state health is the hc-ping dead-man
   ECONNREFUSED — Colima is the usual local suspect, not the code.
 - GitHub `shem86/ezra` (public). CI = build+lint+test+recovery with a
   pgvector service container, **plus prod-image build/smoke/push to GHCR**; CD
-  deploys on release over SSM (see Deploying). Branch protection unavailable on
-  the free plan — treat red CI as merge-blocking by discipline.
+  deploys on release over SSM (see Deploying). Branch protection was unavailable
+  while the repo was private; it went public 2026-07-14, so GitHub now offers it
+  free — until it is actually enabled, treat red CI as merge-blocking by
+  discipline (tracked in `STATUS.md`).
 - Household: mixed Hebrew + English (fixtures must cover code-switching);
   timezone Eastern — reminders/compaction anchor to it, never server time.
 - Prod host root is via `ssh ubuntu@98.91.67.226` (the `hh` user can't sudo).

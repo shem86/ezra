@@ -1,6 +1,10 @@
 # Tasks: Household AI Agent v1 (hh-assistant)
 
-> **Status: APPROVED 2026-06-09 — execution in progress.**
+> **Status: ✅ COMPLETE — all 52 tasks done (T1–T48 + `PROX-SEND-001`), M0–M6.**
+> Approved 2026-06-09; build backlog closed 2026-06-21. The v1 build ledger is
+> finished — this file is now history. Open work lives in [`STATUS.md`](STATUS.md),
+> including the one still-open row of the deferred-decisions ledger below
+> (**#14**, durable `wasSentByBot`). Last verified 2026-07-21.
 > Breakdown of `PLAN.md` (approved 2026-06-09). Tasks are dependency-ordered within each milestone; each is sized for one focused session and touches ≤ ~5 files. M0–M3 are fully specified; M4–M6 tasks are named and gated but get their full acceptance criteria refined at milestone entry (their shape depends on what M1/M3 validate). `[H]` marks tasks the builder does by hand (drills, approvals, external accounts). Number acquisition, warming, and soak testing are out of scope; tasks assume a paired, usable WhatsApp number.
 >
 > *Reading note:* this is the raw v1 build ledger, kept verbatim as working

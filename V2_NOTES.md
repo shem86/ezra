@@ -12,50 +12,22 @@ actually bit, not speculation. The north star: **one command (or one merged
 PR) takes a clean commit to a running, hardened, monitored process — and the
 ~Oct-2026 Hetzner migration is a provider swap, not a re-derivation.**
 
-## Status at a glance
+## Status — see [`STATUS.md`](STATUS.md)
+
+**This file no longer tracks current state.** It is an append-only ops journal;
+[`STATUS.md`](STATUS.md) is the single source of truth for what is open today.
 
 Section numbers are stable anchors (code comments + systemd units reference
-`V2_NOTES §N`) — they don't renumber as items close. Detail stays in each
-section below; this table is the index.
+`V2_NOTES §N`) — they don't renumber as items close, and `STATUS.md` cites them
+rather than restating them.
 
-| § | Item | State |
-|---|---|---|
-| 1 | CI/CD pipeline (build→GHCR→release→SSM deploy) | ✅ shipped — only README badge automation open (§10 dissolves it) |
-| 2 | IaC (Pulumi TS) | ✅ shipped — prod adopted (0 replacements) + create-from-zero proven |
-| 3 | App secrets → SSM/SOPS | ✅ shipped — both paths wired + prod param seeded (2026-06-24); only the next-deploy log check remains |
-| 4 | Compose ergonomics (`Makefile`) | ✅ shipped — host-Node removal done (firewall reads a committed, drift-guarded artifact) |
-| 5 | Egress firewall (units + static bridge pin) | ✅ shipped — cloud-layer SG egress now authored in Pulumi (apply pending — deliberate prod step) |
-| 7 | Pairing (`make pair`) | ✅ shipped |
-| 8 | CI verification smokes (image + config-load) | ✅ shipped |
-| 11 | Egress refresh split (no fail-open window) | ✅ shipped |
-| 6 | Backups automation (initdb bake + scheduled base + freshness) | ✅ shipped + fully wired on prod (2026-06-28): timers enabled, freshness dead-man green, old crontab retired; only the initdb-bake/`hh_backup` migration awaits the next full rebuild (passive) |
-| 9 | Footguns burned in v1 | 📌 reference |
-| 10 | Going public (secret/PII scrub, LICENSE) | ⏳ gate — evaluate before flipping |
-| 12 | AI / model-layer guardrails | 🟢 spend limit ✅ set; untrusted-content boundary Phase 0 ✅ shipped + eval-ratified (ADR-0005 Accepted) — Phase 1 deferred to M5 |
-
-**What's next, ranked:**
-
-1. **§12 — set the Anthropic Console monthly spend limit** (dedicated
-   workspace + key). Zero code, biggest risk-reduction-per-effort; the one
-   "do this first" item.
-2. **§12 — data/instruction + memory-poisoning boundary.** ✅ Phase 0 shipped +
-   eval-ratified (`docs/adr-0005-untrusted-content-boundary.md`, Accepted):
-   fence-at-tool on calendar/recall/facts + the system-prompt rule; injection
-   evals hold. Phase 1 (nonce marker, web/Q&A, forwarded-message provenance)
-   deferred to M5.
-3. ~~**§6 — bake replication into initdb + schedule base backups + surface
-   freshness**~~ ✅ shipped in-repo (initdb bake + `hh_backup` role + base/
-   freshness timers + dead-man ping); the one operator step left is enabling the
-   timers on the live host (the PR doesn't touch prod).
-4. **§4 / §5 — drop host Node** (render the allowlist at image-build). The
-   **cloud-layer SG egress** defense-in-depth is now authored in §2's Pulumi SG
-   (443/80/53/123); applying it to live prod is the remaining deliberate step.
-5. **§10 — the going-public gate** (history secret scan, PII audit, LICENSE);
-   flipping dissolves the §1 badge workarounds and unlocks branch protection.
-
-*(§3 closed 2026-06-24 — `.env`-from-SSM wired on both paths and the prod
-param seeded; the only remainder is a one-line check that the next release's
-deploy log shows `secrets: .env materialized from ssm`, not a build task.)*
+> **The ✅/⏳ markers in the section headings below are historical** — true when
+> written, not maintained since. This split exists because the old
+> "Status at a glance" table drifted: it still read `§10 ⏳ gate — evaluate
+> before flipping` a week after the repo went public, and §5's heading claimed
+> the systemd units were installed while §11's body called installing them "the
+> remaining manual step." Two copies of the truth meant one was always stale.
+> Status now lives in exactly one file.
 
 ## 1. CI/CD — ✅ BUILT (badge automation still open)
 

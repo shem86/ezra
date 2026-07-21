@@ -259,7 +259,7 @@ A single-operator, **read-only** web console (`backoffice/` — Vite + React,
 Hebrew/English-aware) sits over the live system as an *observatory*: what it did,
 what it knows, what it costs, and whether it's healthy. Zero write paths reach
 the UI; it's exposed only over a private Tailscale tailnet, never a public port.
-See [`docs/backoffice-spec.md`](docs/backoffice-spec.md).
+See [`docs/specs/archive/backoffice-spec.md`](docs/specs/archive/backoffice-spec.md).
 
 <table>
 <tr>
@@ -365,13 +365,14 @@ docs/               ADRs, spike results, runbooks, drill logs, launch checklist
 
 | Document | What it owns |
 |---|---|
+| [`STATUS.md`](STATUS.md) | **Current state** — the single source of truth for what is open today |
 | `household-ai-agent-architecture-v3_5.md` | **Why** — the locked architecture decisions |
 | [`SPEC.md`](SPEC.md) | **What/how** — scope, conventions, boundaries, success criteria |
 | [`docs/adr-0001-remove-secret-fact-class.md`](docs/adr-0001-remove-secret-fact-class.md) | Why the user-facing secret-fact class was dropped |
 | [`docs/adr-0002-voyage-embeddings.md`](docs/adr-0002-voyage-embeddings.md) | Why Voyage + a zero-dependency fetch client for embeddings |
 | [`docs/adr-0003-remove-turn-router.md`](docs/adr-0003-remove-turn-router.md) | Why the tiered cheap/reasoning turn router was removed |
 | [`docs/adr-0004-service-account-calendar.md`](docs/adr-0004-service-account-calendar.md) | Why a shared-calendar service account over OAuth consent |
-| [`docs/backoffice-spec.md`](docs/backoffice-spec.md) | The read-only operations console — scope, exposure, screens |
+| [`docs/specs/archive/backoffice-spec.md`](docs/specs/archive/backoffice-spec.md) | The read-only operations console — scope, exposure, screens *(archived; shipped)* |
 | [`docs/launch-checklist.md`](docs/launch-checklist.md) | SPEC success criteria, each box closed with evidence |
 | [`docs/recovery-runbook.md`](docs/recovery-runbook.md) | The four loss scenarios + mechanical reconciliation |
 | [`docs/spike-results.md`](docs/spike-results.md) | Spike verdicts, version pins, gotchas |
