@@ -185,4 +185,7 @@ deploy picks it up, no host touch. Steady-state health is the hc-ping dead-man
   discipline (tracked in `STATUS.md`).
 - Household: mixed Hebrew + English (fixtures must cover code-switching);
   timezone Eastern — reminders/compaction anchor to it, never server time.
-- Prod host root is via `ssh ubuntu@98.91.67.226` (the `hh` user can't sudo).
+- Prod host root is via `ssh ubuntu@98.91.67.226` (the `hh` user can't sudo);
+  it authorizes only the dedicated `~/.ssh/hh-assistant-aws` key, which needs
+  pinning in `~/.ssh/config` or a bare `ssh` fails *intermittently* — setup and
+  symptom in `infra/host.md`.
