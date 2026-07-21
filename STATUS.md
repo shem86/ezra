@@ -27,7 +27,13 @@ history:
 3. **Never delete a spec** — archive it. `go-public-spec.md` was deleted in the
    pre-public trim and its audit record survived only in `0b4f008`.
 4. **Update this file in the same PR as the work.** Branch protection is not
-   enforcing that today (see below), so it is discipline.
+   enforcing that today, so it is discipline.
+5. **Cite symbols, never line numbers.** `the wasSentByBot: () => false wiring
+   in src/main.ts`, not `src/main.ts:431`. Earned immediately: this file shipped
+   2026-07-21 citing four line numbers, and PR #35 (socket-drop diagnostics)
+   invalidated all four the *same day* — `main.ts:431`→446,
+   `baileys.ts:142`→162, `:305`→345, `:228`→268. The facts were still true; only
+   the pointers rotted. A grep-able symbol survives every refactor above it.
 
 ---
 
@@ -81,12 +87,13 @@ live. That run mattered — the adopted host never ran cloud-init, so the
 **Status:** open, builder decision (schema vs adapter-id) · **verified**
 2026-07-21 by reading source.
 
-Production passes a hardcoded constant: `src/main.ts:431` →
-`wasSentByBot: () => false`. The real suppression is an **in-memory ring
-buffer** — `src/transport/baileys.ts:142` (`RecentIds`), populated at `:305`,
-consulted at `:228` — which is **lost on restart**. The `IngestionDeps.wasSentByBot`
-seam (`src/orchestration/ingest.ts:56`, checked at `:88`) is therefore dead code
-in prod. `sent_log` exists but is wired only to send-class dedup, not the echo
+Production passes a hardcoded constant — the `wasSentByBot: () => false` wiring
+in `src/main.ts`. The real suppression is an **in-memory ring buffer**: the
+`sentIds = new RecentIds(SENT_ID_CAPACITY)` in `src/transport/baileys.ts`,
+populated by `sentIds.add(messageId)` on send and consulted by `sentIds.has(id)`
+on inbound — so it is **lost on restart**. The `IngestionDeps.wasSentByBot` seam
+(declared and checked in `src/orchestration/ingest.ts`) is therefore dead code in
+prod. `sent_log` exists but is wired only to send-class dedup, not the echo
 guard; no migration adds an echo/adapter-id table (`migrations/` tops out at
 `0008-compaction-log.sql`).
 
