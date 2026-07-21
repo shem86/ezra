@@ -26,6 +26,7 @@ import {
   normalizeJid,
   RecentIds,
   toEpochSeconds,
+  type DisconnectAction,
   type ReconnectPolicy,
 } from './protocol.js';
 
@@ -68,12 +69,31 @@ interface UpsertLike {
   }>;
 }
 
+/** Why the socket dropped, and what the adapter decided to do about it. */
+export interface DisconnectInfo {
+  /** WhatsApp's disconnect code; undefined when the error carried none. */
+  statusCode: number | undefined;
+  action: DisconnectAction;
+  /** Retry number within the current budget; 0 for 'restart'/'re-pair'. */
+  attempt: number;
+  /** Backoff before the next attempt; null when not retrying. */
+  retryDelayMs: number | null;
+  /** The retry budget is spent — the adapter is giving up and going 'closed'. */
+  gaveUp: boolean;
+}
+
 export interface BaileysTransportDeps {
   sessionStore: SessionStore;
   reconnectPolicy?: ReconnectPolicy;
   sendTimeoutMs?: number;
   /** Pairing hook — the QR payload to render for the builder. */
   onQr?: (qr: string) => void;
+  /**
+   * Observability seam for unexpected drops (never fires on an intentional
+   * disconnect). The adapter itself stays console-free — the composing
+   * caller decides where this goes, mirroring deadman's onPingError.
+   */
+  onDisconnect?: (info: DisconnectInfo) => void;
   /** Test seams; default to the real socket, timer, and Math.random. */
   createSocket?: (auth: AuthenticationState) => Promise<WaSocketLike> | WaSocketLike;
   sleep?: (ms: number) => Promise<void>;
@@ -183,6 +203,15 @@ export function createBaileysTransport(deps: BaileysTransportDeps): Transport {
     });
   }
 
+  // Observability must never take the socket down with it.
+  function report(info: DisconnectInfo): void {
+    try {
+      deps.onDisconnect?.(info);
+    } catch {
+      // A broken observer is not a transport failure.
+    }
+  }
+
   function handleClose(statusCode: number | undefined): void {
     if (intentionalClose) {
       setState('closed');
@@ -193,22 +222,33 @@ export function createBaileysTransport(deps: BaileysTransportDeps): Transport {
       void startSocket();
       return;
     }
-    switch (classifyDisconnect(statusCode)) {
+    const action = classifyDisconnect(statusCode);
+    switch (action) {
       case 're-pair':
         // Auto-reconnecting on 401 would loop; restoring old state is
         // forbidden. A human re-pairs.
+        report({ statusCode, action, attempt: 0, retryDelayMs: null, gaveUp: false });
         setState('logged-out');
         return;
       case 'restart':
+        report({ statusCode, action, attempt: 0, retryDelayMs: null, gaveUp: false });
         void startSocket();
         return;
       case 'retry': {
         retryAttempts += 1;
         if (retryAttempts > policy.maxAttempts) {
+          report({
+            statusCode,
+            action,
+            attempt: retryAttempts,
+            retryDelayMs: null,
+            gaveUp: true,
+          });
           setState('closed');
           return;
         }
         const delay = computeReconnectDelay(retryAttempts - 1, policy, random);
+        report({ statusCode, action, attempt: retryAttempts, retryDelayMs: delay, gaveUp: false });
         void sleep(delay).then(() => {
           if (!intentionalClose) return startSocket();
         });
