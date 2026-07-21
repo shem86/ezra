@@ -66,7 +66,26 @@ dwarfs the data.
   tcp/22 from 0.0.0.0/0 only; egress default-open until T16's allowlist
   (SG egress rules give cloud-layer enforcement alongside on-host rules)
 - Key pair: `hh-assistant` (ed25519; private key `~/.ssh/hh-assistant-aws`
-  on the builder's Mac — never in repo or backups)
+  on the builder's Mac — never in repo or backups). The host authorizes
+  **only** this key, so pin it per-host in `~/.ssh/config`:
+
+  ```
+  Host ezra-prod 98.91.67.226
+    HostName 98.91.67.226
+    User ubuntu
+    IdentityFile ~/.ssh/hh-assistant-aws
+    IdentitiesOnly yes
+  ```
+
+  Placement is load-bearing: ssh tries `IdentityFile`s in the order it
+  encounters them, so this block must sit **above** any `Host *` that sets
+  one (a `Host *` pinning `~/.ssh/id_ed25519` is a common default and is
+  what's on the builder's Mac). Unpinned, a bare `ssh ubuntu@98.91.67.226`
+  succeeds only while the agent happens to be holding the key and fails with
+  `Permission denied (publickey)` once it doesn't — an *intermittent* failure
+  that reads as a host outage rather than local key selection. Verify the fix
+  with the agent disabled: `SSH_AUTH_SOCK= ssh ezra-prod` (2026-07-21, cost a
+  detour mid-deploy).
 - Budget: pre-existing "My Zero-Spend Budget" ($1/mo) doubles as the
   credit-expiry tripwire (see above)
 
