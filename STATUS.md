@@ -163,8 +163,18 @@ calendar rollout).
 
 ## Watch list (from the `TASKS.md` deferred-decisions ledger)
 
-- **#7** — T19 kill-mid-flight flake under triple-suite load (1 in ~9,
-  unreproduced). Watch in `test:recovery`.
+- **#7** — kill-mid-flight flake under load. **No longer unreproduced:**
+  it recurred in CI 2026-08-03 (run `30834016384`, PR #38) — this time in the
+  `handleTurn skeleton (T22)` suite in `tests/integration/handle-turn.test.ts`,
+  not T19's file. The mid-flight
+  child never produced its first effect ("condition not met within 30000ms"),
+  and because that test runs first *by design* (it must observe a PENDING
+  workflow before `DBOS.launch()` triggers recovery), its failure meant launch
+  never happened and the other 22 tests in the file cascaded with
+  "`DBOS.launch()` must be called before running workflows". One re-run went
+  fully green with no code change. Two things to carry: the blast radius is
+  the **whole file**, not one test, so this reads far worse than it is; and
+  the flake is not T19-specific. Watch in `test:recovery`.
 - **#13** — `semantic.test.ts` "empty store" test races parallel suites on the
   shared dev DB. Fix if it recurs.
 - **#16** — dev/prod prompt divergence on sender attribution; resolved for the

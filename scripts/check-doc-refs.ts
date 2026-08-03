@@ -151,6 +151,10 @@ const checkSymbolBindings = (file: string, text: string): void => {
   for (const m of flat.matchAll(/`([^`]+)`[^`]{0,60}?\bin\s+`([^`]+)`/g)) {
     const [, symbol, path] = m
     if (!isRepoPath(path)) continue
+    // Prose puts plenty of non-identifiers next to a path — a CI run id, an
+    // issue number, a duration. Only an identifier-shaped token is a claim
+    // about the code, and only those are worth resolving.
+    if (!/^[A-Za-z_$]/.test(symbol.trim())) continue
     bound.set(path, [...(bound.get(path) ?? []), symbol])
   }
 
