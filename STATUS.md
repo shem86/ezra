@@ -28,12 +28,18 @@ history:
    pre-public trim and its audit record survived only in `0b4f008`.
 4. **Update this file in the same PR as the work.** Branch protection is not
    enforcing that today, so it is discipline.
-5. **Cite symbols, never line numbers.** `the wasSentByBot: () => false wiring
-   in src/main.ts`, not `src/main.ts:431`. Earned immediately: this file shipped
-   2026-07-21 citing four line numbers, and PR #35 (socket-drop diagnostics)
-   invalidated all four the *same day* — `main.ts:431`→446,
-   `baileys.ts:142`→162, `:305`→345, `:228`→268. The facts were still true; only
-   the pointers rotted. A grep-able symbol survives every refactor above it.
+5. **Cite symbols, never line numbers.** <!-- refcheck:off --> `the
+   wasSentByBot: () => false wiring in src/main.ts`, not `src/main.ts:431`.
+   Earned immediately: this file shipped 2026-07-21 citing four line numbers,
+   and PR #35 (socket-drop diagnostics) invalidated all four the *same day* —
+   `main.ts:431`→446, `baileys.ts:142`→162, `:305`→345, `:228`→268. The facts
+   were still true; only the pointers rotted. A grep-able symbol survives every
+   refactor above it. <!-- refcheck:on -->
+   Enforced by `pnpm check:docs` (`scripts/check-doc-refs.ts`), which also
+   resolves every link and every cited path, and requires each `src/`/`tests/`
+   path in this file to carry a symbol that still greps. It runs in **both** CI
+   workflows on purpose — see the header comment in that script for why a
+   docs-only trigger would have been green through the very failure above.
 
 ---
 

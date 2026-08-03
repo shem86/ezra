@@ -40,6 +40,16 @@ every claim a date plus how it was verified. Never delete a spec — archive it
 under `docs/specs/archive/` (the go-public audit record was lost to a delete and
 had to be recovered from `0b4f008`).
 
+Half of that discipline is mechanical: `pnpm check:docs`
+(`scripts/check-doc-refs.ts`) resolves every markdown link, asserts every repo
+path cited in `STATUS.md`/`CLAUDE.md`/`README.md` exists, and requires each
+`src/`/`tests/` path in `STATUS.md` to name a symbol that still greps there —
+so **cite symbols, never line numbers**. It runs in *both* CI workflows because
+neither trigger alone is sufficient: reference rot is introduced by **code**
+PRs (`ci.yml`) and link rot by **doc** PRs (`docs.yml`, which covers the
+`'**.md'`/`'docs/**'` paths `ci.yml` ignores). The other half — whether a claim
+matches reality — no grep can reach, and stays a periodic human reconcile.
+
 ## Commands
 
 ```
@@ -48,6 +58,7 @@ pnpm build             # tsc, strict
 pnpm test              # vitest run; integration suite only runs when DATABASE_URL is set
 pnpm test:recovery     # kill-mid-flight replay gate (named integration files; CI runs it after test)
 pnpm lint              # eslint incl. custom DBOS-determinism rule (CI-failing)
+pnpm check:docs        # doc reference check — links, cited paths, STATUS.md symbols (CI-failing)
 pnpm eval              # model-in-the-loop scenarios — on-demand, never CI
 pnpm dev               # scripted-day composition against dev DB, transport+model stubbed
 ```
