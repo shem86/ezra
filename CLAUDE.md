@@ -21,7 +21,7 @@ for what is actually open; `V2_NOTES.md` is the journal behind it.
 | `TASKS.md` | Per-task ledger (T-numbers are stable anchors) | complete — history |
 | `docs/spike-results.md` | Spike verdicts, pinned versions, gotchas | reference |
 | `docs/launch-checklist.md` · `docs/recovery-runbook.md` · `docs/ops-drills.md` | Launch/ops runbooks | reference |
-| `docs/adr-000*.md` | Reversed/locked decisions (router removed, Voyage, service-account calendar) | reference |
+| `docs/adr-000*.md` | Reversed/locked decisions (router removed, Voyage, service-account calendar, WhatsApp client-version pin) | reference |
 
 Where docs overlap: architecture wins on rationale, SPEC wins on
 implementation detail. `TASKS.md` carries a per-task trail (the "T-numbers" in

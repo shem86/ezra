@@ -31,6 +31,34 @@ const validEnv = {
   CALENDAR_ID_WIFE: 'wife@gmail.com',
 };
 
+// The WhatsApp Web client version is enforced server-side; ours silently froze
+// at the Baileys bundled fallback and WhatsApp started rejecting it
+// (2026-07-28 outage, ADR-0006). It is now an explicit, reviewable pin that
+// lives in git — the default IS the production value.
+describe('loadConfig: WA_CLIENT_VERSION pin (ADR-0006)', () => {
+  it('defaults to the known-good pin as a parsed triple', () => {
+    expect(loadConfig(validEnv).waClientVersion).toEqual([2, 3000, 1043857760]);
+  });
+
+  it('accepts an override from the environment', () => {
+    const config = loadConfig({ ...validEnv, WA_CLIENT_VERSION: '2.3000.1050000000' });
+    expect(config.waClientVersion).toEqual([2, 3000, 1050000000]);
+  });
+
+  it('rejects a malformed pin at startup rather than at the first connect', () => {
+    expect(() => loadConfig({ ...validEnv, WA_CLIENT_VERSION: '2.3000' })).toThrow(
+      /WA_CLIENT_VERSION/,
+    );
+    expect(() => loadConfig({ ...validEnv, WA_CLIENT_VERSION: 'latest' })).toThrow(
+      /WA_CLIENT_VERSION/,
+    );
+  });
+
+  it('is available to the standalone transport runner too', () => {
+    expect(loadTransportOpsConfig(validEnv).waClientVersion).toEqual([2, 3000, 1043857760]);
+  });
+});
+
 describe('loadConfig', () => {
   it('returns a typed config from a valid environment', () => {
     const config = loadConfig(validEnv);

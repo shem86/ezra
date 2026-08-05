@@ -51,6 +51,16 @@ tree via DBOS; baileys reuses the same version.)
    startup. Either allowlist `raw.githubusercontent.com` on the host or
    pass a static `version` to `makeWASocket` — decide at T16.
 
+   > **DECIDED 2026-08-05 — ADR-0006, and both, for different jobs.** T16
+   > shipped the allowlist and made *neither* choice, which is what caused the
+   > 2026-07-28 outage: the probe was blocked, it resolves with an `error`
+   > field instead of throwing, and the announced version silently froze until
+   > WhatsApp refused it with a 405 (5.7 days deaf). The version is now an
+   > explicit pin passed to `makeWASocket` — **the connect path performs no
+   > probe at all** — and `raw.githubusercontent.com` is allowlisted purely for
+   > the out-of-band staleness check and the fall-forward after a rejection.
+   > See `docs/adr-0006-whatsapp-client-version.md`.
+
 ## Verdict
 
 **Accept.** Risk is concentrated in the unofficial-protocol nature of

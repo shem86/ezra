@@ -3,18 +3,28 @@
 // stack; numeric codes mirror baileys' DisconnectReason values.
 
 export const DISCONNECT_LOGGED_OUT = 401;
+export const DISCONNECT_VERSION_REJECTED = 405;
 export const DISCONNECT_RESTART_REQUIRED = 515;
 
-export type DisconnectAction = 're-pair' | 'restart' | 'retry';
+export type DisconnectAction = 're-pair' | 'restart' | 'retry' | 'version-rejected';
 
 /**
  * 401 means WhatsApp revoked the pairing — reconnecting would loop forever,
  * and restoring old session state is forbidden (re-pair via QR is the only
  * recovery). 515 is the routine restart WhatsApp requests right after
- * pairing. Everything else (408 storms, 5xx, unknown) is retryable.
+ * pairing.
+ *
+ * 405 is a handshake rejection whose canonical cause is an obsolete client
+ * version (ADR-0006, 2026-07-28 outage). It is NOT a transient failure:
+ * reconnecting with the same version can never succeed, so it gets its own
+ * action and the adapter tries a *different* version before falling back to
+ * ordinary backoff.
+ *
+ * Everything else (408 storms, 5xx, unknown) is retryable.
  */
 export function classifyDisconnect(statusCode: number | undefined): DisconnectAction {
   if (statusCode === DISCONNECT_LOGGED_OUT) return 're-pair';
+  if (statusCode === DISCONNECT_VERSION_REJECTED) return 'version-rejected';
   if (statusCode === DISCONNECT_RESTART_REQUIRED) return 'restart';
   return 'retry';
 }

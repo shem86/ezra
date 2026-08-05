@@ -3,7 +3,8 @@ import { loadTransportOpsConfig } from '../ops/config.js';
 import { createTelegramAlertChannel } from '../ops/alerts.js';
 import { createDeadmanPinger } from '../ops/deadman.js';
 import { createHealthMonitor } from '../ops/health.js';
-import { createBaileysTransport } from './baileys.js';
+import { createBaileysTransport, fetchUpstreamWaVersion } from './baileys.js';
+import { createWaVersionSource, formatWaVersion } from './wa-version.js';
 import { createRunner } from './runner.js';
 import { createSessionStore } from './session-store.js';
 
@@ -32,8 +33,19 @@ const deadman = createDeadmanPinger({
   onPingError: (error) => console.error('[deadman]', error),
 });
 
+// Same client-version pin the spine runs (ADR-0006) — a drill that announced a
+// different version would be testing a different client than production. This
+// is an interactive harness with a human watching, so events go to the console
+// rather than the alert channel, and there is no background staleness poll.
+const waVersionSource = createWaVersionSource({
+  pinned: config.waClientVersion,
+  fetchUpstream: fetchUpstreamWaVersion,
+  onEvent: (event) => console.log('[wa-version]', JSON.stringify(event)),
+});
+
 const transport = createBaileysTransport({
   sessionStore: store,
+  versionSource: waVersionSource,
   onQr: () => {
     console.error('[transport] unexpected QR — session invalid; quit and re-pair via pnpm pair');
   },
@@ -70,7 +82,9 @@ process.on('SIGINT', () => {
   void shutdown(0);
 });
 
-console.log(`Connecting with session from ${config.waSessionDir}…`);
+console.log(
+  `Connecting with session from ${config.waSessionDir} (wa-version ${formatWaVersion(config.waClientVersion)})…`,
+);
 try {
   await transport.connect();
 } catch (error) {
