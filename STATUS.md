@@ -4,6 +4,11 @@
 source tree — not against the other docs). Secret scan clean the same day
 (see Open item 2).
 
+**Partial update 2026-08-05:** live-host check only (container logs + Postgres).
+Added Open item 0 — **production is down** — and four defect records to
+`docs/known-issues.md`. Items 1–5 below were not re-verified on this pass and
+still carry their 2026-07-21 dates.
+
 This is the **single source of truth for current state**. Everything else is
 history:
 
@@ -13,7 +18,7 @@ history:
 | [`V2_NOTES.md`](V2_NOTES.md) | Append-only ops journal. `§N` anchors are stable and referenced from code + systemd units. Its heading markers are historical. |
 | [`TASKS.md`](TASKS.md) | v1 build ledger, complete. T-numbers are stable anchors. |
 | [`docs/adr-*.md`](docs) | Decisions. Immutable once Accepted. |
-| [`docs/known-issues.md`](docs/known-issues.md) | Per-defect deep records (both entries currently RESOLVED). |
+| [`docs/known-issues.md`](docs/known-issues.md) | Per-defect deep records. Open entries first, then the resolved ones. |
 | [`docs/specs/archive/`](docs/specs/archive) | Shipped/executed specs. Archived, never deleted. |
 
 **House rules.**
@@ -32,6 +37,36 @@ history:
 ---
 
 ## Open
+
+### 0. 🔴 PRODUCTION DOWN — WhatsApp socket dead since 2026-07-28
+**Status:** open, **P0, unresolved at time of writing** · **verified**
+2026-08-05T16:09Z by `docker logs` on the host + a Postgres query, not by
+inference.
+
+**ezra has been unable to send or receive WhatsApp for 7 days 18 hours.** The
+container is `running` with 0 restarts and the dead-man ping is green — the
+*process* is healthy, the *socket* is not. Last `[socket] open` was
+2026-07-28T21:53Z; the adapter burned 12 retries and logged `giving up` at
+22:12Z, then wrote nothing further. `sent_log` and `conversation_inbox` both
+top out at **2026-07-18**, with zero unprocessed rows.
+
+Three separate defects had to line up, each filed in
+[`docs/known-issues.md`](docs/known-issues.md):
+
+| | Defect | Role |
+|---|---|---|
+| **cause** | `WA-VERSION-001` | egress blocks Baileys' version probe → frozen WA client version → WhatsApp rejects it (`405`) |
+| **amplifier** | `SOCKET-DEAD-001` | adapter gives up permanently and never re-arms; process stays alive so Docker never restarts it |
+| **blind spot** | `HEALTH-GRACE-001` | health monitor alerts **once** and latches; dead-man proves liveness, not connectivity |
+
+**Immediate recovery** (operator action, not yet taken — needs a decision on
+whether to restart prod): restarting the container will re-arm the socket, but
+the frozen client version means it may re-fail; `WA-VERSION-001`'s fix is what
+makes the recovery stick. Re-pairing should **not** be needed (`401` never
+appeared; the drops were `405`/`408`/`428`/`503`).
+
+**This was found by the `v2.2.9` disconnect logging (#35) doing its job** — the
+codes and the `giving up` marker are what made an 8-day silent hole legible.
 
 ### 1. §5 — apply the cloud-layer SG egress to live prod
 **Status:** open · **verified** 2026-07-21 (`git log` shows nothing under
