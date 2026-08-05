@@ -59,14 +59,18 @@ Three separate defects had to line up, each filed in
 | **amplifier** | `SOCKET-DEAD-001` | adapter gives up permanently and never re-arms; process stays alive so Docker never restarts it |
 | **blind spot** | `HEALTH-GRACE-001` | health monitor alerts **once** and latches; dead-man proves liveness, not connectivity |
 
-**Immediate recovery** (operator action, not yet taken — needs a decision on
-whether to restart prod): restarting the container will re-arm the socket, but
-the frozen client version means it may re-fail; `WA-VERSION-001`'s fix is what
-makes the recovery stick. Re-pairing should **not** be needed (`401` never
-appeared; the drops were `405`/`408`/`428`/`503`).
+**Immediate recovery** (operator action, **not yet taken**): a container restart
+alone will *not* hold — the client version is still frozen and WhatsApp is still
+rejecting it, so it will re-fail within minutes. Recovery requires fixing
+`WA-VERSION-001` first (allowlist the probe host, or bump the `baileys` pin),
+then restarting. Re-pairing should **not** be needed — `401` never appeared; the
+drops were `405`/`408`/`428`/`503`.
 
-**This was found by the `v2.2.9` disconnect logging (#35) doing its job** — the
-codes and the `giving up` marker are what made an 8-day silent hole legible.
+**Diagnosed 2026-08-03, still down 2026-08-05.** The root cause was worked out
+two days before this entry was written; it just never landed in the repo, so
+nothing tracked it and nothing acted on it. That gap is the reason for house
+rule 4 and the reason this item is filed here rather than left in a session
+transcript.
 
 ### 1. §5 — apply the cloud-layer SG egress to live prod
 **Status:** open · **verified** 2026-07-21 (`git log` shows nothing under

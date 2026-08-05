@@ -7,10 +7,13 @@ entries come first**; current open/closed state is asserted only by
 
 ## SOCKET-DEAD-001 — the adapter never re-arms after exhausting its retry budget
 
-**Status: OPEN — caused a live 8-day silent outage.** Severity **P0**: ezra
-could not send or receive WhatsApp at all. Found 2026-08-05 by reading the
-disconnect logging that shipped in `v2.2.9` (#35) — the instrumentation worked
-exactly as intended and made a previously-invisible failure legible.
+**Status: OPEN — production has been dead since 2026-07-28 and still is.**
+Severity **P0**: ezra could not send or receive WhatsApp at all. The outage was
+diagnosed 2026-08-03 (root cause: WA-VERSION-001) and **re-confirmed still
+running, still unfixed on 2026-08-05** — this entry exists because the diagnosis
+had not been written into the repo, so nothing tracked it. The disconnect
+logging shipped in `v2.2.9` (#35) is what made the failure legible in the first
+place.
 
 **Problem.** `handleClose` (`src/transport/baileys.ts`) retries a dropped socket
 with exponential backoff up to `policy.maxAttempts`. When the budget is spent it
@@ -75,17 +78,34 @@ already has the give-up harness from #35 to build on.
 ## WA-VERSION-001 — egress blocks the Baileys version probe, freezing the WA client version
 
 **Status: OPEN.** Severity **high** — this is the root cause of SOCKET-DEAD-001.
-Found 2026-08-05; the mechanism was recorded earlier from the 2026-07-28 outage
-and is now confirmed live on the host.
+**Diagnosed 2026-08-03**; re-confirmed still-unfixed and still-down on the host
+2026-08-05.
 
-**Problem.** Baileys fetches the current WhatsApp web client version from
-`https://raw.githubusercontent.com/WhiskeySockets/Baileys/master/src/Defaults/baileys-version.json`
-at connect time, falling back to the version bundled with the package. That host
-is **not in the egress allowlist** (`src/ops/egress-allowlist.ts` / the nftables
-units), so the fetch times out and the client is pinned forever to whatever
-`baileys@7.0.0-rc13` shipped with. As WhatsApp advances server-side, the frozen
-version is eventually rejected — which is what `405` means here (a connection
-failure/refusal, not one of Baileys' named `DisconnectReason` codes).
+**Problem.** `fetchLatestBaileysVersion()` (called in `defaultCreateSocket`,
+`src/transport/baileys.ts`) fetches the current WhatsApp Web version from
+`raw.githubusercontent.com`. That host is **not in the egress allowlist**
+(`src/ops/egress-allowlist.ts` / the mirrored nftables units), so on prod it
+fails with `UND_ERR_CONNECT_TIMEOUT`.
+
+The failure is silent by construction: it does **not throw** — it returns
+`{ version: <bundled fallback>, isLatest: false, error }`, so the surrounding
+`try/catch` never fires and the `error` / `isLatest` fields are ignored. The WA
+client version is therefore frozen at whatever the installed release bundles
+(`lib/Defaults/index.js`); `baileys@7.0.0-rc13` bundles `[2,3000,1035194821]`.
+
+WhatsApp began rejecting that version on 2026-07-27 (a single `405`), then
+wholesale on 2026-07-28. Here `405` is a server `<failure reason>` surfaced via
+`ws.on('CB:failure')` → `Boom('Connection Failure')` — a **handshake rejection**,
+not one of Baileys' named `DisconnectReason` codes — and its canonical trigger is
+an obsolete client version. `classifyDisconnect` treats `405` as a generic
+`retry`, so the adapter burned all 12 attempts against a server that was never
+going to accept it.
+
+**Why this appeared a month after the hardening that caused it.** Enforcing the
+egress allowlist (2026-06-27, `reconcile-host-config.sh` — it had been silently
+failing *open* before) converted a self-updating version pin into a frozen one.
+The hardening was correct; it planted a time bomb that detonated when WhatsApp
+next advanced.
 
 **Evidence (verified 2026-08-05, from inside the prod container).**
 
@@ -96,6 +116,14 @@ FAIL TimeoutError The operation was aborted due to timeout
 
 and in the give-up storm, `405` is the dominant code (14 occurrences, 10 of the
 12 final retries) — the signature of a version the server won't accept.
+
+Check bundled-vs-live at any time with:
+
+```
+docker exec hh-assistant-ezra-1 node -e \
+  'require("baileys").fetchLatestBaileysVersion().then(r=>console.log(r))'
+curl -s https://raw.githubusercontent.com/WhiskeySockets/Baileys/master/src/Defaults/baileys-version.json
+```
 
 **Fix direction.** Two independent options; they are not exclusive.
 1. **Allowlist the probe host** — add `raw.githubusercontent.com` to
@@ -109,10 +137,20 @@ and in the give-up storm, `405` is the dominant code (14 occurrences, 10 of the
    schedule. Zero new egress; costs a recurring manual step and will re-break on
    the same clock.
 
-Recommendation: (1), because option 2's failure mode is exactly the outage we
-just had, and the whole point of SOCKET-DEAD-001's fix is to stop depending on a
-human noticing. If (1) is rejected on egress grounds, then (2) **must** be paired
-with a calendar reminder and a version-age alert.
+3. **Stop the probe failing silently (do this regardless).** `fetchLatestBaileysVersion()`
+   returns its error instead of throwing, so today a blocked probe is invisible.
+   Log `isLatest`/`error` and the resolved version at connect, and alert when
+   `isLatest` is false. Whichever of 1/2 is chosen, this is what turns the next
+   occurrence into a warning instead of an outage.
+4. **Classify `405` as fatal-ish.** `classifyDisconnect` treats it as a generic
+   `retry`, which is why 12 attempts were spent on a handshake the server would
+   never accept. A handshake rejection should alert loudly (and, once
+   SOCKET-DEAD-001 is fixed, back off far harder than a transient drop).
+
+Recommendation: (1) + (3). Option 2's failure mode is exactly the outage we just
+had, and the whole point of SOCKET-DEAD-001's fix is to stop depending on a human
+noticing. If (1) is rejected on egress grounds, then (2) **must** be paired with
+a version-age alert — (3) is that alert.
 
 ---
 
