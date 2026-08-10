@@ -178,39 +178,6 @@ export function Cell({ col, val }: { col: string; val: unknown }): React.JSX.Ele
   );
 }
 
-export function BarChart({
-  data,
-  height = 90,
-  color = 'var(--accent)',
-  fmt = (v: number): string => String(v),
-}: {
-  data: number[];
-  height?: number;
-  color?: string;
-  fmt?: (v: number) => string;
-}): React.JSX.Element {
-  // Guard the divisor: an all-zero series (e.g. a zero-spend day) would make
-  // `peak` 0 and every `v / peak` NaN → `height: 'NaN%'`. Floor it at 1.
-  const peak = data.length > 0 ? Math.max(...data) : 0;
-  const max = peak > 0 ? peak : 1;
-  return (
-    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height }}>
-      {data.map((v, i) => (
-        <div
-          key={i}
-          title={fmt(v)}
-          style={{
-            flex: 1,
-            height: `${Math.max(6, (v / max) * 100)}%`,
-            background:
-              i === data.length - 1
-                ? color
-                : `color-mix(in oklch, ${color} 55%, var(--surface-2))`,
-            borderRadius: '3px 3px 0 0',
-            transition: 'height .3s ease',
-          }}
-        />
-      ))}
-    </div>
-  );
-}
+// The hand-rolled `BarChart` that used to live here (30 flex divs, a `title=`
+// tooltip, no axis, and a 6% minimum bar height that made a zero-spend day look
+// like a small-spend day) is replaced by src/charts — see spend-chart.tsx.

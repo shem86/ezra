@@ -3,7 +3,8 @@
 // render `—`; the journal always supplies id/status/timing.
 import { Fragment, useMemo, useState, type ReactNode } from 'react';
 import { Icon } from '../components/icon';
-import { Badge, Card, Dot } from '../components/primitives';
+import { Badge, Card, Dot, SectionTitle } from '../components/primitives';
+import { LatencyChart, TurnVolumeChart } from '../charts/turn-charts';
 import { sColor, tierTone } from '../components/status';
 import { api, type ApiClient } from '../api/client';
 import { useAsync } from '../api/use-async';
@@ -85,6 +86,30 @@ export function LogsScreen({ client = api }: { client?: ApiClient }): React.JSX.
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search turns…" />
         </div>
       </div>
+
+      {/* The two charts this screen never had. Both are derived from the rows
+          already fetched, so they describe the fetched window and say so —
+          widening it is a server change, not a chart change. */}
+      {turns.length > 0 && (
+        <div className="grid-logs-charts">
+          <Card>
+            <SectionTitle right={<span style={{ fontSize: 11.5, color: 'var(--muted-2)' }}>fetched window</span>}>
+              Turn volume &amp; outcome
+            </SectionTitle>
+            <div className="chart-host">
+              <TurnVolumeChart turns={rows} height={132} />
+            </div>
+          </Card>
+          <Card>
+            <SectionTitle right={<span style={{ fontSize: 11.5, color: 'var(--muted-2)' }}>p95 marked</span>}>
+              Turn latency
+            </SectionTitle>
+            <div className="chart-host">
+              <LatencyChart turns={rows} height={132} />
+            </div>
+          </Card>
+        </div>
+      )}
 
       <Card pad={0} style={{ overflow: 'hidden' }}>
         <div style={{ overflowX: 'auto' }}>

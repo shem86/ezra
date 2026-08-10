@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Icon } from './icon';
-import { Badge, BarChart, Card, Cell, Dot, SectionTitle } from './primitives';
+import { Badge, Card, Cell, Dot, SectionTitle } from './primitives';
 import { sColor, tierTone, toneForStatus } from './status';
 
 afterEach(cleanup);
@@ -40,21 +40,6 @@ describe('primitives render without error', () => {
     expect(he).toHaveStyle({ direction: 'rtl' });
   });
 
-  it('BarChart renders one bar per datum', () => {
-    const { container } = render(<BarChart data={[1, 2, 3]} />);
-    // outer flex + 3 bars
-    expect(container.querySelectorAll('div').length).toBe(4);
-  });
-
-  it('BarChart keeps finite heights on an all-zero series (no NaN%)', () => {
-    const { container } = render(<BarChart data={[0, 0, 0]} />);
-    const flex = container.querySelector('div')!; // outer flex wrapper
-    const bars = flex.querySelectorAll<HTMLDivElement>(':scope > div');
-    expect(bars.length).toBe(3);
-    for (const bar of bars) {
-      expect(bar.style.height).not.toContain('NaN');
-    }
-  });
 });
 
 describe('status helpers', () => {
