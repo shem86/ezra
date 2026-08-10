@@ -349,8 +349,9 @@ Ruled out by measurement, *not* inference: the DBOS journal query is **35ms**
 (`EXPLAIN ANALYZE`; a seq scan over 97,758 rows, fully cached — no index
 needed), and `/api/status` is **0.45s** with every probe ≤541ms.
 
-Fixed by collapsing both screens onto ONE shared read of the **v2** endpoint
-(`src/backoffice/observations.ts`): `/api/public/v2/observations` with
+Fixed by collapsing both screens onto ONE shared read of the **v2** endpoint —
+the `makeObservationsSource` factory in `src/backoffice/observations.ts` —
+calling `/api/public/v2/observations` with
 `fields=core,basic,usage,metadata`. The `fields` parameter is load-bearing —
 without it v2 omits `usageDetails` and `metadata` entirely, which is every
 column the console shows. Costs no longer touches `metrics/daily` at all; the
