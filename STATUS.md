@@ -93,9 +93,22 @@ fault. Two things combined:
    retry burst — the same image and the same pinned version were refused at
    16:53Z and accepted at 17:02Z with no code change in between.
 
+✅ **Fixed 2026-08-10** (same day, in the follow-up PR). Readiness deliberately
+still means *the WhatsApp socket is open* — ezra **is** the WhatsApp connection,
+so a green deploy with a dead socket would claim success while delivering
+nothing. What changed is the failure branch: `on-host-deploy.sh` now samples the
+outgoing container's socket state **before** the swap and rolls back only when
+that socket was healthy, i.e. only when the new release is genuinely the
+suspect. When the socket was already down, it keeps the newer image and says so
+— reverting to an image with the same external dependency cannot restore
+service and would discard the fix. The deploy still fails (ezra is down and must
+not be reported healthy); it just no longer undoes the cure. `HEALTH_TIMEOUT`
+also went 180s → 300s, since the reconnect ladder only fits ~8 attempts in 180s
+and a WhatsApp cooldown can outlast that.
+
 If a future deploy fails this gate, **re-run it before concluding the release
-is bad**, and check the container's own `[socket]`/`[wa-version]` lines rather
-than the pipeline's verdict.
+is bad**, and check the container's own `[spine]`/`[socket]`/`[wa-version]`
+lines rather than the pipeline's verdict.
 
 **Why `SOCKET-DEAD-001` is not fixed alongside it.** Both fix directions that
 entry proposes were considered and rejected on the evidence (ADR-0006,
@@ -113,10 +126,15 @@ unpushed local branch for five days. Twice now the delay was not the diagnosis
 or the code but the work living somewhere the repo could not see it. That is
 the reason for house rule 4.
 
-**Still open from this outage:** `HEALTH-GRACE-001` (the monitor latches after
-one alert, so a *still-down* socket stays silent — the reason 12 days passed
-with no second signal) and the deploy-gate catch-22 described above. Neither
-blocks service today.
+**Still open from this outage:** only the `HEALTH-GRACE-001` *predicate* half —
+the monitor cannot tell "climbing the retry ladder" from "gave up", so ordinary
+self-healing blips can page while a real give-up waits out the grace. Fixing it
+would mean fewer alerts, not more.
+
+**Closed as won't-fix 2026-08-10:** repeat-alerting while down. One alert per
+outage is the intended contract ("still down unless you hear otherwise"); the
+12 days were operator time, not a missing signal. The deploy-gate catch-22 is
+fixed — see below.
 
 ### 1. §5 — apply the cloud-layer SG egress to live prod
 **Status:** open · **verified** 2026-07-21 (`git log` shows nothing under

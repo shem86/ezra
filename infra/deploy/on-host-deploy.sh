@@ -20,8 +20,11 @@
 #   REPO_DIR           repo root holding .env + infra/ (default: ~/hh-assistant)
 #   GHCR_USER/GHCR_PAT optional; if set, `docker login ghcr.io` runs first.
 #                      Omit when the host already holds a persistent GHCR login.
-#   HEALTH_TIMEOUT     seconds to wait for the launch marker (default: 180 —
-#                      real startup is ~60s: WhatsApp connect + DBOS launch/recovery)
+#   HEALTH_TIMEOUT     seconds to wait for the launch marker (default: 300 —
+#                      real startup is ~60s: WhatsApp connect + DBOS launch/recovery.
+#                      The headroom is for WhatsApp-side refusals: reconnect
+#                      backoff fits ~8 attempts in 180s, and a cooldown after a
+#                      retry burst can outlast that — see §7 and STATUS.md item 0)
 #   SECRETS_MODE       how to materialize .env before deploy (V2_NOTES §3): unset
 #                      or `none` (default) keeps the on-disk .env untouched —
 #                      preserves portability + the historical behavior; `ssm`
@@ -37,7 +40,7 @@ set -euo pipefail
 
 EZRA_TAG="${EZRA_TAG:?set EZRA_TAG to the image tag to deploy}"
 REPO_DIR="${REPO_DIR:-$HOME/hh-assistant}"
-HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-180}"
+HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-300}"
 SECRETS_MODE="${SECRETS_MODE:-none}"
 SECRETS_PARAM="${SECRETS_PARAM:-/hh-assistant/env}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
@@ -134,11 +137,23 @@ fi
 
 # --- 2. record the currently-running tag for rollback -------------------------
 PRIOR_TAG=""
+# Was the OUTGOING image's WhatsApp socket actually up? This decides whether a
+# failed healthcheck later means "the new release broke it" or "the environment
+# is broken" — and only the first is a rollback. See the rollback branch (§7)
+# for why that distinction is load-bearing; it must be sampled HERE, while the
+# old container is still the running one.
+PRIOR_SOCKET_OK=false
 prior_cid="$(compose ps -q ezra || true)"
 if [[ -n "$prior_cid" ]]; then
   prior_image="$(docker inspect -f '{{.Config.Image}}' "$prior_cid" 2>/dev/null || true)"
   PRIOR_TAG="${prior_image##*:}" # tag after the last colon
   log "currently running tag: ${PRIOR_TAG:-<none>}"
+  # The adapter logs exactly one of these per transition, so the LAST one is the
+  # current state. 'open' is the only healthy terminal value.
+  prior_socket="$(docker logs "$prior_cid" 2>&1 \
+    | grep -oE '\[socket\] (open|closed|connecting|logged-out)' | tail -1 || true)"
+  [[ "$prior_socket" == "[socket] open" ]] && PRIOR_SOCKET_OK=true
+  log "outgoing socket state: ${prior_socket:-<none logged>} (healthy=$PRIOR_SOCKET_OK)"
 else
   log "no ezra container running — this is a first deploy (no rollback target)"
 fi
@@ -257,12 +272,33 @@ if [[ "$ezra_up" == true && "$bo_up" == true ]]; then
   exit 0
 fi
 
-# --- 7. auto-rollback ---------------------------------------------------------
+# --- 7. auto-rollback (only when the RELEASE is the suspect) -------------------
+# Readiness deliberately means "the WhatsApp socket is open" and not merely "the
+# process booted": ezra IS the WhatsApp connection, so a green deploy with a dead
+# socket would be a deploy that claims success while delivering nothing.
+#
+# But that makes the gate sensitive to something we don't control, and rolling
+# back is only ever the right answer when the NEW release is what broke it. The
+# rollback target runs the same code against the same third party — so when the
+# socket was ALREADY down before the swap, reverting cannot help and actively
+# throws away the fix. That is not hypothetical: on 2026-08-10 the v2.3.0 deploy
+# that fixed a 12-day outage (WA-VERSION-001) failed this gate during a
+# WhatsApp-side cooldown and rolled itself back to the very image whose frozen
+# client version WhatsApp was already refusing. An identical redeploy nine
+# minutes later came up on the first attempt.
+#
+# So: fail the deploy either way — ezra is down and must not be reported healthy
+# — but only revert when reverting can plausibly restore service.
 log "HEALTHCHECK FAILED for ${EZRA_TAG} (ezra_up=$ezra_up backoffice_up=$bo_up)"
-if [[ -n "$PRIOR_TAG" && "$PRIOR_TAG" != "$EZRA_TAG" ]]; then
-  log "rolling back ezra + backoffice to ${PRIOR_TAG}"
-  EZRA_TAG="$PRIOR_TAG" compose up -d ezra backoffice
-else
+if [[ -z "$PRIOR_TAG" || "$PRIOR_TAG" == "$EZRA_TAG" ]]; then
   log "no prior tag to roll back to — leaving the failed containers for diagnosis"
+elif [[ "$PRIOR_SOCKET_OK" != true ]]; then
+  log "NOT rolling back: the socket was already down on ${PRIOR_TAG} before this deploy,"
+  log "  so ${PRIOR_TAG} cannot restore service and reverting would discard the newer code."
+  log "  Keeping ${EZRA_TAG}. Check the container's own [socket]/[wa-version] lines, then re-run"
+  log "  this deploy — a transient WhatsApp-side refusal clears on its own (see STATUS.md item 0)."
+else
+  log "rolling back ezra + backoffice to ${PRIOR_TAG} (its socket was healthy before the swap)"
+  EZRA_TAG="$PRIOR_TAG" compose up -d ezra backoffice
 fi
 exit 1
