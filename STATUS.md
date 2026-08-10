@@ -378,32 +378,34 @@ per-card rendering is still the right shape. Also unaddressed: 97,540 of the
 turns — harmless at today's 35ms, worth a retention policy before it isn't.
 
 ### 7. Backoffice charts — the two things the new chart layer can't reach yet
-**Status:** open · **verified** 2026-08-10 by reading `src/backoffice/cost.ts`
-and `journal.ts` while porting the console's charts to TanStack Charts
+**Status:** open · **verified** 2026-08-10 by reading `makeCostClient` in
+`src/backoffice/cost.ts` and `getLogs` in `src/backoffice/journal.ts` while
+porting the console's charts to TanStack Charts
 (`worktree-backoffice-tanstack-charts`; frontend `lint`/`build`/`test` green,
-35 tests).
+52 tests after merging main).
 
 The chart layer landed and every hand-rolled widget is replaced, but two limits
 are in the **server**, not the charts, so they were deliberately left alone:
 
 | | Limit | Where |
 |---|---|---|
-| **lookback** | `/api/costs` takes no parameters and hard-codes 30 slots (`for (let i = 29; i >= 0; i--)`); `/api/logs` takes only `?limit` (≤200, always newest-first), so its level/search filters are client-side over a truncated window | `src/backoffice/cost.ts:189` · `journal.ts:48,185` |
-| **retention** | every token/cost figure comes from Langfuse Cloud. **Confirm the plan**: Hobby keeps a 30-day access window, Core 90 days, Pro 3 years. On Hobby, 30 days is all the cost history that exists anywhere — no API change reaches further back | `src/backoffice/cost.ts` |
+| **lookback** | `/api/costs` takes no parameters and builds a fixed 30-slot daily series; `/api/logs` takes only `?limit` (≤200, always newest-first), so its level/search filters are client-side over a truncated window | `makeCostClient` · `getLogs` |
+| **retention** | every token/cost figure comes from Langfuse Cloud. **Confirm the plan**: Hobby keeps a 30-day access window, Core 90 days, Pro 3 years. On Hobby, 30 days is all the cost history that exists anywhere — no API change reaches further back | `makeCostClient` in `src/backoffice/cost.ts` |
 
 Journal-backed charts (turn volume, outcome, latency) have no such ceiling —
 `dbos.workflow_status` is local and complete — but they currently render only
 the fetched window because the endpoint can't be asked for more.
 
 The durable fix for cost history is small and was scoped but **not built**
-(schema changes are ask-first): `call-model.ts:59–62` already reads exact
-per-call usage (input / output / cache-read / cache-write) and `main.ts:133`
-hands it to the Langfuse tracer alone — nothing persists it. An append-only
-`model_usage` row written inside the turn's existing transaction would give
-unbounded history *and* retire the "estimated" label, since the caller knows the
-model name that Langfuse lacks (the gap BO-8 recorded). `src/memory/embedder.ts:81`
-reports Voyage usage through the same shape of hook and is likewise dropped, so
-the Costs total under-reports by the whole embedding line.
+(schema changes are ask-first): `makeCallModel` in `src/agent/call-model.ts`
+already reads exact per-call usage (input / output / cache-read / cache-write)
+and hands it to `tracer.onModelUsage` in `src/main.ts` alone — nothing persists
+it. An append-only `model_usage` row written inside the turn's existing
+transaction would give unbounded history *and* retire the "estimated" label,
+since the caller knows the model name that Langfuse lacks (the gap BO-8
+recorded). `makeVoyageEmbedder` in `src/memory/embedder.ts` reports Voyage usage
+through the same shape of `onUsage` hook and is likewise dropped, so the Costs
+total under-reports by the whole embedding line.
 
 Also unbuilt for the same reason: the Status screen's uptime strip and probe
 latency trend need probe results persisted — `ServiceRow` carries latency and

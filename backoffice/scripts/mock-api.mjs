@@ -29,6 +29,15 @@ const server = createServer((req, res) => {
     return;
   }
 
+  // Auth is server behaviour, not fixture data. There is no secret here to
+  // protect — the payload is invented — so the session endpoints accept
+  // anything, which keeps the sign-in shell exercisable locally instead of
+  // dead-ending on a 404. Never let this file grow into a real auth path.
+  if (pathname === '/api/session' || pathname === '/api/signout') {
+    res.writeHead(200, { 'content-type': 'application/json' }).end('{}');
+    return;
+  }
+
   const body = resolveFixture(pathname);
   if (body === null) {
     res.writeHead(404, { 'content-type': 'application/json' }).end('{"error":"not found"}');
