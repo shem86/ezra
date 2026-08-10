@@ -104,11 +104,12 @@ already has the give-up harness from #35 to build on.
 
 ## WA-VERSION-001 — egress blocks the Baileys version probe, freezing the WA client version
 
-**Status: FIXED on branch 2026-08-05 (ADR-0006), awaiting deploy.** Severity
-**high** — this is the root cause of SOCKET-DEAD-001. **Diagnosed 2026-08-03**;
-re-confirmed still-down on the host 2026-08-05; fix built and green the same day
-(`pnpm lint && pnpm build && pnpm test`, 737 tests incl. integration).
-Production remains down until it ships — see [`STATUS.md`](../STATUS.md) item 0.
+**Status: RESOLVED 2026-08-10, shipped in `v2.3.0` (ADR-0006).** Severity
+**high** — this was the root cause of SOCKET-DEAD-001. **Diagnosed 2026-08-03**,
+fix built and green 2026-08-05, released and deployed 2026-08-10. Verified on
+the host at 17:05Z: `[socket] open`, `ezra up: … wa-version 2.3000.1043857760`,
+`[wa-version] pin is current` — the last line also proves the probe host is
+now reachable, since a blocked probe reports `probe failed` instead.
 
 **Problem.** `fetchLatestBaileysVersion()` (called in `defaultCreateSocket`,
 `src/transport/baileys.ts`) fetches the current WhatsApp Web version from
