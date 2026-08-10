@@ -68,6 +68,33 @@ arriving. Disconnect-code distribution across the container's life: `428`×17,
 Recommendation: (1) + (3). (1) removes the permanent-dead state; (3) removes the
 single-alert blind spot that let it run 8 days unnoticed.
 
+> **Recommendation revised 2026-08-05 (ADR-0006). (1) and (2) were both
+> rejected on the evidence; this entry stays OPEN and the give-up stays
+> deliberate.**
+>
+> - **(1) never give up** would not have helped here. A `405` is a *permanent
+>   rejection*, not a transient failure: WhatsApp refused the client version we
+>   announced, and no number of retries changes what we announce. Retrying
+>   forever converts a dead socket into a dead socket that also generates load.
+>   The premise "a household assistant has no scenario where stopping is right"
+>   conflates *transient* failures (where it holds) with *rejections* (where it
+>   does not).
+> - **(2) exit on give-up** would have crash-looped straight through this
+>   outage — the rejection follows the version, not the process — while tearing
+>   down healthy DBOS state, the queue, the scheduled sweeps, and the in-memory
+>   sent-id set that suppresses echoes. Its only real effect is resetting a
+>   counter.
+>
+> What was actually missing was a socket that could **change what it
+> announces**. WA-VERSION-001's fix adds exactly that: `405` becomes its own
+> `version-rejected` action that falls forward to a newer version and *then*
+> reconnects with a fresh budget. The bounded give-up remains correct for the
+> case where no version change can help — and `no-upgrade` alerts a human at
+> that point.
+>
+> **(3) re-alert while down** is untouched by this and still stands — see
+> HEALTH-GRACE-001.
+
 **Repro test to write first** (Prove-It): drive the adapter past
 `maxAttempts` with a fake socket and assert it **still** schedules another
 attempt (and that the monitor re-alerts while `closed`). `tests/unit/baileys-adapter.test.ts`
@@ -77,9 +104,11 @@ already has the give-up harness from #35 to build on.
 
 ## WA-VERSION-001 — egress blocks the Baileys version probe, freezing the WA client version
 
-**Status: OPEN.** Severity **high** — this is the root cause of SOCKET-DEAD-001.
-**Diagnosed 2026-08-03**; re-confirmed still-unfixed and still-down on the host
-2026-08-05.
+**Status: FIXED on branch 2026-08-05 (ADR-0006), awaiting deploy.** Severity
+**high** — this is the root cause of SOCKET-DEAD-001. **Diagnosed 2026-08-03**;
+re-confirmed still-down on the host 2026-08-05; fix built and green the same day
+(`pnpm lint && pnpm build && pnpm test`, 737 tests incl. integration).
+Production remains down until it ships — see [`STATUS.md`](../STATUS.md) item 0.
 
 **Problem.** `fetchLatestBaileysVersion()` (called in `defaultCreateSocket`,
 `src/transport/baileys.ts`) fetches the current WhatsApp Web version from
@@ -151,6 +180,35 @@ Recommendation: (1) + (3). Option 2's failure mode is exactly the outage we just
 had, and the whole point of SOCKET-DEAD-001's fix is to stop depending on a human
 noticing. If (1) is rejected on egress grounds, then (2) **must** be paired with
 a version-age alert — (3) is that alert.
+
+**Resolved 2026-08-05 — ADR-0006 (`docs/adr-0006-whatsapp-client-version.md`),
+all four, arranged by job.** The measured churn decided the shape: upstream bumps
+its version 4–8 times a year, but the version we ran was accepted for ~4.5 months
+and then died **one day** after upstream published the replacement. A ~24-hour
+warning window is too thin to rely on a human being reachable, which rules out
+option 2 alone; and putting a third party on the connect path rules out option 1
+alone.
+
+- **(2), as the normal path.** `WA_CLIENT_VERSION` is an explicit pin in
+  `src/ops/config.ts`, default `2.3000.1043857760`. **The connect path performs
+  no probe at all**, so no firewall change can ever again decide what version we
+  speak.
+- **(1), narrowly.** `raw.githubusercontent.com` is allowlisted under a new
+  `wa-version` category, used *only* by the out-of-band staleness check and the
+  fall-forward after a rejection.
+- **(3), as `interpretProbeResult()`** (`src/transport/wa-version.ts`): a probe
+  result carrying `error`, or `isLatest !== true`, is a **failed probe**, never
+  an answer. Directly unit-tested as the root-cause regression guard. A blind
+  probe alerts after 7 consecutive failures.
+- **(4), as its own action.** `classifyDisconnect(405)` returns
+  `'version-rejected'`. The adapter fetches upstream and, if it differs from the
+  version just rejected, adopts it, resets the retry budget, and reconnects
+  immediately — so a deprecation self-heals. With nothing newer it degrades to
+  the existing bounded retry and alerts `no-upgrade`.
+
+Note this fixes the *cause* without adopting SOCKET-DEAD-001's proposed fixes;
+that entry's recommendation was reconsidered on the evidence (see its own
+section and ADR-0006 "Alternatives rejected").
 
 ---
 
