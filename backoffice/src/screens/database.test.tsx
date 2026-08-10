@@ -58,6 +58,6 @@ describe('DatabaseScreen (live data)', () => {
       status: unused,
     };
     render(<DatabaseScreen client={failing} />);
-    await waitFor(() => expect(screen.getByText(/Unauthorized/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/Session expired/)).toBeInTheDocument());
   });
 });

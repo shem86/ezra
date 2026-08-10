@@ -219,6 +219,23 @@ Let's Encrypt cert; MagicDNS + HTTPS must be enabled in the tailnet admin
 console). **Admin-console follow-up:** disable key expiry on the `ezra-backoffice`
 node so it never drops off the tailnet.
 
+### Signing in
+Open the URL and enter `BACKOFFICE_TOKEN` (from the host's `.env`) on the
+sign-in screen. The token is exchanged for an httpOnly `bo_session` cookie that
+is **renewed on every authenticated request**, so an operator who keeps using
+the console never has to re-enter it; it never travels in the URL.
+
+The older `https://…/?token=<TOKEN>` form still signs you in (old bookmarks keep
+working), but it puts the token in browser history — prefer the form.
+
+Failed sign-ins are throttled per client IP: **8 wrong tokens inside 15 minutes**
+locks that address out for 15 minutes, with `backoffice auth: rejected …` in the
+container log. Requests carrying *no* credential are not attempts and never
+count — that distinction is what stopped the throttle firing on the operator
+(STATUS item 6). If you ever do see `429 too many attempts`, the console is
+healthy and the lock clears on its own; check
+`docker logs hh-assistant-backoffice-1` for the rejections.
+
 ### SELECT-only DB role
 The console connects through the `hh_readonly` role (migration
 `0007`, created passwordless at ezra launch). Its password is set out-of-band

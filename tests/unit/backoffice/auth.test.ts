@@ -142,6 +142,85 @@ describe('backoffice server', () => {
   });
 });
 
+// Self-service sign-in: the SPA shell is public so an unauthenticated visit can
+// render a sign-in screen, and the session cookie renews on use so an active
+// operator never falls off the 30-day cliff. /api/* remains the real gate.
+describe('backoffice self-service sign-in', () => {
+  let server: Server;
+  let base: string;
+
+  beforeAll(async () => {
+    const dist = await mkdtemp(join(tmpdir(), 'bo-dist-'));
+    await writeFile(join(dist, 'index.html'), '<!doctype html><title>ezra</title>');
+    await writeFile(join(dist, 'app.js'), 'console.log(1)');
+    server = createBackofficeServer({
+      token: TOKEN,
+      distDir: dist,
+      rateLimiter: makeRateLimiter({ maxFailures: 8, lockoutMs: 60_000 }),
+    });
+    await new Promise<void>((r) => server.listen(0, r));
+    const { port } = server.address() as AddressInfo;
+    base = `http://127.0.0.1:${port}`;
+  });
+
+  afterAll(() => {
+    server.close();
+  });
+
+  it('serves the SPA shell with no credential at all', async () => {
+    const res = await fetch(`${base}/`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/html');
+    expect(await res.text()).toContain('ezra');
+  });
+
+  it('serves static assets with no credential', async () => {
+    const res = await fetch(`${base}/app.js`);
+    expect(res.status).toBe(200);
+  });
+
+  it('still gates /api/* without a credential', async () => {
+    const res = await fetch(`${base}/api/health`);
+    expect(res.status).toBe(401);
+  });
+
+  it('signs in over /api/session with a bearer token and sets the cookie', async () => {
+    const res = await fetch(`${base}/api/session`, { headers: { authorization: `Bearer ${TOKEN}` } });
+    expect(res.status).toBe(200);
+    const setCookie = res.headers.get('set-cookie') ?? '';
+    expect(setCookie).toContain(`${SESSION_COOKIE}=`);
+    expect(setCookie.toLowerCase()).toContain('httponly');
+    expect(setCookie.toLowerCase()).toContain('samesite=strict');
+  });
+
+  it('rejects sign-in with a wrong token', async () => {
+    const res = await fetch(`${base}/api/session`, { headers: { authorization: 'Bearer nope' } });
+    expect(res.status).toBe(401);
+  });
+
+  // The 30-day cliff: a fixed Max-Age set once at first login eventually expires
+  // mid-use. Every authenticated response now re-issues it.
+  it('renews the session cookie on every authenticated request', async () => {
+    const res = await fetch(`${base}/api/health`, { headers: { cookie: `${SESSION_COOKIE}=${TOKEN}` } });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('set-cookie') ?? '').toContain(`${SESSION_COOKIE}=`);
+  });
+
+  it('still promotes a ?token= shell load into a cookie (old bookmarks keep working)', async () => {
+    const res = await fetch(`${base}/?token=${TOKEN}`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('set-cookie') ?? '').toContain(`${SESSION_COOKIE}=`);
+  });
+
+  // A stale bookmark carrying a dead token must still reach the sign-in screen
+  // rather than a wall of JSON.
+  it('serves the shell even when a wrong token rides along', async () => {
+    const res = await fetch(`${base}/?token=wrong`);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('ezra');
+  });
+});
+
 // Regression suite for the 2026-08-10 lockout incident: the operator's own
 // machine was 429'd for 15 minutes while the console was perfectly healthy.
 // Three separate defects conspired; each gets a test here.

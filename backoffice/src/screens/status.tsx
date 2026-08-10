@@ -16,7 +16,7 @@ export function StatusScreen({ client = api }: { client?: ApiClient }): React.JS
     return (
       <Card>
         <span style={{ color: 'var(--err)' }}>
-          {error === 'unauthorized' ? 'Unauthorized — open with ?token=…' : `Could not load status: ${error}`}
+          {error === 'unauthorized' ? 'Session expired — sign in again.' : `Could not load status: ${error}`}
         </span>
       </Card>
     );

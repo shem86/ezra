@@ -41,7 +41,7 @@ export function LogsScreen({ client = api }: { client?: ApiClient }): React.JSX.
       {error !== null && (
         <Card>
           <span style={{ color: 'var(--err)' }}>
-            {error === 'unauthorized' ? 'Unauthorized — open with ?token=…' : `Could not load logs: ${error}`}
+            {error === 'unauthorized' ? 'Session expired — sign in again.' : `Could not load logs: ${error}`}
           </span>
         </Card>
       )}

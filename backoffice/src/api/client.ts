@@ -13,6 +13,17 @@ export class ApiError extends Error {
   }
 }
 
+/** Fired when any API call comes back 401. The app shell listens and swaps in
+ *  the sign-in screen — a window event rather than an `onUnauthorized` callback
+ *  threaded through every screen and card. */
+export const UNAUTHORIZED_EVENT = 'bo:unauthorized';
+
+function describe(status: number): string {
+  if (status === 401) return 'unauthorized';
+  if (status === 429) return 'too many attempts — wait a few minutes';
+  return `HTTP ${status}`;
+}
+
 async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   const res = await fetch(path, {
     credentials: 'include',
@@ -20,9 +31,25 @@ async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
     ...(signal ? { signal } : {}),
   });
   if (!res.ok) {
-    throw new ApiError(res.status, res.status === 401 ? 'unauthorized' : `HTTP ${res.status}`);
+    if (res.status === 401) window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
+    throw new ApiError(res.status, describe(res.status));
   }
   return (await res.json()) as T;
+}
+
+/** Exchange the operator's token for the httpOnly session cookie. Sent as a
+ *  Bearer header, so the token never lands in the address bar or in browser
+ *  history the way the older `?token=` URL did. Deliberately does NOT raise
+ *  UNAUTHORIZED_EVENT — a wrong token here belongs on the form, not in a
+ *  sign-out loop. */
+export async function signIn(token: string): Promise<void> {
+  const res = await fetch('/api/session', {
+    credentials: 'include',
+    headers: { accept: 'application/json', authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    throw new ApiError(res.status, res.status === 401 ? 'that token was not accepted' : describe(res.status));
+  }
 }
 
 export interface ApiClient {

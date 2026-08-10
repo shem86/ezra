@@ -206,13 +206,16 @@ relatedness classifier is guarded only by offline eval; the HITL park/resume
 machinery is built but **unexercised in production** (soak it during the
 calendar rollout).
 
-### 6. Backoffice auth lockout — fixed on a branch, not yet deployed
-**Status:** open (awaiting deploy) · **verified** 2026-08-10 by reproducing it
+### 6. ✅ RESOLVED 2026-08-10 — backoffice auth locked the operator out
+**Status:** **resolved**, shipped in `v2.3.1` (lockout) + the self-service
+sign-in that follows it · **verified** 2026-08-10 first by reproducing it
 against live prod (`curl` over the tailnet returned
 `429 too many attempts — locked out` while the host's own tailnet IP got a
-normal `401`), then by the regression suite on
-`worktree-backoffice-lockout-fix` (`pnpm lint && pnpm build && pnpm test` green
-— 578 unit + 10 backoffice integration).
+normal `401`), then **against prod after the `v2.3.1` deploy**: 12 consecutive
+credential-less requests all returned `401` with no lockout (under the old code
+the 9th would have 429'd for 15 minutes), and a single wrong token produced
+`backoffice auth: rejected header token from …` in the container log with the
+presented value absent.
 
 The operator's own machine was locked out of the read-only console for 15
 minutes while every layer was healthy (host up, `tailscaled` up,
@@ -237,13 +240,37 @@ random behind a tailnet, so the limiter's security value rounded to zero while
 its availability cost was a real 15-minute outage. It is kept, but now it fires
 on guessing rather than on the operator.
 
-**Deliberately not in that branch** (a UX change to the sign-in flow, worth
-landing separately): the SPA shell is still token-gated, so an unauthenticated
-visit returns raw JSON instead of a sign-in screen — the only way in is
-hand-pasting `?token=` into the URL bar; and the `bo_session` cookie is a fixed
-30-day `Max-Age` with no renewal, a recurring cliff whose failure mode is this
-incident. Serving the shell publicly (it holds no data; `/api/*` is the real
-gate) and renewing the cookie on each success would close both.
+**Self-service sign-in (the follow-up, same day).** The lockout fix stopped the
+console locking you out; it did not stop you *needing the URL bar* to get in.
+Two things kept the incident's root cause alive:
+
+- the SPA shell was token-gated too, so an unauthenticated visit rendered raw
+  JSON and the only way in was hand-pasting `?token=` — no sign-in screen
+  existed anywhere in the product;
+- `bo_session` carried a fixed 30-day `Max-Age` set once at first sign-in, so it
+  expired mid-use on a schedule. That expiry is the most likely trigger of the
+  original incident (the tailnet exposure was rolled 2026-06-24, 47 days before).
+
+Both are closed. The shell and its assets are now **public** (they carry no
+household data — `/api/*` is the real gate), so an unauthenticated visit renders
+a **sign-in form**; the token is exchanged for the cookie over
+`GET /api/session` as a Bearer header, so it never enters the address bar or
+browser history the way `?token=` did (that URL still works — old bookmarks are
+unbroken). The cookie is **re-issued on every authenticated response**, making
+it an idle timeout rather than a hard expiry. Any `401` from any screen raises a
+window event that swaps the shell for the sign-in form, so an expired session
+lands on a form instead of five identical error cards.
+
+Verified end-to-end in a real browser against the built server + built SPA
+(`chromium`, script in the PR): unauthenticated visit renders the form and no
+raw JSON; a wrong token stays on the form; the right token loads the console;
+the token never appears in the URL; the cookie is httpOnly; a reload stays
+signed in.
+
+**Known fragility, not fixed here:** the SPA has no error boundary, so one
+malformed API field blanks the whole console (found while building the
+verification harness — a stub with a missing `dailyCost` produced a white
+screen, not a degraded card). Worth an error boundary around the screen subtree.
 
 ---
 

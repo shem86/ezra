@@ -2,8 +2,10 @@
 // and the cards/dense dashboard variants are dropped; the `focus` layout is the
 // one kept (spec Q6). Hash routing means no server-side SPA fallback is needed.
 import { useEffect, useState } from 'react';
+import { UNAUTHORIZED_EVENT } from './api/client';
 import { Icon } from './components/icon';
 import { Badge, Dot } from './components/primitives';
+import { SignIn } from './components/sign-in';
 import { isRoute, NAV, TITLES, type Route } from './routes';
 
 // Static console branding (not mock data — the household's real group jid is
@@ -80,6 +82,17 @@ export function App(): React.JSX.Element {
     const h = (location.hash || '').replace('#', '');
     return isRoute(h) ? h : 'dashboard';
   });
+  // Any 401 from any screen raises UNAUTHORIZED_EVENT; that swaps the whole
+  // shell for the sign-in form. `session` remounts the screen subtree after a
+  // successful sign-in so its data loaders re-run with the fresh cookie.
+  const [signedOut, setSignedOut] = useState(false);
+  const [session, setSession] = useState(0);
+
+  useEffect(() => {
+    const onUnauthorized = (): void => setSignedOut(true);
+    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+  }, []);
 
   useEffect(() => {
     location.hash = route;
@@ -102,12 +115,25 @@ export function App(): React.JSX.Element {
     status: <StatusScreen />,
   };
 
+  if (signedOut) {
+    return (
+      <SignIn
+        onSignedIn={() => {
+          setSignedOut(false);
+          setSession((n) => n + 1);
+        }}
+      />
+    );
+  }
+
   return (
     <div className="shell">
       <Sidebar route={route} setRoute={setRoute} />
       <main className="main">
         <Topbar route={route} />
-        <div className="content">{screen[route]}</div>
+        <div className="content" key={session}>
+          {screen[route]}
+        </div>
       </main>
     </div>
   );
