@@ -215,9 +215,24 @@ section and ADR-0006 "Alternatives rejected").
 
 ## HEALTH-GRACE-001 — the down-alert predicate can't tell "retrying" from "dead"
 
-**Status: OPEN.** Severity **medium** (alert quality, not availability). Filed
-2026-07-21 from the alert investigation that produced #35; confirmed against
-real disconnect data 2026-08-05.
+**Status: PARTIALLY CLOSED 2026-08-10.** This entry bundles two independent
+defects; the builder decided against one of them:
+
+- **Repeat-alert-while-down — WON'T FIX (builder decision, 2026-08-10).** The
+  alert channel is deliberately edge-triggered: one alert per outage, and
+  "still down until you hear otherwise" is the contract. *"I don't want to be
+  alerted more than once, the time that passed since is on me."* The 12-day
+  outage is therefore not evidence of an alerting defect — the alert fired
+  correctly and was acted on late, which is an operator-time question, not a
+  code one. Do not re-file this.
+- **Predicate can't distinguish retrying from gave-up — STILL OPEN.** Unchanged
+  by the above, and note it would *reduce* alert volume rather than add to it:
+  no page for an ordinary blip that self-heals, an immediate page when the
+  socket genuinely gives up.
+
+Severity **medium** (alert quality, not availability). Filed 2026-07-21 from the
+alert investigation that produced #35; confirmed against real disconnect data
+2026-08-05.
 
 **Problem.** `createHealthMonitor` (`src/ops/health.ts:59`) treats `'closed'`
 and `'connecting'` identically — "down" means *not open past the grace*. That
@@ -236,14 +251,19 @@ available**: `SPEC.md:180` requires socket-drop alerting within 5 minutes, and
 the ladder already eats 4.25 of those.
 
 Second, independent defect in the same code: `downAlertSent` latches, so exactly
-**one** alert fires per outage and a still-dead socket goes quiet — the blind
-spot that hid SOCKET-DEAD-001 for 8 days.
+**one** alert fires per outage and a still-dead socket goes quiet.
 
-**Fix direction.** Feed the `DisconnectInfo` the adapter already emits (#35) into
-the monitor and split the predicate: alert **immediately** on `gaveUp` (no
-grace — it is definitionally an outage), and keep the grace only for the
-"connecting/retrying" case. Then make the alert **repeat** on an interval while
-down instead of latching, with a recovery notice on `open`.
+> **That second one is now WON'T FIX** (see Status above) — the latch is the
+> intended design, not a defect. It was originally written up here as "the blind
+> spot that hid SOCKET-DEAD-001 for 8 days"; that framing was wrong. The alert
+> fired, and the edge-triggered contract means silence afterwards carries no
+> information either way.
+
+**Fix direction (for the part that remains open).** Feed the `DisconnectInfo`
+the adapter already emits (#35) into the monitor and split the predicate: alert
+**immediately** on `gaveUp` (no grace — it is definitionally an outage), and
+keep the grace only for the "connecting/retrying" case. Still exactly one alert
+per outage — this changes *when* and *why* it fires, never *how many*.
 
 **Data now available.** `v2.2.9` has been emitting `[socket] disconnected:
 code=… ` since 2026-07-21; the code distribution in SOCKET-DEAD-001 is the

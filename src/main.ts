@@ -497,6 +497,13 @@ async function main(): Promise<void> {
   }
 
   await replyDb.connect();
+  // Diagnostic boundary, NOT a readiness signal. `ezra up:` below still means
+  // "the WhatsApp socket is open", because ezra IS the WhatsApp connection —
+  // a spine with no socket serves nobody. This line only makes the two failure
+  // modes distinguishable at a glance in `docker logs`: nothing after it means
+  // the process never wired up; this line followed by [socket] retries means it
+  // wired up fine and WhatsApp is refusing us.
+  console.log('[spine] wired: DBOS, queues, sweeps, reply lane');
   await transport.connect();
   deadman.start();
   // After connect: a staleness probe must never sit between the process
