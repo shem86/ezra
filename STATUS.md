@@ -13,8 +13,10 @@ still carry their 2026-07-21 dates.
 `v2.3.0`, verified live on the host. Item 7 (backoffice Langfuse reads — both
 data screens measured broken on prod) **resolved** and live on `v2.3.3`,
 verified on the host after the deploy. Added item 8, which corrects a
-`/api/status` timing claim made under item 7. Items 1–5 still carry their
-2026-07-21 dates and were not re-verified on this pass either.
+`/api/status` timing claim made under item 7, and item 9 (the lookback and
+retention ceilings the new TanStack chart layer cannot reach from the client).
+Items 1–5 still carry their 2026-07-21 dates and were not re-verified on this
+pass either.
 
 This is the **single source of truth for current state**. Everything else is
 history:
@@ -415,12 +417,17 @@ otherwise 0.45s, and this predates `v2.3.3` (the same 10.48s pair was measured
 on `v2.3.1` before any of this work). It is filed because it is a *known
 unknown* with a precise reproduction, not because it is urgent.
 
-### 7. Backoffice charts — the two things the new chart layer can't reach yet
+### 9. Backoffice charts — the two things the new chart layer can't reach yet
 **Status:** open · **verified** 2026-08-10 by reading `makeCostClient` in
 `src/backoffice/cost.ts` and `getLogs` in `src/backoffice/journal.ts` while
 porting the console's charts to TanStack Charts
 (`worktree-backoffice-tanstack-charts`; frontend `lint`/`build`/`test` green,
 52 tests after merging main).
+
+Distinct from item 7, and not in tension with it: that item was about the reads
+being **broken and slow** and is fixed. This one is about how far back they can
+*see* at all, which the v2 rewrite did not change — `makeCostClient` still
+builds the same fixed 30-slot series it did before.
 
 The chart layer landed and every hand-rolled widget is replaced, but two limits
 are in the **server**, not the charts, so they were deliberately left alone:
