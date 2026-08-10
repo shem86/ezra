@@ -38,7 +38,19 @@ history:
 3. **Never delete a spec** — archive it. `go-public-spec.md` was deleted in the
    pre-public trim and its audit record survived only in `0b4f008`.
 4. **Update this file in the same PR as the work.** Branch protection is not
-   enforcing that today (see below), so it is discipline.
+   enforcing that today, so it is discipline.
+5. **Cite symbols, never line numbers.** <!-- refcheck:off --> `the
+   wasSentByBot: () => false wiring in src/main.ts`, not `src/main.ts:431`.
+   Earned immediately: this file shipped 2026-07-21 citing four line numbers,
+   and PR #35 (socket-drop diagnostics) invalidated all four the *same day* —
+   `main.ts:431`→446, `baileys.ts:142`→162, `:305`→345, `:228`→268. The facts
+   were still true; only the pointers rotted. A grep-able symbol survives every
+   refactor above it. <!-- refcheck:on -->
+   Enforced by `pnpm check:docs` (`scripts/check-doc-refs.ts`), which also
+   resolves every link and every cited path, and requires each `src/`/`tests/`
+   path in this file to carry a symbol that still greps. It runs in **both** CI
+   workflows on purpose — see the header comment in that script for why a
+   docs-only trigger would have been green through the very failure above.
 
 ---
 
@@ -186,12 +198,13 @@ live. That run mattered — the adopted host never ran cloud-init, so the
 **Status:** open, builder decision (schema vs adapter-id) · **verified**
 2026-07-21 by reading source.
 
-Production passes a hardcoded constant: `src/main.ts:431` →
-`wasSentByBot: () => false`. The real suppression is an **in-memory ring
-buffer** — `src/transport/baileys.ts:142` (`RecentIds`), populated at `:305`,
-consulted at `:228` — which is **lost on restart**. The `IngestionDeps.wasSentByBot`
-seam (`src/orchestration/ingest.ts:56`, checked at `:88`) is therefore dead code
-in prod. `sent_log` exists but is wired only to send-class dedup, not the echo
+Production hardcodes the guard off: the `wasSentByBot` constant in
+`src/main.ts` is `() => false`. The real suppression is an **in-memory ring
+buffer** — the `RecentIds` buffer in `src/transport/baileys.ts`, populated on
+send and consulted on inbound — so it is **lost on restart**. The
+`IngestionDeps.wasSentByBot` seam (declared and checked in
+`src/orchestration/ingest.ts`) is therefore dead code in
+prod. `sent_log` exists but is wired only to send-class dedup, not the echo
 guard; no migration adds an echo/adapter-id table (`migrations/` tops out at
 `0008-compaction-log.sql`).
 
@@ -392,8 +405,21 @@ turns — harmless at today's 35ms, worth a retention policy before it isn't.
 
 ## Watch list (from the `TASKS.md` deferred-decisions ledger)
 
-- **#7** — T19 kill-mid-flight flake under triple-suite load (1 in ~9,
-  unreproduced). Watch in `test:recovery`.
+- **#7** — kill-mid-flight flake under load. **No longer unreproduced:**
+  it recurred in CI 2026-08-03 — run `30834016384` **attempt 1** (PR #38) —
+  this time in the `handleTurn skeleton (T22)` suite in
+  `tests/integration/handle-turn.test.ts`, not T19's file. Cite the attempt,
+  never the run: the re-run below overwrote the run-level conclusion, so that
+  run id now reports *success* and only attempt 1 still carries the failure.
+  The mid-flight
+  child never produced its first effect ("condition not met within 30000ms"),
+  and because that test runs first *by design* (it must observe a PENDING
+  workflow before `DBOS.launch()` triggers recovery), its failure meant launch
+  never happened and the other 22 tests in the file cascaded with
+  "`DBOS.launch()` must be called before running workflows". One re-run went
+  fully green with no code change. Two things to carry: the blast radius is
+  the **whole file**, not one test, so this reads far worse than it is; and
+  the flake is not T19-specific. Watch in `test:recovery`.
 - **#13** — `semantic.test.ts` "empty store" test races parallel suites on the
   shared dev DB. Fix if it recurs.
 - **#16** — dev/prod prompt divergence on sender attribution; resolved for the

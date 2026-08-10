@@ -44,6 +44,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm lint
+      # Doc reference check. It lives HERE, on the code path, because that is
+      # where the damage comes from: PR #35 invalidated four of STATUS.md's
+      # references while touching only src/ and one test. A docs-only trigger
+      # would have been green through it. `docs.yml` covers the complement
+      # (the '**.md'/'docs/**' paths this workflow ignores).
+      - run: pnpm check:docs
       - run: pnpm test
       # The M3 reliability gate (T24): the named recovery/exactly-once/
       # debounce/FIFO/execute-once tests as one suite. Overlaps `pnpm test`
