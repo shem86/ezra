@@ -5,7 +5,8 @@
 // (used by curl / the api client), a `bo_session` cookie, or a one-time
 // `?token=<t>` query on the SPA load (which the server then promotes to an
 // httpOnly cookie so the browser carries it on subsequent same-origin calls).
-// Comparison is constant-time; repeated failures from an address lock out.
+// Comparison is constant-time. Repeated WRONG tokens from an address lock it
+// out; a request carrying no credential is not an attempt and never counts.
 
 import { createHash, timingSafeEqual } from 'node:crypto';
 
@@ -55,6 +56,11 @@ export function extractToken(input: {
 export interface RateLimitOptions {
   readonly maxFailures: number;
   readonly lockoutMs: number;
+  /** Sliding window the failures must land INSIDE to trip a lockout.
+   *  Defaults to lockoutMs. Without it failures sum for the process's whole
+   *  lifetime, so unrelated rejects weeks apart add up to a lockout — that is
+   *  what stranded the operator on 2026-08-10. */
+  readonly windowMs?: number;
   /** Injectable clock for tests; defaults to Date.now. */
   readonly now?: () => number;
 }
@@ -68,7 +74,10 @@ export interface RateLimiter {
 
 export function makeRateLimiter(options: RateLimitOptions): RateLimiter {
   const now = options.now ?? Date.now;
-  const state = new Map<string, { failures: number; lockedUntil: number }>();
+  const windowMs = options.windowMs ?? options.lockoutMs;
+  // Failure TIMESTAMPS, not a running count — the count is derived per call
+  // from the ones still inside the window.
+  const state = new Map<string, { failures: number[]; lockedUntil: number }>();
   return {
     isLocked(addr) {
       const s = state.get(addr);
@@ -78,13 +87,21 @@ export function makeRateLimiter(options: RateLimitOptions): RateLimiter {
       return false;
     },
     recordFailure(addr) {
-      const s = state.get(addr) ?? { failures: 0, lockedUntil: 0 };
-      s.failures += 1;
-      if (s.failures >= options.maxFailures) {
-        s.lockedUntil = now() + options.lockoutMs;
-        s.failures = 0;
+      const t = now();
+      const s = state.get(addr) ?? { failures: [], lockedUntil: 0 };
+      // Drop failures that have aged out, then add this one.
+      s.failures = s.failures.filter((ts) => ts > t - windowMs);
+      s.failures.push(t);
+      if (s.failures.length >= options.maxFailures) {
+        s.lockedUntil = t + options.lockoutMs;
+        s.failures = [];
       }
       state.set(addr, s);
+      // Addresses that never lock would otherwise accumulate forever: an
+      // unbounded Map keyed by a caller-influenced value. Drop spent entries.
+      for (const [k, v] of state) {
+        if (v.failures.length === 0 && v.lockedUntil <= t) state.delete(k);
+      }
     },
     reset(addr) {
       state.delete(addr);

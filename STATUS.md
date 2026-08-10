@@ -186,6 +186,45 @@ relatedness classifier is guarded only by offline eval; the HITL park/resume
 machinery is built but **unexercised in production** (soak it during the
 calendar rollout).
 
+### 6. Backoffice auth lockout — fixed on a branch, not yet deployed
+**Status:** open (awaiting deploy) · **verified** 2026-08-10 by reproducing it
+against live prod (`curl` over the tailnet returned
+`429 too many attempts — locked out` while the host's own tailnet IP got a
+normal `401`), then by the regression suite on
+`worktree-backoffice-lockout-fix` (`pnpm lint && pnpm build && pnpm test` green
+— 578 unit + 10 backoffice integration).
+
+The operator's own machine was locked out of the read-only console for 15
+minutes while every layer was healthy (host up, `tailscaled` up,
+`tailscale serve` bound, container Up, ~90ms response). It reads as an outage.
+Three defects in the auth gate conspired, all in `src/backoffice`:
+
+| | Defect | Effect |
+|---|---|---|
+| **trigger** | credential-less requests counted as failed *attempts* | the dashboard fires 4 parallel `/api` calls on mount, so **two** stale-cookie page loads spent the whole 8-failure budget |
+| **amplifier** | failure counter never decayed | rejects summed for the process's lifetime, so unrelated 401s days apart added up |
+| **trap** | `isLocked` was checked *before* the token comparison | a **correct** token was refused too — the operator could not recover by presenting it, only by waiting |
+
+Fixed by evaluating the credential first and consulting the lockout only once
+it proves wrong (a valid token always wins — an attacker never holds one), by
+not counting no-credential requests, and by sliding the failure window. The
+throttle that matters is unchanged: 8 wrong tokens inside 15 minutes still
+locks. Auth rejections and lockouts are now logged (the console had emitted
+**two log lines in two weeks**, so nothing was diagnosable from the box).
+
+Brute force was never the real risk here — `BACKOFFICE_TOKEN` is `min(32)`
+random behind a tailnet, so the limiter's security value rounded to zero while
+its availability cost was a real 15-minute outage. It is kept, but now it fires
+on guessing rather than on the operator.
+
+**Deliberately not in that branch** (a UX change to the sign-in flow, worth
+landing separately): the SPA shell is still token-gated, so an unauthenticated
+visit returns raw JSON instead of a sign-in screen — the only way in is
+hand-pasting `?token=` into the URL bar; and the `bo_session` cookie is a fixed
+30-day `Max-Age` with no renewal, a recurring cliff whose failure mode is this
+incident. Serving the shell publicly (it holds no data; `/api/*` is the real
+gate) and renewing the cookie on each success would close both.
+
 ---
 
 ## Newly unblocked by going public (2026-07-14)

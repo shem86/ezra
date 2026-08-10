@@ -48,6 +48,30 @@ describe('auth helpers', () => {
     rl.reset('ip');
     expect(rl.isLocked('ip')).toBe(false);
   });
+
+  // Regression: failures used to accumulate forever, so 8 rejects spread over
+  // WEEKS still tripped a lockout. Only failures inside the window count.
+  it('forgets failures older than the window', () => {
+    let t = 0;
+    const rl = makeRateLimiter({ maxFailures: 3, lockoutMs: 1000, windowMs: 1000, now: () => t });
+    rl.recordFailure('ip');
+    rl.recordFailure('ip');
+    t = 1001; // both fall out of the window
+    rl.recordFailure('ip');
+    rl.recordFailure('ip');
+    expect(rl.isLocked('ip')).toBe(false);
+    rl.recordFailure('ip'); // 3 inside the window → locked
+    expect(rl.isLocked('ip')).toBe(true);
+  });
+
+  it('windowMs defaults to lockoutMs', () => {
+    let t = 0;
+    const rl = makeRateLimiter({ maxFailures: 2, lockoutMs: 500, now: () => t });
+    rl.recordFailure('ip');
+    t = 501;
+    rl.recordFailure('ip');
+    expect(rl.isLocked('ip')).toBe(false);
+  });
 });
 
 describe('backoffice server', () => {
@@ -115,5 +139,86 @@ describe('backoffice server', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('text/html');
     expect(await res.text()).toContain('ezra');
+  });
+});
+
+// Regression suite for the 2026-08-10 lockout incident: the operator's own
+// machine was 429'd for 15 minutes while the console was perfectly healthy.
+// Three separate defects conspired; each gets a test here.
+describe('backoffice lockout behaviour', () => {
+  const servers: Server[] = [];
+
+  async function start(maxFailures: number): Promise<{ base: string; logs: string[] }> {
+    const dist = await mkdtemp(join(tmpdir(), 'bo-dist-'));
+    await writeFile(join(dist, 'index.html'), '<!doctype html><title>ezra</title>');
+    const logs: string[] = [];
+    const server = createBackofficeServer({
+      token: TOKEN,
+      distDir: dist,
+      rateLimiter: makeRateLimiter({ maxFailures, lockoutMs: 60_000 }),
+      logger: (msg) => logs.push(msg),
+    });
+    servers.push(server);
+    await new Promise<void>((r) => server.listen(0, r));
+    const { port } = server.address() as AddressInfo;
+    return { base: `http://127.0.0.1:${port}`, logs };
+  }
+
+  afterAll(() => {
+    for (const s of servers) s.close();
+  });
+
+  // Defect 1: every credential-less request counted as a failed ATTEMPT. The
+  // dashboard fires 4 parallel /api calls on mount, so two loads with a stale
+  // cookie locked the operator out before any password was ever guessed.
+  it('does not count a credential-less request as a failed attempt', async () => {
+    const { base } = await start(3);
+    for (let i = 0; i < 6; i++) {
+      const res = await fetch(`${base}/api/health`);
+      expect(res.status).toBe(401);
+    }
+    const res = await fetch(`${base}/api/health`, { headers: { authorization: `Bearer ${TOKEN}` } });
+    expect(res.status).toBe(200);
+  });
+
+  // Defect 2: isLocked was checked BEFORE the token comparison, so a lockout
+  // shut out the correct credential too — the operator could not recover by
+  // presenting the right token, only by waiting.
+  it('honours a correct token even while the address is locked out', async () => {
+    const { base } = await start(3);
+    for (let i = 0; i < 3; i++) {
+      await fetch(`${base}/api/health`, { headers: { authorization: 'Bearer wrong' } });
+    }
+    // Locked: a further WRONG token is throttled...
+    const throttled = await fetch(`${base}/api/health`, { headers: { authorization: 'Bearer wrong' } });
+    expect(throttled.status).toBe(429);
+    // ...but the real credential still gets in.
+    const res = await fetch(`${base}/api/health`, { headers: { authorization: `Bearer ${TOKEN}` } });
+    expect(res.status).toBe(200);
+  });
+
+  // The throttle that actually matters is unchanged: a guesser is still capped
+  // after maxFailures wrong tokens, and stays capped.
+  it('still throttles repeated wrong tokens', async () => {
+    const { base } = await start(3);
+    const wrong = { headers: { authorization: 'Bearer wrong' } };
+    expect((await fetch(`${base}/api/health`, wrong)).status).toBe(401);
+    expect((await fetch(`${base}/api/health`, wrong)).status).toBe(401);
+    // The 3rd wrong token trips the lock and is told so on the spot.
+    const tripped = await fetch(`${base}/api/health`, wrong);
+    expect(tripped.status).toBe(429);
+    expect(tripped.headers.get('retry-after')).toBeTruthy();
+    expect((await fetch(`${base}/api/health`, wrong)).status).toBe(429);
+  });
+
+  // Defect 3: none of this was observable — two log lines in two weeks.
+  it('logs rejected attempts and the lockout, never the token', async () => {
+    const { base, logs } = await start(2);
+    await fetch(`${base}/api/health`, { headers: { authorization: 'Bearer wrong-token-value' } });
+    await fetch(`${base}/api/health`, { headers: { authorization: 'Bearer wrong-token-value' } });
+    expect(logs.length).toBeGreaterThanOrEqual(2);
+    expect(logs.some((l) => l.includes('locked out'))).toBe(true);
+    expect(logs.join('\n')).not.toContain('wrong-token-value');
+    expect(logs.join('\n')).not.toContain(TOKEN);
   });
 });

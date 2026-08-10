@@ -116,20 +116,42 @@ export function createRequestHandler(deps: BackofficeDeps) {
       return;
     }
 
-    if (deps.rateLimiter.isLocked(addr)) {
-      sendJson(res, 429, { error: 'too many attempts — locked out' }, { 'retry-after': '900' });
-      return;
-    }
-
     // --- auth gate ---
+    //
+    // Order is load-bearing (2026-08-10 incident, STATUS.md): evaluate the
+    // credential FIRST and consult the lockout only once it proves wrong.
+    // Checking isLocked up front shut out the correct token too, so the
+    // operator could not recover by presenting it — only by waiting 15
+    // minutes, which reads exactly like an outage. An attacker never holds
+    // the token, so letting a valid one through costs nothing; the throttle
+    // that matters (repeated WRONG tokens, below) is unchanged.
     const candidate = extractToken({
       authorization: req.headers['authorization'],
       cookie: req.headers['cookie'],
       queryToken: url.searchParams.get('token') ?? undefined,
     });
-    const ok = candidate !== undefined && safeEqual(candidate.token, deps.token);
-    if (!ok) {
+
+    // No credential at all is not an ATTEMPT — it is a browser that has not
+    // signed in yet. The dashboard fires four parallel /api calls on mount, so
+    // counting these meant one stale-cookie page load burned half the budget
+    // and two locked the operator out. Brute force always presents a
+    // candidate, so ignoring these does not weaken detection.
+    if (candidate === undefined) {
+      sendJson(res, 401, { error: 'unauthorized' }, { 'www-authenticate': 'Bearer' });
+      return;
+    }
+
+    if (!safeEqual(candidate.token, deps.token)) {
       deps.rateLimiter.recordFailure(addr);
+      const locked = deps.rateLimiter.isLocked(addr);
+      // Never log the presented value — only that one arrived and from where.
+      deps.logger?.(
+        `backoffice auth: rejected ${candidate.source} token from ${addr}${locked ? ' — address now locked out' : ''}`,
+      );
+      if (locked) {
+        sendJson(res, 429, { error: 'too many attempts — locked out' }, { 'retry-after': '900' });
+        return;
+      }
       sendJson(res, 401, { error: 'unauthorized' }, { 'www-authenticate': 'Bearer' });
       return;
     }

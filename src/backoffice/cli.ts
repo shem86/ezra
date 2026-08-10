@@ -24,9 +24,10 @@ import { createBackofficeServer } from './server.js';
 function main(): void {
   const config = loadBackofficeConfig();
   const distDir = resolve(config.distDir);
-  // 8 bad tokens from one address → 15-minute lockout. Generous for a fat
-  // finger, tight enough that the tailnet+token combo isn't brute-forceable.
-  const rateLimiter = makeRateLimiter({ maxFailures: 8, lockoutMs: 15 * 60_000 });
+  // 8 WRONG tokens from one address *within 15 minutes* → 15-minute lockout.
+  // Both qualifiers matter: credential-less requests don't count, and the
+  // window slides, so ordinary 401s can't sum into a lockout over days.
+  const rateLimiter = makeRateLimiter({ maxFailures: 8, lockoutMs: 15 * 60_000, windowMs: 15 * 60_000 });
 
   // The SELECT-only pool (BO-17 role). A small pool: this is a single-operator
   // console, not a high-throughput service.
