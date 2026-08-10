@@ -125,7 +125,7 @@ export function DatabaseScreen({ client = api }: { client?: ApiClient }): React.
             }}
           >
             {error === 'unauthorized'
-              ? 'Unauthorized — open this console with ?token=… to sign in.'
+              ? 'Session expired — sign in again.'
               : `Could not load data: ${error}`}
           </div>
         )}

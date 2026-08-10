@@ -31,7 +31,7 @@ function CardError({ title, error }: { title: string; error: string }): React.JS
     <Card>
       <SectionTitle>{title}</SectionTitle>
       <span style={{ color: 'var(--err)', fontSize: 13 }}>
-        {error === 'unauthorized' ? 'Unauthorized — open with ?token=…' : `Couldn't load: ${error}`}
+        {error === 'unauthorized' ? 'Session expired — sign in again.' : `Couldn't load: ${error}`}
       </span>
     </Card>
   );
@@ -257,7 +257,7 @@ export function OverviewScreen({ onOpen, client = api }: { onOpen: (r: Route) =>
     return (
       <Card>
         <span style={{ color: 'var(--err)' }}>
-          {error === 'unauthorized' ? 'Unauthorized — open with ?token=…' : `Could not load overview: ${error}`}
+          {error === 'unauthorized' ? 'Session expired — sign in again.' : `Could not load overview: ${error}`}
         </span>
       </Card>
     );
@@ -307,7 +307,7 @@ export function OverviewScreen({ onOpen, client = api }: { onOpen: (r: Route) =>
           <div style={{ padding: '4px 18px 12px' }}>
             {logs ? <ActivityFeed logs={logs} onOpen={onOpen} /> : (
               <span style={{ color: 'var(--err)', fontSize: 13 }}>
-                {data.logs.ok ? '' : data.logs.error === 'unauthorized' ? 'Unauthorized — open with ?token=…' : `Couldn't load: ${data.logs.error}`}
+                {data.logs.ok ? '' : data.logs.error === 'unauthorized' ? 'Session expired — sign in again.' : `Couldn't load: ${data.logs.error}`}
               </span>
             )}
           </div>

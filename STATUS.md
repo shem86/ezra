@@ -226,13 +226,16 @@ relatedness classifier is guarded only by offline eval; the HITL park/resume
 machinery is built but **unexercised in production** (soak it during the
 calendar rollout).
 
-### 6. Backoffice auth lockout — fixed on a branch, not yet deployed
-**Status:** open (awaiting deploy) · **verified** 2026-08-10 by reproducing it
+### 6. ✅ RESOLVED 2026-08-10 — backoffice auth locked the operator out
+**Status:** **resolved**, shipped in `v2.3.1` (lockout) + the self-service
+sign-in that follows it · **verified** 2026-08-10 first by reproducing it
 against live prod (`curl` over the tailnet returned
 `429 too many attempts — locked out` while the host's own tailnet IP got a
-normal `401`), then by the regression suite on
-`worktree-backoffice-lockout-fix` (`pnpm lint && pnpm build && pnpm test` green
-— 578 unit + 10 backoffice integration).
+normal `401`), then **against prod after the `v2.3.1` deploy**: 12 consecutive
+credential-less requests all returned `401` with no lockout (under the old code
+the 9th would have 429'd for 15 minutes), and a single wrong token produced
+`backoffice auth: rejected header token from …` in the container log with the
+presented value absent.
 
 The operator's own machine was locked out of the read-only console for 15
 minutes while every layer was healthy (host up, `tailscaled` up,
@@ -257,13 +260,63 @@ random behind a tailnet, so the limiter's security value rounded to zero while
 its availability cost was a real 15-minute outage. It is kept, but now it fires
 on guessing rather than on the operator.
 
-**Deliberately not in that branch** (a UX change to the sign-in flow, worth
-landing separately): the SPA shell is still token-gated, so an unauthenticated
-visit returns raw JSON instead of a sign-in screen — the only way in is
-hand-pasting `?token=` into the URL bar; and the `bo_session` cookie is a fixed
-30-day `Max-Age` with no renewal, a recurring cliff whose failure mode is this
-incident. Serving the shell publicly (it holds no data; `/api/*` is the real
-gate) and renewing the cookie on each success would close both.
+**Self-service sign-in (the follow-up, same day).** The lockout fix stopped the
+console locking you out; it did not stop you *needing the URL bar* to get in.
+Two things kept the incident's root cause alive:
+
+- the SPA shell was token-gated too, so an unauthenticated visit rendered raw
+  JSON and the only way in was hand-pasting `?token=` — no sign-in screen
+  existed anywhere in the product;
+- `bo_session` carried a fixed 30-day `Max-Age` set once at first sign-in, so it
+  expired mid-use on a schedule. That expiry is the most likely trigger of the
+  original incident (the tailnet exposure was rolled 2026-06-24, 47 days before).
+
+Both are closed. The shell and its assets are now **public** (they carry no
+household data — `/api/*` is the real gate), so an unauthenticated visit renders
+a **sign-in form**; the token is exchanged for the cookie over
+`GET /api/session` as a Bearer header, so it never enters the address bar or
+browser history the way `?token=` did (that URL still works — old bookmarks are
+unbroken). The cookie is **re-issued on every authenticated response**, making
+it an idle timeout rather than a hard expiry. Any `401` **or `429`** from any
+screen raises a window event that swaps the shell for the sign-in form, so an
+expired session lands on a form instead of five identical error cards. There is
+now a **sign out** in the sidebar, so revoking a session no longer means rotating
+the token.
+
+**A third shape of the same lockout, caught in review of that follow-up.** Making
+the shell public re-opened the incident by a new route: after
+`BACKOFFICE_TOKEN` is rotated, every browser replays the *old* token in its
+cookie — on the shell, on each hashed asset, and on the four `/api` calls the
+dashboard fires on mount. Counted as guesses, one page load spent the whole
+8-failure budget, so the operator was `429`'d before the sign-in form could
+render, every reload re-armed the lock, and `429` did not raise the window event
+so the form was unreachable. Reproduced against the built server at the
+production limiter settings (lock tripped on page load 1; loads 2 and 3 were
+`429` across the board). Three changes close it: a rejected **cookie** is not an
+attempt (it is discarded and cleared — only a *presented* header or `?token=` can
+be a guess, and those still lock out after 8); a presented token now outranks a
+stored cookie in `extractToken`, so a good token is compared instead of being
+shadowed by the stale one; and `429` joins `401` in routing to the form, which
+says the console is healthy. Also hardened while in there: `Secure` on the cookie
+when the request arrives over HTTPS — which in prod is always, since
+`tailscale serve` forwards `x-forwarded-proto: https` and the container port is
+loopback-only; the conditional exists for the plain `http://localhost` origin the
+vite dev server proxies through — and `X-Frame-Options: DENY` +
+`frame-ancestors 'none'`, since a public page now renders a credential form.
+
+Verified end-to-end in a real browser against the built server + built SPA
+(`chromium`, `backoffice/scripts/verify-signin.mjs`, now at the production
+limiter settings): unauthenticated visit renders the form and no raw JSON; a
+wrong token stays on the form; the right token loads the console; the token never
+appears in the URL; the cookie is httpOnly; a reload stays signed in; sign-out
+returns to the form and survives a reload; and a stale cookie lands on the form
+across three reloads without a single `429`, then signs in cleanly. The two
+stale-cookie server tests were confirmed RED against the pre-fix code.
+
+**Known fragility, not fixed here:** the SPA has no error boundary, so one
+malformed API field blanks the whole console (found while building the
+verification harness — a stub with a missing `dailyCost` produced a white
+screen, not a degraded card). Worth an error boundary around the screen subtree.
 
 ### 7. Backoffice Langfuse reads — fixed on a branch, not yet deployed
 **Status:** open (awaiting deploy) · **verified** 2026-08-10 by timing the live
