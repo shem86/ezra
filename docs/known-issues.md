@@ -1,7 +1,226 @@
 # Known issues
 
 Tracked defects found in production/deploy that are filed for a deliberate fix
-rather than hot-patched. Each links a repro test where one exists.
+rather than hot-patched. Each links a repro test where one exists. **Open
+entries come first**; current open/closed state is asserted only by
+[`STATUS.md`](../STATUS.md).
+
+## SOCKET-DEAD-001 — the adapter never re-arms after exhausting its retry budget
+
+**Status: OPEN — production has been dead since 2026-07-28 and still is.**
+Severity **P0**: ezra could not send or receive WhatsApp at all. The outage was
+diagnosed 2026-08-03 (root cause: WA-VERSION-001) and **re-confirmed still
+running, still unfixed on 2026-08-05** — this entry exists because the diagnosis
+had not been written into the repo, so nothing tracked it. The disconnect
+logging shipped in `v2.2.9` (#35) is what made the failure legible in the first
+place.
+
+**Problem.** `handleClose` (`src/transport/baileys.ts`) retries a dropped socket
+with exponential backoff up to `policy.maxAttempts`. When the budget is spent it
+reports `gaveUp: true`, emits state `closed`, **and stops** — nothing ever
+re-arms it. The Node process stays alive and healthy, so:
+
+- Docker's restart policy never fires (the container is `running`, exit code
+  never happens).
+- The dead-man ping keeps succeeding — it proves the *process* is up, not that
+  the *socket* is up — so healthchecks.io stays green through a total outage.
+- The health monitor alerts **once** (`downAlertSent` latches at
+  `src/ops/health.ts:68`/`:71`) and never repeats, so a permanent outage looks
+  identical to the transient blips that had been self-healing all week.
+
+Net effect: a transient WhatsApp-side rejection is converted into a **permanent,
+silent** outage that only a human noticing "ezra stopped answering" will catch.
+
+**Evidence (prod, verified 2026-08-05 by `docker logs` + DB query).**
+Container `hh-assistant-ezra-1`, image `2.2.9`, started `2026-07-21T14:05:49Z`,
+**0 restarts**, same `node dist/start.js` PID throughout.
+
+```
+2026-07-28T21:53:01Z [socket] open           <- last time it ever worked
+2026-07-28T22:03:27Z [socket] connecting
+   … 12 retries, codes 405/408 …
+2026-07-28T22:12:02Z [socket] disconnected: code=408 giving up after 12 retries
+2026-07-28T22:12:02Z [socket] closed         <- last log line the container ever wrote
+```
+
+Nothing was logged for the following **7 days 18 hours** (checked at
+2026-08-05T16:09Z). Corroborated in Postgres: `max(enqueued_at)` on
+`conversation_inbox` and `max(created_at)` on `sent_log` are both **2026-07-18**,
+with `0` unprocessed inbox rows — messages were not queuing up, they were never
+arriving. Disconnect-code distribution across the container's life: `428`×17,
+`503`×15, `405`×14, `408`×8, with exactly **one** `giving up`.
+
+**Root cause of the drops themselves:** WA-VERSION-001 below. This entry is the
+*amplifier* that turned it into an 8-day outage rather than a bad evening.
+
+**Fix direction (decide at fix time).**
+1. **Never give up permanently (preferred).** Cap the backoff (e.g. 5 min) and
+   keep retrying forever. A household assistant has no scenario where "stop
+   trying to reach WhatsApp until a human intervenes" is right — except `401`
+   logged-out, which genuinely needs re-pairing and already has its own branch.
+2. **Exit the process on give-up**, letting Docker's `restart: unless-stopped`
+   restart the whole spine. Simple and uses existing machinery, but throws away
+   in-memory state and loops noisily if the cause is persistent.
+3. **Re-alert while down.** Independent of 1/2: make the health monitor repeat
+   its alert on an interval instead of latching once, so a still-down socket
+   keeps nagging. See HEALTH-GRACE-001.
+
+Recommendation: (1) + (3). (1) removes the permanent-dead state; (3) removes the
+single-alert blind spot that let it run 8 days unnoticed.
+
+**Repro test to write first** (Prove-It): drive the adapter past
+`maxAttempts` with a fake socket and assert it **still** schedules another
+attempt (and that the monitor re-alerts while `closed`). `tests/unit/baileys-adapter.test.ts`
+already has the give-up harness from #35 to build on.
+
+---
+
+## WA-VERSION-001 — egress blocks the Baileys version probe, freezing the WA client version
+
+**Status: OPEN.** Severity **high** — this is the root cause of SOCKET-DEAD-001.
+**Diagnosed 2026-08-03**; re-confirmed still-unfixed and still-down on the host
+2026-08-05.
+
+**Problem.** `fetchLatestBaileysVersion()` (called in `defaultCreateSocket`,
+`src/transport/baileys.ts`) fetches the current WhatsApp Web version from
+`raw.githubusercontent.com`. That host is **not in the egress allowlist**
+(`src/ops/egress-allowlist.ts` / the mirrored nftables units), so on prod it
+fails with `UND_ERR_CONNECT_TIMEOUT`.
+
+The failure is silent by construction: it does **not throw** — it returns
+`{ version: <bundled fallback>, isLatest: false, error }`, so the surrounding
+`try/catch` never fires and the `error` / `isLatest` fields are ignored. The WA
+client version is therefore frozen at whatever the installed release bundles
+(`lib/Defaults/index.js`); `baileys@7.0.0-rc13` bundles `[2,3000,1035194821]`.
+
+WhatsApp began rejecting that version on 2026-07-27 (a single `405`), then
+wholesale on 2026-07-28. Here `405` is a server `<failure reason>` surfaced via
+`ws.on('CB:failure')` → `Boom('Connection Failure')` — a **handshake rejection**,
+not one of Baileys' named `DisconnectReason` codes — and its canonical trigger is
+an obsolete client version. `classifyDisconnect` treats `405` as a generic
+`retry`, so the adapter burned all 12 attempts against a server that was never
+going to accept it.
+
+**Why this appeared a month after the hardening that caused it.** Enforcing the
+egress allowlist (2026-06-27, `reconcile-host-config.sh` — it had been silently
+failing *open* before) converted a self-updating version pin into a frozen one.
+The hardening was correct; it planted a time bomb that detonated when WhatsApp
+next advanced.
+
+**Evidence (verified 2026-08-05, from inside the prod container).**
+
+```
+$ docker exec hh-assistant-ezra-1 node -e 'fetch("https://raw.githubusercontent.com/...")'
+FAIL TimeoutError The operation was aborted due to timeout
+```
+
+and in the give-up storm, `405` is the dominant code (14 occurrences, 10 of the
+12 final retries) — the signature of a version the server won't accept.
+
+Check bundled-vs-live at any time with:
+
+```
+docker exec hh-assistant-ezra-1 node -e \
+  'require("baileys").fetchLatestBaileysVersion().then(r=>console.log(r))'
+curl -s https://raw.githubusercontent.com/WhiskeySockets/Baileys/master/src/Defaults/baileys-version.json
+```
+
+**Fix direction.** Two independent options; they are not exclusive.
+1. **Allowlist the probe host** — add `raw.githubusercontent.com` to
+   `src/ops/egress-allowlist.ts` and the mirrored nftables rules (the drift test
+   will hold them together). Lets Baileys self-update its version forever.
+   Weigh against the allowlist's deliberately tight posture: it adds a GitHub
+   CDN to the egress surface of a box that currently talks only to Anthropic,
+   Voyage, Google, healthchecks.io, and WhatsApp.
+2. **Bump the pin** — keep egress closed and treat the WA version as a normal
+   dependency: upgrade `baileys` (and/or pass an explicit `version`) on a
+   schedule. Zero new egress; costs a recurring manual step and will re-break on
+   the same clock.
+
+3. **Stop the probe failing silently (do this regardless).** `fetchLatestBaileysVersion()`
+   returns its error instead of throwing, so today a blocked probe is invisible.
+   Log `isLatest`/`error` and the resolved version at connect, and alert when
+   `isLatest` is false. Whichever of 1/2 is chosen, this is what turns the next
+   occurrence into a warning instead of an outage.
+4. **Classify `405` as fatal-ish.** `classifyDisconnect` treats it as a generic
+   `retry`, which is why 12 attempts were spent on a handshake the server would
+   never accept. A handshake rejection should alert loudly (and, once
+   SOCKET-DEAD-001 is fixed, back off far harder than a transient drop).
+
+Recommendation: (1) + (3). Option 2's failure mode is exactly the outage we just
+had, and the whole point of SOCKET-DEAD-001's fix is to stop depending on a human
+noticing. If (1) is rejected on egress grounds, then (2) **must** be paired with
+a version-age alert — (3) is that alert.
+
+---
+
+## HEALTH-GRACE-001 — the down-alert predicate can't tell "retrying" from "dead"
+
+**Status: OPEN.** Severity **medium** (alert quality, not availability). Filed
+2026-07-21 from the alert investigation that produced #35; confirmed against
+real disconnect data 2026-08-05.
+
+**Problem.** `createHealthMonitor` (`src/ops/health.ts:59`) treats `'closed'`
+and `'connecting'` identically — "down" means *not open past the grace*. That
+was deliberate (a socket stuck in `connecting` **is** down), but it cannot
+distinguish two very different states now that the adapter reports which one it
+is in:
+
+- *still climbing the retry ladder* — normal, self-healing, and **expected** to
+  exceed the grace, because the ladder itself sleeps ~4.25 min before giving up
+  (2000, 3600, 6480, 11664, 20995, then 30000×7);
+- *gave up / permanently closed* — a real outage (SOCKET-DEAD-001).
+
+With `downGraceMs: 180_000` (`src/main.ts:104`) the retry sleep alone outruns the
+grace, so ordinary blips page the builder. Widening the grace is **not
+available**: `SPEC.md:180` requires socket-drop alerting within 5 minutes, and
+the ladder already eats 4.25 of those.
+
+Second, independent defect in the same code: `downAlertSent` latches, so exactly
+**one** alert fires per outage and a still-dead socket goes quiet — the blind
+spot that hid SOCKET-DEAD-001 for 8 days.
+
+**Fix direction.** Feed the `DisconnectInfo` the adapter already emits (#35) into
+the monitor and split the predicate: alert **immediately** on `gaveUp` (no
+grace — it is definitionally an outage), and keep the grace only for the
+"connecting/retrying" case. Then make the alert **repeat** on an interval while
+down instead of latching, with a recovery notice on `open`.
+
+**Data now available.** `v2.2.9` has been emitting `[socket] disconnected:
+code=… ` since 2026-07-21; the code distribution in SOCKET-DEAD-001 is the
+calibration input this fix was waiting on.
+
+---
+
+## LOG-KEYS-001 — Baileys writes Signal session key material to container logs
+
+**Status: OPEN.** Severity **medium** — cuts against a `CLAUDE.md` **Never**
+("let operational credentials … into prompts/traces/semantic store"). Found
+2026-07-18, re-confirmed on prod 2026-08-05.
+
+**Problem.** Baileys' internal logger serializes Signal session state — objects
+containing `privKey` and `rootKey` buffers — into stdout, which Docker captures
+into the container log. Anyone with `docker logs` (i.e. host access) reads
+ratchet key material, and it lands in any log shipping or host backup that
+picks up container logs.
+
+**Evidence (verified 2026-08-05).** `docker logs hh-assistant-ezra-1 | grep -c
+privKey` → **11**; same count for `rootKey`. (Counts only — values deliberately
+not read into a transcript.)
+
+**Scope / what limits it.** Log retention is the container's lifetime (no
+external shipping today) and host access is already the trust boundary that
+holds the session files themselves, so this is a defence-in-depth failure, not
+an active compromise. The Baileys session directory is correctly excluded from
+backups (`infra/`, SPEC "Never"); container logs are simply a channel nobody
+audited.
+
+**Fix direction.** Pass Baileys a logger configured to redact or drop those
+fields (its pino logger supports `redact` paths), or lower its log level in
+production so session-state objects are never serialized. Verify with the same
+grep returning `0`. Add a smoke assertion so it cannot regress silently.
+
+---
 
 ## LEDGER-15 — undeliverable-send poison pill wedges the concurrency-1 lane
 
