@@ -41,7 +41,7 @@ export function CostsScreen({ client = api }: { client?: ApiClient }): React.JSX
     return (
       <Card>
         <span style={{ color: 'var(--err)' }}>
-          {error === 'unauthorized' ? 'Unauthorized — open with ?token=…' : `Could not load costs: ${error}`}
+          {error === 'unauthorized' ? 'Session expired — sign in again.' : `Could not load costs: ${error}`}
         </span>
       </Card>
     );

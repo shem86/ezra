@@ -10,8 +10,10 @@ Added Open item 0 — **production is down** — and four defect records to
 still carry their 2026-07-21 dates.
 
 **Partial update 2026-08-10:** item 0 **resolved** — ezra is back up on
-`v2.3.0`, verified live on the host. Items 1–5 still carry their 2026-07-21
-dates and were not re-verified on this pass either.
+`v2.3.0`, verified live on the host. Added Open item 7 (backoffice Langfuse
+reads — both data screens measured broken on prod, fixed on a branch). Items
+1–5 still carry their 2026-07-21 dates and were not re-verified on this pass
+either.
 
 This is the **single source of truth for current state**. Everything else is
 history:
@@ -36,7 +38,19 @@ history:
 3. **Never delete a spec** — archive it. `go-public-spec.md` was deleted in the
    pre-public trim and its audit record survived only in `0b4f008`.
 4. **Update this file in the same PR as the work.** Branch protection is not
-   enforcing that today (see below), so it is discipline.
+   enforcing that today, so it is discipline.
+5. **Cite symbols, never line numbers.** <!-- refcheck:off --> `the
+   wasSentByBot: () => false wiring in src/main.ts`, not `src/main.ts:431`.
+   Earned immediately: this file shipped 2026-07-21 citing four line numbers,
+   and PR #35 (socket-drop diagnostics) invalidated all four the *same day* —
+   `main.ts:431`→446, `baileys.ts:142`→162, `:305`→345, `:228`→268. The facts
+   were still true; only the pointers rotted. A grep-able symbol survives every
+   refactor above it. <!-- refcheck:on -->
+   Enforced by `pnpm check:docs` (`scripts/check-doc-refs.ts`), which also
+   resolves every link and every cited path, and requires each `src/`/`tests/`
+   path in this file to carry a symbol that still greps. It runs in **both** CI
+   workflows on purpose — see the header comment in that script for why a
+   docs-only trigger would have been green through the very failure above.
 
 ---
 
@@ -184,12 +198,13 @@ live. That run mattered — the adopted host never ran cloud-init, so the
 **Status:** open, builder decision (schema vs adapter-id) · **verified**
 2026-07-21 by reading source.
 
-Production passes a hardcoded constant: `src/main.ts:431` →
-`wasSentByBot: () => false`. The real suppression is an **in-memory ring
-buffer** — `src/transport/baileys.ts:142` (`RecentIds`), populated at `:305`,
-consulted at `:228` — which is **lost on restart**. The `IngestionDeps.wasSentByBot`
-seam (`src/orchestration/ingest.ts:56`, checked at `:88`) is therefore dead code
-in prod. `sent_log` exists but is wired only to send-class dedup, not the echo
+Production hardcodes the guard off: the `wasSentByBot` constant in
+`src/main.ts` is `() => false`. The real suppression is an **in-memory ring
+buffer** — the `RecentIds` buffer in `src/transport/baileys.ts`, populated on
+send and consulted on inbound — so it is **lost on restart**. The
+`IngestionDeps.wasSentByBot` seam (declared and checked in
+`src/orchestration/ingest.ts`) is therefore dead code in
+prod. `sent_log` exists but is wired only to send-class dedup, not the echo
 guard; no migration adds an echo/adapter-id table (`migrations/` tops out at
 `0008-compaction-log.sql`).
 
@@ -224,13 +239,16 @@ relatedness classifier is guarded only by offline eval; the HITL park/resume
 machinery is built but **unexercised in production** (soak it during the
 calendar rollout).
 
-### 6. Backoffice auth lockout — fixed on a branch, not yet deployed
-**Status:** open (awaiting deploy) · **verified** 2026-08-10 by reproducing it
+### 6. ✅ RESOLVED 2026-08-10 — backoffice auth locked the operator out
+**Status:** **resolved**, shipped in `v2.3.1` (lockout) + the self-service
+sign-in that follows it · **verified** 2026-08-10 first by reproducing it
 against live prod (`curl` over the tailnet returned
 `429 too many attempts — locked out` while the host's own tailnet IP got a
-normal `401`), then by the regression suite on
-`worktree-backoffice-lockout-fix` (`pnpm lint && pnpm build && pnpm test` green
-— 578 unit + 10 backoffice integration).
+normal `401`), then **against prod after the `v2.3.1` deploy**: 12 consecutive
+credential-less requests all returned `401` with no lockout (under the old code
+the 9th would have 429'd for 15 minutes), and a single wrong token produced
+`backoffice auth: rejected header token from …` in the container log with the
+presented value absent.
 
 The operator's own machine was locked out of the read-only console for 15
 minutes while every layer was healthy (host up, `tailscaled` up,
@@ -255,13 +273,109 @@ random behind a tailnet, so the limiter's security value rounded to zero while
 its availability cost was a real 15-minute outage. It is kept, but now it fires
 on guessing rather than on the operator.
 
-**Deliberately not in that branch** (a UX change to the sign-in flow, worth
-landing separately): the SPA shell is still token-gated, so an unauthenticated
-visit returns raw JSON instead of a sign-in screen — the only way in is
-hand-pasting `?token=` into the URL bar; and the `bo_session` cookie is a fixed
-30-day `Max-Age` with no renewal, a recurring cliff whose failure mode is this
-incident. Serving the shell publicly (it holds no data; `/api/*` is the real
-gate) and renewing the cookie on each success would close both.
+**Self-service sign-in (the follow-up, same day).** The lockout fix stopped the
+console locking you out; it did not stop you *needing the URL bar* to get in.
+Two things kept the incident's root cause alive:
+
+- the SPA shell was token-gated too, so an unauthenticated visit rendered raw
+  JSON and the only way in was hand-pasting `?token=` — no sign-in screen
+  existed anywhere in the product;
+- `bo_session` carried a fixed 30-day `Max-Age` set once at first sign-in, so it
+  expired mid-use on a schedule. That expiry is the most likely trigger of the
+  original incident (the tailnet exposure was rolled 2026-06-24, 47 days before).
+
+Both are closed. The shell and its assets are now **public** (they carry no
+household data — `/api/*` is the real gate), so an unauthenticated visit renders
+a **sign-in form**; the token is exchanged for the cookie over
+`GET /api/session` as a Bearer header, so it never enters the address bar or
+browser history the way `?token=` did (that URL still works — old bookmarks are
+unbroken). The cookie is **re-issued on every authenticated response**, making
+it an idle timeout rather than a hard expiry. Any `401` **or `429`** from any
+screen raises a window event that swaps the shell for the sign-in form, so an
+expired session lands on a form instead of five identical error cards. There is
+now a **sign out** in the sidebar, so revoking a session no longer means rotating
+the token.
+
+**A third shape of the same lockout, caught in review of that follow-up.** Making
+the shell public re-opened the incident by a new route: after
+`BACKOFFICE_TOKEN` is rotated, every browser replays the *old* token in its
+cookie — on the shell, on each hashed asset, and on the four `/api` calls the
+dashboard fires on mount. Counted as guesses, one page load spent the whole
+8-failure budget, so the operator was `429`'d before the sign-in form could
+render, every reload re-armed the lock, and `429` did not raise the window event
+so the form was unreachable. Reproduced against the built server at the
+production limiter settings (lock tripped on page load 1; loads 2 and 3 were
+`429` across the board). Three changes close it: a rejected **cookie** is not an
+attempt (it is discarded and cleared — only a *presented* header or `?token=` can
+be a guess, and those still lock out after 8); a presented token now outranks a
+stored cookie in `extractToken`, so a good token is compared instead of being
+shadowed by the stale one; and `429` joins `401` in routing to the form, which
+says the console is healthy. Also hardened while in there: `Secure` on the cookie
+when the request arrives over HTTPS — which in prod is always, since
+`tailscale serve` forwards `x-forwarded-proto: https` and the container port is
+loopback-only; the conditional exists for the plain `http://localhost` origin the
+vite dev server proxies through — and `X-Frame-Options: DENY` +
+`frame-ancestors 'none'`, since a public page now renders a credential form.
+
+Verified end-to-end in a real browser against the built server + built SPA
+(`chromium`, `backoffice/scripts/verify-signin.mjs`, now at the production
+limiter settings): unauthenticated visit renders the form and no raw JSON; a
+wrong token stays on the form; the right token loads the console; the token never
+appears in the URL; the cookie is httpOnly; a reload stays signed in; sign-out
+returns to the form and survives a reload; and a stale cookie lands on the form
+across three reloads without a single `429`, then signs in cleanly. The two
+stale-cookie server tests were confirmed RED against the pre-fix code.
+
+**Known fragility, not fixed here:** the SPA has no error boundary, so one
+malformed API field blanks the whole console (found while building the
+verification harness — a stub with a missing `dailyCost` produced a white
+screen, not a degraded card). Worth an error boundary around the screen subtree.
+
+### 7. Backoffice Langfuse reads — fixed on a branch, not yet deployed
+**Status:** open (awaiting deploy) · **verified** 2026-08-10 by timing the live
+console on the host and by running the new code against real Langfuse
+(`pnpm lint && pnpm build && pnpm test && pnpm test:recovery` green — 754 unit +
+integration, 57 recovery).
+
+Both Langfuse-backed screens were broken in production, and neither was a
+cold-cache effect — they failed on **every** load:
+
+| | Measured on the host (2026-08-10) | Cause |
+|---|---|---|
+| **Logs** | **30.05s every load**, `enriched:false` every time — the token/cost/tier/tool columns had *never* rendered in prod | the legacy `/api/public/observations` endpoint is deprecated on Langfuse Cloud and answers an unfiltered page with a **server-side timeout** (HTTP 422, "Request timed out") after ~30s. The app's own 30s `AbortSignal` usually fired first. Because the fetch always threw, the 5-minute cache never populated, so every request paid the full 30s afresh. |
+| **Costs** | 15–17s, then `503` for the rest of the day | `/api/public/metrics/daily` is capped at **10 requests per day** on this plan (`x-ratelimit-limit: 10`, ~24h reset). A 5-minute TTL burns that quota within the hour; after that it is `429` → `503`. |
+
+Ruled out by measurement, *not* inference: the DBOS journal query is **35ms**
+(`EXPLAIN ANALYZE`; a seq scan over 97,758 rows, fully cached — no index
+needed), and `/api/status` is **0.45s** with every probe ≤541ms.
+
+Fixed by collapsing both screens onto ONE shared read of the **v2** endpoint —
+the `makeObservationsSource` factory in `src/backoffice/observations.ts` —
+calling `/api/public/v2/observations` with
+`fields=core,basic,usage,metadata`. The `fields` parameter is load-bearing —
+without it v2 omits `usageDetails` and `metadata` entirely, which is every
+column the console shows. Costs no longer touches `metrics/daily` at all; the
+per-day series is folded from the same records, which also yields a *real*
+per-day cache split instead of applying one sampled ratio to every day. The
+source owns caching, in-flight de-duplication (the SPA fires four calls at
+once) and a short **failure** cache, so a broken upstream can no longer cost a
+full timeout on every request. Fetch ceiling dropped 30s → 8s.
+
+Measured after the change, against live Langfuse: cold shared read **2.4s**
+(606 records), warm **0ms**, `getCosts()` **1ms**, and **246 traces enriched**
+where production had zero. The month-to-date figures reproduce independently
+computed host-side numbers exactly (31,644 tokens, $0.0872, 20% cache reads).
+
+Still estimated, deliberately: v2's `totalCost`/`costDetails`/`modelId` come
+back 0/empty/null for this project, so BO-8's "Langfuse has no cost and no
+model" still holds and the Sonnet-class price table stays.
+
+**Not in this branch:** the Overview still renders all-or-nothing (`useAsync`
+holds until all four calls settle), so the page is as slow as its slowest card.
+That mattered enormously at 30s and barely matters at ~1s, but progressive
+per-card rendering is still the right shape. Also unaddressed: 97,540 of the
+97,758 journal rows are `reminderSweep`/`expirySweep` records versus 54 real
+turns — harmless at today's 35ms, worth a retention policy before it isn't.
 
 ### 7. Backoffice charts — the two things the new chart layer can't reach yet
 **Status:** open · **verified** 2026-08-10 by reading `src/backoffice/cost.ts`
@@ -324,8 +438,21 @@ uptime as *strings*, and no history exists to chart.
 
 ## Watch list (from the `TASKS.md` deferred-decisions ledger)
 
-- **#7** — T19 kill-mid-flight flake under triple-suite load (1 in ~9,
-  unreproduced). Watch in `test:recovery`.
+- **#7** — kill-mid-flight flake under load. **No longer unreproduced:**
+  it recurred in CI 2026-08-03 — run `30834016384` **attempt 1** (PR #38) —
+  this time in the `handleTurn skeleton (T22)` suite in
+  `tests/integration/handle-turn.test.ts`, not T19's file. Cite the attempt,
+  never the run: the re-run below overwrote the run-level conclusion, so that
+  run id now reports *success* and only attempt 1 still carries the failure.
+  The mid-flight
+  child never produced its first effect ("condition not met within 30000ms"),
+  and because that test runs first *by design* (it must observe a PENDING
+  workflow before `DBOS.launch()` triggers recovery), its failure meant launch
+  never happened and the other 22 tests in the file cascaded with
+  "`DBOS.launch()` must be called before running workflows". One re-run went
+  fully green with no code change. Two things to carry: the blast radius is
+  the **whole file**, not one test, so this reads far worse than it is; and
+  the flake is not T19-specific. Watch in `test:recovery`.
 - **#13** — `semantic.test.ts` "empty store" test races parallel suites on the
   shared dev DB. Fix if it recurs.
 - **#16** — dev/prod prompt divergence on sender attribution; resolved for the

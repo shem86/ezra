@@ -36,6 +36,39 @@ export interface BackofficeDeps {
   readonly logger?: ((msg: string) => void) | undefined;
 }
 
+/** Session cookie lifetime. Renewed on every authenticated response (below),
+ *  so this is an idle timeout rather than a hard expiry from first sign-in. */
+const SESSION_MAX_AGE_SECONDS = 2592000; // 30 days
+
+/** Build the `set-cookie` value for the session. `token: ''` with `maxAge: 0`
+ *  clears it.
+ *
+ *  `Secure` is conditional on the request arriving over HTTPS, which in
+ *  production means always: `tailscale serve` terminates TLS and forwards
+ *  `x-forwarded-proto: https`, and the container port is published to loopback
+ *  only (`docker-compose.prod.yml`), so no plaintext path to it exists. The
+ *  conditional is for local dev, where the vite dev server proxies `/api` over a
+ *  plain-http loopback origin — one most browsers treat as trustworthy, but not
+ *  consistently enough to bet a silently-dropped cookie on.
+ *
+ *  (Deliberately no scheme-qualified host literal in this comment: the egress
+ *  anti-drift scan greps `src/` for `http(s)://<host>` and does not skip
+ *  comments — see `tests/unit/egress-allowlist.test.ts`.) */
+function sessionCookie(req: IncomingMessage, token: string, maxAgeSeconds: number): string {
+  const proto = req.headers['x-forwarded-proto'];
+  const scheme = (typeof proto === 'string' ? proto.split(',')[0]!.trim() : '').toLowerCase();
+  const secure = scheme === 'https' ? '; Secure' : '';
+  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAgeSeconds}${secure}`;
+}
+
+/** The shell is served unauthenticated and renders a credential form, so it
+ *  must not be framable — otherwise anything else on the tailnet can overlay it
+ *  and harvest the token. */
+const FRAME_HEADERS = {
+  'x-frame-options': 'DENY',
+  'content-security-policy': "frame-ancestors 'none'",
+};
+
 const CONTENT_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -54,6 +87,7 @@ function sendJson(res: ServerResponse, status: number, body: unknown, extraHeade
     'content-type': 'application/json; charset=utf-8',
     'cache-control': 'no-store',
     'x-content-type-options': 'nosniff',
+    ...FRAME_HEADERS,
     ...extraHeaders,
   });
   res.end(payload);
@@ -94,6 +128,7 @@ async function serveStatic(res: ServerResponse, distDir: string, pathname: strin
   res.writeHead(200, {
     'content-type': CONTENT_TYPES[ext] ?? 'application/octet-stream',
     'x-content-type-options': 'nosniff',
+    ...FRAME_HEADERS,
     // Hashed asset filenames are immutable; the HTML shell must not be cached.
     'cache-control': ext === '.html' ? 'no-store' : 'public, max-age=31536000, immutable',
   });
@@ -116,7 +151,7 @@ export function createRequestHandler(deps: BackofficeDeps) {
       return;
     }
 
-    // --- auth gate ---
+    // --- credential evaluation ---
     //
     // Order is load-bearing (2026-08-10 incident, STATUS.md): evaluate the
     // credential FIRST and consult the lockout only once it proves wrong.
@@ -131,65 +166,119 @@ export function createRequestHandler(deps: BackofficeDeps) {
       queryToken: url.searchParams.get('token') ?? undefined,
     });
 
-    // No credential at all is not an ATTEMPT — it is a browser that has not
-    // signed in yet. The dashboard fires four parallel /api calls on mount, so
-    // counting these meant one stale-cookie page load burned half the budget
-    // and two locked the operator out. Brute force always presents a
-    // candidate, so ignoring these does not weaken detection.
-    if (candidate === undefined) {
-      sendJson(res, 401, { error: 'unauthorized' }, { 'www-authenticate': 'Bearer' });
-      return;
-    }
-
-    if (!safeEqual(candidate.token, deps.token)) {
-      deps.rateLimiter.recordFailure(addr);
-      const locked = deps.rateLimiter.isLocked(addr);
-      // Never log the presented value — only that one arrived and from where.
-      deps.logger?.(
-        `backoffice auth: rejected ${candidate.source} token from ${addr}${locked ? ' — address now locked out' : ''}`,
-      );
-      if (locked) {
-        sendJson(res, 429, { error: 'too many attempts — locked out' }, { 'retry-after': '900' });
-        return;
+    let authed = false;
+    let staleCookie = false;
+    if (candidate !== undefined) {
+      if (safeEqual(candidate.token, deps.token)) {
+        authed = true;
+        deps.rateLimiter.reset(addr);
+      } else if (candidate.source === 'cookie') {
+        // A rejected COOKIE is not an attempt either — it is this browser
+        // replaying a token that has since been rotated. Counting it re-created
+        // the very lockout this file exists to prevent: the browser replays the
+        // cookie on the shell, on every hashed asset, and on the four /api calls
+        // the dashboard fires on mount, so ONE page load spent the whole
+        // 8-failure budget and the operator was 429'd before the sign-in form
+        // could render — and every reload re-armed the lock. A guesser has no
+        // cookie to replay; it presents a header or `?token=`, which still
+        // counts (below). So clear the dead cookie and treat the request as
+        // simply not signed in, which lands the SPA on the form.
+        staleCookie = true;
+        deps.logger?.(`backoffice auth: clearing a stale session cookie from ${addr}`);
+      } else {
+        deps.rateLimiter.recordFailure(addr);
+        const locked = deps.rateLimiter.isLocked(addr);
+        // Never log the presented value — only that one arrived and from where.
+        deps.logger?.(
+          `backoffice auth: rejected ${candidate.source} token from ${addr}${locked ? ' — address now locked out' : ''}`,
+        );
+        if (isApi) {
+          if (locked) {
+            sendJson(res, 429, { error: 'too many attempts — locked out' }, { 'retry-after': '900' });
+            return;
+          }
+          sendJson(res, 401, { error: 'unauthorized' }, { 'www-authenticate': 'Bearer' });
+          return;
+        }
+        // A wrong token on the SHELL falls through and still serves the app,
+        // which renders its sign-in screen — a stale bookmark should land the
+        // operator on a form, not on a wall of JSON.
       }
-      sendJson(res, 401, { error: 'unauthorized' }, { 'www-authenticate': 'Bearer' });
-      return;
     }
-    deps.rateLimiter.reset(addr);
 
-    // Promote a one-time ?token= load into an httpOnly session cookie so the
-    // browser carries it on subsequent same-origin /api calls.
-    const setCookie =
-      candidate.source === 'query'
-        ? { 'set-cookie': `${SESSION_COOKIE}=${encodeURIComponent(deps.token)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000` }
+    // Sliding renewal. The cookie used to be issued once, with a fixed 30-day
+    // Max-Age, so it expired mid-use and dropped the operator onto the
+    // credential-less path. Re-issuing it on every authenticated response means
+    // an operator who keeps using the console never hits an expiry cliff.
+    const setCookie = authed
+      ? { 'set-cookie': sessionCookie(req, deps.token, SESSION_MAX_AGE_SECONDS) }
+      : staleCookie
+        ? { 'set-cookie': sessionCookie(req, '', 0) }
         : undefined;
 
+    // --- the SPA shell and its assets are PUBLIC ---
+    // They carry no household data — /api/* below is the real gate. Gating the
+    // shell too meant an unauthenticated visit rendered raw JSON with no way in
+    // but hand-editing `?token=` into the address bar, which is exactly what
+    // made a routine cookie expiry look like an outage.
+    if (!isApi) {
+      if (setCookie !== undefined) {
+        for (const [k, v] of Object.entries(setCookie)) res.setHeader(k, v);
+      }
+      if (method === 'HEAD') {
+        res.writeHead(200);
+        res.end();
+        return;
+      }
+      await serveStatic(res, deps.distDir, url.pathname);
+      return;
+    }
+
+    // --- /api/* requires a valid credential ---
+    // A request with no credential is not an ATTEMPT — it is a browser that has
+    // not signed in yet. The dashboard fires four parallel /api calls on mount,
+    // so counting these meant one stale-cookie page load burned half the
+    // failure budget and two locked the operator out. Brute force always
+    // presents a candidate, so ignoring these does not weaken detection.
+    if (!authed) {
+      // `setCookie` here can only be the CLEARING cookie (a stale session), and
+      // it must ride along: the SPA's first /api call is what evicts the dead
+      // cookie, so the next request is credential-less rather than another
+      // rejection.
+      sendJson(res, 401, { error: 'unauthorized' }, { ...setCookie, 'www-authenticate': 'Bearer' });
+      return;
+    }
+
     // --- routing ---
+    // The sign-in endpoint: the SPA sends the operator's token here as a Bearer
+    // header and gets the session cookie back, so the token never enters the
+    // address bar or the browser history the way `?token=` does. It is a GET
+    // because this server routes nothing but GET/HEAD by construction; the only
+    // thing it "writes" is the caller's own cookie.
+    if (url.pathname === '/api/session') {
+      sendJson(res, 200, { ok: true }, setCookie);
+      return;
+    }
+
+    // Sign out: drop the session cookie. Without this the only way to revoke a
+    // session was rotating BACKOFFICE_TOKEN — which invalidates every browser's
+    // cookie at once, the exact condition that used to strand the operator.
+    if (url.pathname === '/api/signout') {
+      sendJson(res, 200, { ok: true }, { 'set-cookie': sessionCookie(req, '', 0) });
+      return;
+    }
+
     if (url.pathname === '/api/health') {
       sendJson(res, 200, { status: 'ok', service: 'backoffice', time: new Date().toISOString() }, setCookie);
       return;
     }
 
-    if (isApi) {
-      const result = deps.api === undefined ? undefined : await deps.api.handle(method, url);
-      if (result === undefined) {
-        sendJson(res, 404, { error: 'no such endpoint' }, setCookie);
-        return;
-      }
-      sendJson(res, result.status, result.body, setCookie);
+    const result = deps.api === undefined ? undefined : await deps.api.handle(method, url);
+    if (result === undefined) {
+      sendJson(res, 404, { error: 'no such endpoint' }, setCookie);
       return;
     }
-
-    // static SPA
-    if (setCookie !== undefined) {
-      for (const [k, v] of Object.entries(setCookie)) res.setHeader(k, v);
-    }
-    if (method === 'HEAD') {
-      res.writeHead(200);
-      res.end();
-      return;
-    }
-    await serveStatic(res, deps.distDir, url.pathname);
+    sendJson(res, result.status, result.body, setCookie);
   };
 }
 
