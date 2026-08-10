@@ -1,4 +1,36 @@
-# backoffice/scripts — UI debug script
+# backoffice/scripts — running and debugging the console locally
+
+Three scripts, one shared fixture set:
+
+| script | what it's for | needs a backend? |
+|---|---|---|
+| `mock-api.mjs` | **browse the console yourself**, in a real browser | no — it *is* the backend |
+| `mock-shots.mjs` | regenerate the README screenshots | no — intercepts `/api` in-page |
+| `ui-debug.mjs` | headless sweep for errors, for agents | yes — a live console |
+
+`fixtures.mjs` holds the fabricated, non-PII data the first two share, so the
+screenshots and the browsable app can never drift apart. Its timestamps are
+absolute rather than relative to now — screenshots have to be byte-stable or
+every regeneration produces a diff.
+
+## Just show me the console
+
+```bash
+pnpm -C backoffice install    # once
+pnpm -C backoffice dev:mock   # fixtures on :8787 + vite on :5173
+```
+
+Open **http://localhost:5173** — no Postgres, no Langfuse, no prod host, no
+household data. Vite already proxies `/api` to `:8787` (see `vite.config.ts`);
+`dev:mock` just starts both and shuts them down together. `pnpm -C backoffice
+mock-api` runs the fixture server alone if you'd rather drive vite yourself.
+
+The chart motion is **update-only** by design, so it shows where the data
+actually changes: on **Logs**, the level filter and the search box re-derive both
+charts and the marks tween between shapes. A fresh page load has nothing to
+animate from.
+
+## ui-debug
 
 `ui-debug.mjs` is a headless screenshot + inspection sweep of the read-only
 console, built so an **agent can debug the UI with no computer-use and no human
