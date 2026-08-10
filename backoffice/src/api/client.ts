@@ -13,10 +13,24 @@ export class ApiError extends Error {
   }
 }
 
-/** Fired when any API call comes back 401. The app shell listens and swaps in
- *  the sign-in screen — a window event rather than an `onUnauthorized` callback
- *  threaded through every screen and card. */
+/** Fired when any API call comes back with an auth-class status. The app shell
+ *  listens and swaps in the sign-in screen — a window event rather than an
+ *  `onUnauthorized` callback threaded through every screen and card. `detail`
+ *  carries the status so the form can explain a throttle differently from an
+ *  expired session. */
 export const UNAUTHORIZED_EVENT = 'bo:unauthorized';
+
+export interface UnauthorizedDetail {
+  readonly status: number;
+}
+
+/** 401 (not signed in) and 429 (throttled) both mean "no data until the
+ *  credential situation is resolved", and the sign-in form is the only screen
+ *  that can resolve either. 429 used to be excluded, which left a throttled
+ *  browser showing five identical error cards with no route to the form. */
+function isAuthStatus(status: number): boolean {
+  return status === 401 || status === 429;
+}
 
 function describe(status: number): string {
   if (status === 401) return 'unauthorized';
@@ -31,7 +45,11 @@ async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
     ...(signal ? { signal } : {}),
   });
   if (!res.ok) {
-    if (res.status === 401) window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
+    if (isAuthStatus(res.status)) {
+      window.dispatchEvent(
+        new CustomEvent<UnauthorizedDetail>(UNAUTHORIZED_EVENT, { detail: { status: res.status } }),
+      );
+    }
     throw new ApiError(res.status, describe(res.status));
   }
   return (await res.json()) as T;
@@ -49,6 +67,17 @@ export async function signIn(token: string): Promise<void> {
   });
   if (!res.ok) {
     throw new ApiError(res.status, res.status === 401 ? 'that token was not accepted' : describe(res.status));
+  }
+}
+
+/** Drop the session cookie server-side. Best-effort: if the call fails the shell
+ *  still returns to the form, and the cookie is refused (and then cleared) on
+ *  the next request anyway. */
+export async function signOut(): Promise<void> {
+  try {
+    await fetch('/api/signout', { credentials: 'include', headers: { accept: 'application/json' } });
+  } catch {
+    // Network failure on the way out is not worth surfacing.
   }
 }
 

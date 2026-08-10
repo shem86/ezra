@@ -257,15 +257,39 @@ a **sign-in form**; the token is exchanged for the cookie over
 `GET /api/session` as a Bearer header, so it never enters the address bar or
 browser history the way `?token=` did (that URL still works — old bookmarks are
 unbroken). The cookie is **re-issued on every authenticated response**, making
-it an idle timeout rather than a hard expiry. Any `401` from any screen raises a
-window event that swaps the shell for the sign-in form, so an expired session
-lands on a form instead of five identical error cards.
+it an idle timeout rather than a hard expiry. Any `401` **or `429`** from any
+screen raises a window event that swaps the shell for the sign-in form, so an
+expired session lands on a form instead of five identical error cards. There is
+now a **sign out** in the sidebar, so revoking a session no longer means rotating
+the token.
+
+**A third shape of the same lockout, caught in review of that follow-up.** Making
+the shell public re-opened the incident by a new route: after
+`BACKOFFICE_TOKEN` is rotated, every browser replays the *old* token in its
+cookie — on the shell, on each hashed asset, and on the four `/api` calls the
+dashboard fires on mount. Counted as guesses, one page load spent the whole
+8-failure budget, so the operator was `429`'d before the sign-in form could
+render, every reload re-armed the lock, and `429` did not raise the window event
+so the form was unreachable. Reproduced against the built server at the
+production limiter settings (lock tripped on page load 1; loads 2 and 3 were
+`429` across the board). Three changes close it: a rejected **cookie** is not an
+attempt (it is discarded and cleared — only a *presented* header or `?token=` can
+be a guess, and those still lock out after 8); a presented token now outranks a
+stored cookie in `extractToken`, so a good token is compared instead of being
+shadowed by the stale one; and `429` joins `401` in routing to the form, which
+says the console is healthy. Also hardened while in there: `Secure` on the cookie
+when the request arrives over HTTPS (conditional — the raw container port is
+plain http over the tailnet), and `X-Frame-Options: DENY` +
+`frame-ancestors 'none'`, since a public page now renders a credential form.
 
 Verified end-to-end in a real browser against the built server + built SPA
-(`chromium`, script in the PR): unauthenticated visit renders the form and no
-raw JSON; a wrong token stays on the form; the right token loads the console;
-the token never appears in the URL; the cookie is httpOnly; a reload stays
-signed in.
+(`chromium`, `backoffice/scripts/verify-signin.mjs`, now at the production
+limiter settings): unauthenticated visit renders the form and no raw JSON; a
+wrong token stays on the form; the right token loads the console; the token never
+appears in the URL; the cookie is httpOnly; a reload stays signed in; sign-out
+returns to the form and survives a reload; and a stale cookie lands on the form
+across three reloads without a single `429`, then signs in cleanly. The two
+stale-cookie server tests were confirmed RED against the pre-fix code.
 
 **Known fragility, not fixed here:** the SPA has no error boundary, so one
 malformed API field blanks the whole console (found while building the

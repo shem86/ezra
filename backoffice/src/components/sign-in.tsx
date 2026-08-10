@@ -7,9 +7,13 @@ import { signIn as apiSignIn } from '../api/client';
 
 export function SignIn({
   onSignedIn,
+  notice = null,
   signIn = apiSignIn,
 }: {
   onSignedIn: () => void;
+  /** Why the operator landed here, when it wasn't simply an expired session
+   *  (e.g. a throttled address). Shown above the field. */
+  notice?: string | null;
   /** Injected in tests. Sign-in is deliberately NOT part of ApiClient — that
    *  interface is the data-read surface every screen stubs. */
   signIn?: (token: string) => Promise<void>;
@@ -45,6 +49,12 @@ export function SignIn({
             <div className="brand-sub">backoffice</div>
           </div>
         </div>
+
+        {notice !== null && (
+          <div className="signin-notice" role="status">
+            {notice}
+          </div>
+        )}
 
         <label className="signin-label" htmlFor="bo-token">
           Console token

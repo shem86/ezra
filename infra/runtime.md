@@ -226,14 +226,25 @@ is **renewed on every authenticated request**, so an operator who keeps using
 the console never has to re-enter it; it never travels in the URL.
 
 The older `https://…/?token=<TOKEN>` form still signs you in (old bookmarks keep
-working), but it puts the token in browser history — prefer the form.
+working), but it puts the token in browser history — prefer the form. **Sign out**
+from the bottom of the sidebar; that drops the cookie server-side.
+
+**After rotating `BACKOFFICE_TOKEN`** every browser is still holding a cookie for
+the old one. Nothing needs clearing by hand: a cookie that no longer matches is
+discarded (`backoffice auth: clearing a stale session cookie …` in the log) and
+the console shows the sign-in form. Entering the new token — or opening an old
+`?token=` bookmark with it — takes precedence over whatever the browser is
+replaying, so there is no state you can get stuck in.
 
 Failed sign-ins are throttled per client IP: **8 wrong tokens inside 15 minutes**
 locks that address out for 15 minutes, with `backoffice auth: rejected …` in the
-container log. Requests carrying *no* credential are not attempts and never
-count — that distinction is what stopped the throttle firing on the operator
-(STATUS item 6). If you ever do see `429 too many attempts`, the console is
-healthy and the lock clears on its own; check
+container log. Only a token somebody *presented* counts — a header or a
+`?token=`. Requests carrying **no** credential never count, and neither does a
+**stale cookie**: a browser replaying a rotated token is not guessing, and
+counting it locked the operator out on a single page load (STATUS item 6, both
+shapes). A correct token is always accepted even while the address is locked, so
+if you do see `429 too many attempts` the console is healthy and you can still
+sign in; the lock clears on its own. Check
 `docker logs hh-assistant-backoffice-1` for the rejections.
 
 ### SELECT-only DB role

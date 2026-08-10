@@ -27,11 +27,25 @@ describe('auth helpers', () => {
     expect(parseCookies(undefined)).toEqual({});
   });
 
-  it('extractToken prefers header, then cookie, then query', () => {
+  it('extractToken prefers header, then query, then cookie', () => {
     expect(extractToken({ authorization: 'Bearer h' })).toEqual({ token: 'h', source: 'header' });
-    expect(extractToken({ cookie: `${SESSION_COOKIE}=c` })).toEqual({ token: 'c', source: 'cookie' });
     expect(extractToken({ queryToken: 'q' })).toEqual({ token: 'q', source: 'query' });
+    expect(extractToken({ cookie: `${SESSION_COOKIE}=c` })).toEqual({ token: 'c', source: 'cookie' });
     expect(extractToken({})).toBeUndefined();
+  });
+
+  // A PRESENTED credential outranks a STORED one. With the cookie winning, an
+  // operator arriving with a good token after a rotation could not get in — the
+  // good token was never even compared against the configured one.
+  it('extractToken lets a presented token outrank a stored cookie', () => {
+    expect(extractToken({ queryToken: 'q', cookie: `${SESSION_COOKIE}=stale` })).toEqual({
+      token: 'q',
+      source: 'query',
+    });
+    expect(extractToken({ authorization: 'Bearer h', cookie: `${SESSION_COOKIE}=stale`, queryToken: 'q' })).toEqual({
+      token: 'h',
+      source: 'header',
+    });
   });
 
   it('rate limiter locks out after maxFailures and reset clears it', () => {
@@ -218,6 +232,154 @@ describe('backoffice self-service sign-in', () => {
     const res = await fetch(`${base}/?token=wrong`);
     expect(res.status).toBe(200);
     expect(await res.text()).toContain('ezra');
+  });
+});
+
+// Regression suite for the SECOND shape of the same lockout, caught in review of
+// the self-service sign-in change: after BACKOFFICE_TOKEN is rotated, every
+// browser still replays the old token in its bo_session cookie. Because the
+// shell now falls through and serves the SPA, that cookie rode along on the
+// shell, on each hashed asset, and on the four /api calls the dashboard fires on
+// mount — so ONE page load spent the whole 8-failure budget and the operator was
+// 429'd before the sign-in form could render. The limiter is configured exactly
+// as production does it (src/backoffice/cli.ts).
+describe('backoffice stale-cookie recovery (post-rotation)', () => {
+  let server: Server;
+  let base: string;
+  const STALE = 'the-previous-token-9876543210-zyxwvuts';
+
+  beforeAll(async () => {
+    const dist = await mkdtemp(join(tmpdir(), 'bo-dist-'));
+    await writeFile(join(dist, 'index.html'), '<!doctype html><title>ezra</title>');
+    await writeFile(join(dist, 'app.js'), 'console.log(1)');
+    await writeFile(join(dist, 'app.css'), 'body{}');
+    server = createBackofficeServer({
+      token: TOKEN,
+      distDir: dist,
+      rateLimiter: makeRateLimiter({ maxFailures: 8, lockoutMs: 15 * 60_000, windowMs: 15 * 60_000 }),
+      api: { handle: async () => ({ status: 200, body: { ok: true } }) },
+    });
+    await new Promise<void>((r) => server.listen(0, r));
+    const { port } = server.address() as AddressInfo;
+    base = `http://127.0.0.1:${port}`;
+  });
+
+  afterAll(() => {
+    server.close();
+  });
+
+  const withStale = (path: string): Promise<Response> =>
+    fetch(`${base}${path}`, { headers: { cookie: `${SESSION_COOKIE}=${STALE}` } });
+
+  it('never locks out across repeated page loads carrying a stale cookie', async () => {
+    // Three full page loads: shell + two assets + a favicon miss, then the four
+    // parallel /api calls the dashboard mounts with. 24 rejected-cookie requests
+    // against a budget of 8 — under the old code the lockout tripped on the
+    // FIRST load and every reload re-armed it.
+    for (let load = 0; load < 3; load++) {
+      for (const path of ['/', '/app.js', '/app.css', '/favicon.ico']) await withStale(path);
+      const api = await Promise.all(
+        ['/api/costs', '/api/status', '/api/logs', '/api/db'].map((p) => withStale(p)),
+      );
+      for (const res of api) {
+        // 401 (not signed in) — never 429. 401 is what routes the SPA to the form.
+        expect(res.status).toBe(401);
+      }
+    }
+  });
+
+  it('clears the dead cookie so the next request is credential-less', async () => {
+    const shell = await withStale('/');
+    expect(shell.status).toBe(200);
+    expect(shell.headers.get('set-cookie') ?? '').toMatch(/bo_session=;.*Max-Age=0/);
+
+    const api = await withStale('/api/health');
+    expect(api.status).toBe(401);
+    expect(api.headers.get('set-cookie') ?? '').toMatch(/bo_session=;.*Max-Age=0/);
+  });
+
+  it('accepts the correct token over a stale cookie, on the form and by bookmark', async () => {
+    // The sign-in form's path: Bearer beats the cookie the browser replays.
+    const viaForm = await fetch(`${base}/api/session`, {
+      headers: { authorization: `Bearer ${TOKEN}`, cookie: `${SESSION_COOKIE}=${STALE}` },
+    });
+    expect(viaForm.status).toBe(200);
+    expect(viaForm.headers.get('set-cookie') ?? '').toContain(encodeURIComponent(TOKEN));
+
+    // The documented bookmark path (infra/runtime.md) must also replace it.
+    const viaQuery = await fetch(`${base}/?token=${TOKEN}`, {
+      headers: { cookie: `${SESSION_COOKIE}=${STALE}` },
+    });
+    expect(viaQuery.status).toBe(200);
+    expect(viaQuery.headers.get('set-cookie') ?? '').toContain(encodeURIComponent(TOKEN));
+  });
+
+  // The throttle must still fire on actual guessing — this is the property the
+  // exemption above must not cost us.
+  it('still locks out an address presenting wrong tokens', async () => {
+    let last = 0;
+    for (let i = 0; i < 9; i++) {
+      const res = await fetch(`${base}/api/health`, { headers: { authorization: `Bearer wrong-${i}` } });
+      last = res.status;
+    }
+    expect(last).toBe(429);
+    // ...and the correct token still gets in while locked out (the #41 property).
+    const rescue = await fetch(`${base}/api/session`, { headers: { authorization: `Bearer ${TOKEN}` } });
+    expect(rescue.status).toBe(200);
+  });
+});
+
+describe('backoffice sign-out and cookie hardening', () => {
+  let server: Server;
+  let base: string;
+
+  beforeAll(async () => {
+    const dist = await mkdtemp(join(tmpdir(), 'bo-dist-'));
+    await writeFile(join(dist, 'index.html'), '<!doctype html><title>ezra</title>');
+    server = createBackofficeServer({
+      token: TOKEN,
+      distDir: dist,
+      rateLimiter: makeRateLimiter({ maxFailures: 8, lockoutMs: 60_000 }),
+    });
+    await new Promise<void>((r) => server.listen(0, r));
+    const { port } = server.address() as AddressInfo;
+    base = `http://127.0.0.1:${port}`;
+  });
+
+  afterAll(() => {
+    server.close();
+  });
+
+  it('drops the session cookie on /api/signout', async () => {
+    const res = await fetch(`${base}/api/signout`, { headers: { cookie: `${SESSION_COOKIE}=${TOKEN}` } });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('set-cookie') ?? '').toMatch(/bo_session=;.*Max-Age=0/);
+  });
+
+  it('requires a credential to sign out', async () => {
+    const res = await fetch(`${base}/api/signout`);
+    expect(res.status).toBe(401);
+  });
+
+  // Secure is conditional: `tailscale serve` forwards x-forwarded-proto https,
+  // but the raw container port is plain http over the tailnet and a Secure
+  // cookie would be silently dropped there.
+  it('marks the cookie Secure only when the request arrived over https', async () => {
+    const https = await fetch(`${base}/api/session`, {
+      headers: { authorization: `Bearer ${TOKEN}`, 'x-forwarded-proto': 'https' },
+    });
+    expect(https.headers.get('set-cookie') ?? '').toContain('Secure');
+
+    const plain = await fetch(`${base}/api/session`, { headers: { authorization: `Bearer ${TOKEN}` } });
+    expect(plain.headers.get('set-cookie') ?? '').not.toContain('Secure');
+  });
+
+  // The shell is public and renders a credential form, so it must not be
+  // framable by anything else on the tailnet.
+  it('refuses to be framed', async () => {
+    const res = await fetch(`${base}/`);
+    expect(res.headers.get('x-frame-options')).toBe('DENY');
+    expect(res.headers.get('content-security-policy')).toContain("frame-ancestors 'none'");
   });
 });
 

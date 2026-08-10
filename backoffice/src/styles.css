@@ -69,7 +69,13 @@ button { font-family: inherit; }
 .navitem.on { background: var(--side-active); color: var(--side-ink); font-weight: 600; }
 .sidebar[data-tone="light"] .navitem.on { color: var(--accent-ink); }
 
-.side-foot { margin-top: auto; }
+.side-foot { margin-top: auto; display: flex; flex-direction: column; gap: 8px; }
+.signout {
+  width: 100%; padding: 8px 12px; border-radius: 9px; border: 1px solid transparent;
+  background: none; color: var(--side-muted); font-size: 12.5px; font-weight: 600; cursor: pointer;
+  transition: background .12s, color .12s;
+}
+.signout:hover { background: var(--side-hover); color: var(--side-ink); }
 .household { background: color-mix(in oklch, var(--side-hover) 60%, transparent); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
 .sidebar[data-tone="light"] .household { background: var(--surface-2); border: 1px solid var(--border); }
 .household-meta { font-size: 11px; color: var(--side-muted); display: flex; gap: 6px; }
@@ -194,5 +200,9 @@ table.grid.logs tbody tr.detail td { border-bottom: 2px solid var(--border); }
 .signin-input:focus { outline: 2px solid color-mix(in oklch, var(--accent) 45%, transparent); outline-offset: 1px; }
 .signin-submit { width: 100%; padding: 10px 13px; font-size: 13.5px; }
 .signin-error { font-size: 12.5px; color: var(--err); }
+.signin-notice {
+  font-size: 12px; line-height: 1.5; color: var(--muted); background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: 9px; padding: 9px 11px;
+}
 .signin-hint { font-size: 11.5px; line-height: 1.5; color: var(--muted-2); margin: 2px 0 0; }
 .signin-hint code { font-family: var(--mono); font-size: 11px; }

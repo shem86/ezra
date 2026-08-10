@@ -12,6 +12,16 @@
 //   4. the token never reaches the address bar
 //   5. the session cookie is httpOnly
 //   6. a reload stays signed in (cookie carries it)
+//   7. sign-out returns to the form and does not stay signed in on reload
+//   8. a STALE cookie (what a rotated BACKOFFICE_TOKEN leaves in every browser)
+//      lands on the form across repeated reloads and never trips the throttle
+//
+// Check 8 is the one this harness existed for and missed: the browser replays a
+// dead cookie on the shell, on each asset, and on the four /api calls the
+// dashboard mounts with, so with those counted as guesses ONE page load spent
+// the whole failure budget and the console showed error cards with no way back
+// in. The rate limiter below is therefore configured EXACTLY as production does
+// it (src/backoffice/cli.ts) — the earlier 60s lockout hid the problem.
 //
 // The /api/* responses are stubbed to the shapes in backoffice/src/api/types.ts
 // so no database, Langfuse, or model credentials are needed.
@@ -78,7 +88,8 @@ await mkdir(OUT, { recursive: true });
 const server = createBackofficeServer({
   token: TOKEN,
   distDir: resolve(ROOT, 'backoffice/dist'),
-  rateLimiter: makeRateLimiter({ maxFailures: 8, lockoutMs: 60_000 }),
+  // Production values, src/backoffice/cli.ts.
+  rateLimiter: makeRateLimiter({ maxFailures: 8, lockoutMs: 15 * 60_000, windowMs: 15 * 60_000 }),
   logger: (m) => console.log('[server]', m),
   api,
 });
@@ -122,6 +133,35 @@ try {
   // 4 — the session survives a reload
   await page.reload({ waitUntil: 'networkidle' });
   check('a reload stays signed in', await page.isVisible('.shell'));
+
+  // 5 — sign out returns to the form, and stays out across a reload
+  await page.click('button.signout');
+  await page.waitForSelector('#bo-token');
+  check('sign out returns to the form', await page.isVisible('#bo-token'));
+  await page.reload({ waitUntil: 'networkidle' });
+  check('sign out survives a reload', await page.isVisible('#bo-token'));
+
+  // 6 — the post-rotation case: the browser holds a cookie for a token that is
+  // no longer the configured one. Three reloads is ~24 rejected-cookie requests
+  // against a budget of 8; the form must appear every time and no request may
+  // come back 429.
+  const throttled = [];
+  await page.context().addCookies([
+    { name: 'bo_session', value: 'a-token-that-was-rotated-away', domain: '127.0.0.1', path: '/' },
+  ]);
+  page.on('response', (r) => {
+    if (r.status() === 429) throttled.push(r.url());
+  });
+  for (let i = 0; i < 3; i++) await page.reload({ waitUntil: 'networkidle' });
+  check('a stale cookie lands on the sign-in form', await page.isVisible('#bo-token'));
+  check('a stale cookie never trips the throttle', throttled.length === 0);
+  await page.screenshot({ path: `${OUT}/4-stale-cookie.png`, fullPage: true });
+
+  // ...and the operator can still get in from that state.
+  await page.fill('#bo-token', TOKEN);
+  await page.click('button[type=submit]');
+  await page.waitForSelector('.shell', { timeout: 10_000 }).catch(() => {});
+  check('signing in recovers from a stale cookie', await page.isVisible('.shell'));
 } finally {
   await browser.close();
   server.close();

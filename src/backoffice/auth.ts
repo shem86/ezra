@@ -2,11 +2,14 @@
 // tailnet (the network boundary is Tailscale; this is the app-level gate).
 //
 // The token arrives one of three ways: an `Authorization: Bearer <t>` header
-// (used by curl / the api client), a `bo_session` cookie, or a one-time
-// `?token=<t>` query on the SPA load (which the server then promotes to an
-// httpOnly cookie so the browser carries it on subsequent same-origin calls).
+// (used by curl / the api client and by the sign-in form), a one-time
+// `?token=<t>` query on the SPA load, or a `bo_session` cookie (which the
+// server issues from either of the first two so the browser carries it on
+// subsequent same-origin calls).
+//
 // Comparison is constant-time. Repeated WRONG tokens from an address lock it
-// out; a request carrying no credential is not an attempt and never counts.
+// out; a request carrying no credential is not an attempt and never counts,
+// and neither is a rejected COOKIE — see the source precedence below.
 
 import { createHash, timingSafeEqual } from 'node:crypto';
 
@@ -33,7 +36,16 @@ export function parseCookies(header: string | undefined): Record<string, string>
   return out;
 }
 
-/** Pull a candidate token from header, cookie, or query (in that order). */
+/** Pull a candidate token from header, query, or cookie — IN THAT ORDER.
+ *
+ *  A header and a `?token=` are *presented* credentials: somebody typed or sent
+ *  them on this request. A cookie is a *stored* one the browser replays without
+ *  being asked. Presented beats stored, so an operator who arrives with a good
+ *  token always gets in even when the browser is still replaying a token that
+ *  has since been rotated — with the cookie winning, the good token was never
+ *  even compared, and the only recovery was clearing site data or waiting out a
+ *  lockout. The distinction also decides what counts as a brute-force attempt
+ *  (see `server.ts`): only presented credentials can be a guess. */
 export function extractToken(input: {
   authorization?: string | undefined;
   cookie?: string | undefined;
@@ -43,12 +55,12 @@ export function extractToken(input: {
   if (auth !== undefined && auth.startsWith('Bearer ')) {
     return { token: auth.slice('Bearer '.length).trim(), source: 'header' };
   }
+  if (input.queryToken !== undefined && input.queryToken.length > 0) {
+    return { token: input.queryToken, source: 'query' };
+  }
   const cookieToken = parseCookies(input.cookie)[SESSION_COOKIE];
   if (cookieToken !== undefined && cookieToken.length > 0) {
     return { token: cookieToken, source: 'cookie' };
-  }
-  if (input.queryToken !== undefined && input.queryToken.length > 0) {
-    return { token: input.queryToken, source: 'query' };
   }
   return undefined;
 }

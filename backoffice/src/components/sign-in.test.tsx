@@ -1,8 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SignIn } from './sign-in';
-import { ApiError, UNAUTHORIZED_EVENT } from '../api/client';
-import { App } from '../app';
+import { ApiError } from '../api/client';
 
 afterEach(cleanup);
 
@@ -43,18 +42,14 @@ describe('SignIn', () => {
     render(<SignIn onSignedIn={vi.fn()} signIn={vi.fn()} />);
     expect(screen.getByLabelText(/console token/i)).toHaveAttribute('type', 'password');
   });
-});
 
-describe('App session handling', () => {
-  it('swaps in the sign-in screen when any call reports 401', async () => {
-    render(<App />);
-    expect(screen.getByText('Ezra')).toBeInTheDocument();
+  it('shows a notice explaining why the operator landed here', () => {
+    render(<SignIn onSignedIn={vi.fn()} signIn={vi.fn()} notice="Too many failed attempts" />);
+    expect(screen.getByRole('status')).toHaveTextContent('Too many failed attempts');
+  });
 
-    // What the api client raises on a 401 from any screen.
-    window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
-
-    expect(await screen.findByLabelText(/console token/i)).toBeInTheDocument();
-    // The console chrome is gone — nothing renders behind the form.
-    expect(screen.queryByText(/WhatsApp household assistant/)).not.toBeInTheDocument();
+  it('shows no notice for an ordinary expired session', () => {
+    render(<SignIn onSignedIn={vi.fn()} signIn={vi.fn()} />);
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 });

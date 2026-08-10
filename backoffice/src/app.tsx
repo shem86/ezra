@@ -2,7 +2,7 @@
 // and the cards/dense dashboard variants are dropped; the `focus` layout is the
 // one kept (spec Q6). Hash routing means no server-side SPA fallback is needed.
 import { useEffect, useState } from 'react';
-import { UNAUTHORIZED_EVENT } from './api/client';
+import { signOut, UNAUTHORIZED_EVENT, type UnauthorizedDetail } from './api/client';
 import { Icon } from './components/icon';
 import { Badge, Dot } from './components/primitives';
 import { SignIn } from './components/sign-in';
@@ -17,7 +17,15 @@ import { LogsScreen } from './screens/logs';
 import { OverviewScreen } from './screens/overview';
 import { StatusScreen } from './screens/status';
 
-function Sidebar({ route, setRoute }: { route: Route; setRoute: (r: Route) => void }): React.JSX.Element {
+function Sidebar({
+  route,
+  setRoute,
+  onSignOut,
+}: {
+  route: Route;
+  setRoute: (r: Route) => void;
+  onSignOut: () => void;
+}): React.JSX.Element {
   return (
     <aside className="sidebar" data-tone="warm">
       <div className="brand">
@@ -53,6 +61,9 @@ function Sidebar({ route, setRoute }: { route: Route; setRoute: (r: Route) => vo
             <span>{HOUSEHOLD.locale}</span>
           </div>
         </div>
+        <button className="signout" type="button" onClick={onSignOut}>
+          Sign out
+        </button>
       </div>
     </aside>
   );
@@ -82,14 +93,26 @@ export function App(): React.JSX.Element {
     const h = (location.hash || '').replace('#', '');
     return isRoute(h) ? h : 'dashboard';
   });
-  // Any 401 from any screen raises UNAUTHORIZED_EVENT; that swaps the whole
-  // shell for the sign-in form. `session` remounts the screen subtree after a
-  // successful sign-in so its data loaders re-run with the fresh cookie.
+  // Any 401 or 429 from any screen raises UNAUTHORIZED_EVENT; that swaps the
+  // whole shell for the sign-in form. `session` remounts the screen subtree
+  // after a successful sign-in so its data loaders re-run with the fresh cookie.
   const [signedOut, setSignedOut] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const [session, setSession] = useState(0);
 
   useEffect(() => {
-    const onUnauthorized = (): void => setSignedOut(true);
+    const onUnauthorized = (e: Event): void => {
+      const status = (e as CustomEvent<UnauthorizedDetail>).detail?.status;
+      setSignedOut(true);
+      // A throttle is not a dead session: the console is healthy and a correct
+      // token is still accepted while locked out, so say so rather than letting
+      // the operator conclude the back office is down (2026-08-10).
+      setNotice(
+        status === 429
+          ? 'Too many failed attempts from this address. The console is healthy — the correct token still works.'
+          : null,
+      );
+    };
     window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
   }, []);
@@ -118,8 +141,10 @@ export function App(): React.JSX.Element {
   if (signedOut) {
     return (
       <SignIn
+        notice={notice}
         onSignedIn={() => {
           setSignedOut(false);
+          setNotice(null);
           setSession((n) => n + 1);
         }}
       />
@@ -128,7 +153,16 @@ export function App(): React.JSX.Element {
 
   return (
     <div className="shell">
-      <Sidebar route={route} setRoute={setRoute} />
+      <Sidebar
+        route={route}
+        setRoute={setRoute}
+        onSignOut={() => {
+          void signOut().finally(() => {
+            setSignedOut(true);
+            setNotice(null);
+          });
+        }}
+      />
       <main className="main">
         <Topbar route={route} />
         <div className="content" key={session}>
