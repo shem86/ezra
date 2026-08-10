@@ -10,8 +10,10 @@ Added Open item 0 — **production is down** — and four defect records to
 still carry their 2026-07-21 dates.
 
 **Partial update 2026-08-10:** item 0 **resolved** — ezra is back up on
-`v2.3.0`, verified live on the host. Items 1–5 still carry their 2026-07-21
-dates and were not re-verified on this pass either.
+`v2.3.0`, verified live on the host. Added Open item 7 (backoffice Langfuse
+reads — both data screens measured broken on prod, fixed on a branch). Items
+1–5 still carry their 2026-07-21 dates and were not re-verified on this pass
+either.
 
 This is the **single source of truth for current state**. Everything else is
 history:
@@ -262,6 +264,51 @@ hand-pasting `?token=` into the URL bar; and the `bo_session` cookie is a fixed
 30-day `Max-Age` with no renewal, a recurring cliff whose failure mode is this
 incident. Serving the shell publicly (it holds no data; `/api/*` is the real
 gate) and renewing the cookie on each success would close both.
+
+### 7. Backoffice Langfuse reads — fixed on a branch, not yet deployed
+**Status:** open (awaiting deploy) · **verified** 2026-08-10 by timing the live
+console on the host and by running the new code against real Langfuse
+(`pnpm lint && pnpm build && pnpm test && pnpm test:recovery` green — 754 unit +
+integration, 57 recovery).
+
+Both Langfuse-backed screens were broken in production, and neither was a
+cold-cache effect — they failed on **every** load:
+
+| | Measured on the host (2026-08-10) | Cause |
+|---|---|---|
+| **Logs** | **30.05s every load**, `enriched:false` every time — the token/cost/tier/tool columns had *never* rendered in prod | the legacy `/api/public/observations` endpoint is deprecated on Langfuse Cloud and answers an unfiltered page with a **server-side timeout** (HTTP 422, "Request timed out") after ~30s. The app's own 30s `AbortSignal` usually fired first. Because the fetch always threw, the 5-minute cache never populated, so every request paid the full 30s afresh. |
+| **Costs** | 15–17s, then `503` for the rest of the day | `/api/public/metrics/daily` is capped at **10 requests per day** on this plan (`x-ratelimit-limit: 10`, ~24h reset). A 5-minute TTL burns that quota within the hour; after that it is `429` → `503`. |
+
+Ruled out by measurement, *not* inference: the DBOS journal query is **35ms**
+(`EXPLAIN ANALYZE`; a seq scan over 97,758 rows, fully cached — no index
+needed), and `/api/status` is **0.45s** with every probe ≤541ms.
+
+Fixed by collapsing both screens onto ONE shared read of the **v2** endpoint
+(`src/backoffice/observations.ts`): `/api/public/v2/observations` with
+`fields=core,basic,usage,metadata`. The `fields` parameter is load-bearing —
+without it v2 omits `usageDetails` and `metadata` entirely, which is every
+column the console shows. Costs no longer touches `metrics/daily` at all; the
+per-day series is folded from the same records, which also yields a *real*
+per-day cache split instead of applying one sampled ratio to every day. The
+source owns caching, in-flight de-duplication (the SPA fires four calls at
+once) and a short **failure** cache, so a broken upstream can no longer cost a
+full timeout on every request. Fetch ceiling dropped 30s → 8s.
+
+Measured after the change, against live Langfuse: cold shared read **2.4s**
+(606 records), warm **0ms**, `getCosts()` **1ms**, and **246 traces enriched**
+where production had zero. The month-to-date figures reproduce independently
+computed host-side numbers exactly (31,644 tokens, $0.0872, 20% cache reads).
+
+Still estimated, deliberately: v2's `totalCost`/`costDetails`/`modelId` come
+back 0/empty/null for this project, so BO-8's "Langfuse has no cost and no
+model" still holds and the Sonnet-class price table stays.
+
+**Not in this branch:** the Overview still renders all-or-nothing (`useAsync`
+holds until all four calls settle), so the page is as slow as its slowest card.
+That mattered enormously at 30s and barely matters at ~1s, but progressive
+per-card rendering is still the right shape. Also unaddressed: 97,540 of the
+97,758 journal rows are `reminderSweep`/`expirySweep` records versus 54 real
+turns — harmless at today's 35ms, worth a retention policy before it isn't.
 
 ---
 
