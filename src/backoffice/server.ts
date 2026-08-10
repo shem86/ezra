@@ -48,8 +48,12 @@ const SESSION_MAX_AGE_SECONDS = 2592000; // 30 days
  *  `x-forwarded-proto: https`, and the container port is published to loopback
  *  only (`docker-compose.prod.yml`), so no plaintext path to it exists. The
  *  conditional is for local dev, where the vite dev server proxies `/api` over a
- *  plain `http://localhost` origin — one most browsers treat as trustworthy, but
- *  not consistently enough to bet a silently-dropped cookie on. */
+ *  plain-http loopback origin — one most browsers treat as trustworthy, but not
+ *  consistently enough to bet a silently-dropped cookie on.
+ *
+ *  (Deliberately no scheme-qualified host literal in this comment: the egress
+ *  anti-drift scan greps `src/` for `http(s)://<host>` and does not skip
+ *  comments — see `tests/unit/egress-allowlist.test.ts`.) */
 function sessionCookie(req: IncomingMessage, token: string, maxAgeSeconds: number): string {
   const proto = req.headers['x-forwarded-proto'];
   const scheme = (typeof proto === 'string' ? proto.split(',')[0]!.trim() : '').toLowerCase();
