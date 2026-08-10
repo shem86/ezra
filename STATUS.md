@@ -10,10 +10,11 @@ Added Open item 0 — **production is down** — and four defect records to
 still carry their 2026-07-21 dates.
 
 **Partial update 2026-08-10:** item 0 **resolved** — ezra is back up on
-`v2.3.0`, verified live on the host. Added Open item 7 (backoffice Langfuse
-reads — both data screens measured broken on prod, fixed on a branch). Items
-1–5 still carry their 2026-07-21 dates and were not re-verified on this pass
-either.
+`v2.3.0`, verified live on the host. Item 7 (backoffice Langfuse reads — both
+data screens measured broken on prod) **resolved** and live on `v2.3.3`,
+verified on the host after the deploy. Added item 8, which corrects a
+`/api/status` timing claim made under item 7. Items 1–5 still carry their
+2026-07-21 dates and were not re-verified on this pass either.
 
 This is the **single source of truth for current state**. Everything else is
 history:
@@ -331,11 +332,13 @@ malformed API field blanks the whole console (found while building the
 verification harness — a stub with a missing `dailyCost` produced a white
 screen, not a degraded card). Worth an error boundary around the screen subtree.
 
-### 7. Backoffice Langfuse reads — fixed on a branch, not yet deployed
-**Status:** open (awaiting deploy) · **verified** 2026-08-10 by timing the live
-console on the host and by running the new code against real Langfuse
-(`pnpm lint && pnpm build && pnpm test && pnpm test:recovery` green — 754 unit +
-integration, 57 recovery).
+### 7. ✅ RESOLVED 2026-08-10 — backoffice Langfuse reads (shipped in `v2.3.3`)
+**Status:** **resolved**, live on `v2.3.3` · **verified** 2026-08-10T19:0xZ on
+the host after the deploy: `/api/logs` **0.074s / 0.030s / 0.032s** with
+`enriched:true` and 43 of 55 turns carrying tokens (was 30.05s and
+`enriched:false` on every load), `/api/costs` **0.004s HTTP 200** returning
+`$0.09` MTD / 31,644 tokens / 20% cache reads (was `503`). Spine healthy on the
+same image — `[socket] open` + `ezra up:` + `[wa-version] pin is current`.
 
 Both Langfuse-backed screens were broken in production, and neither was a
 cold-cache effect — they failed on **every** load:
@@ -347,7 +350,9 @@ cold-cache effect — they failed on **every** load:
 
 Ruled out by measurement, *not* inference: the DBOS journal query is **35ms**
 (`EXPLAIN ANALYZE`; a seq scan over 97,758 rows, fully cached — no index
-needed), and `/api/status` is **0.45s** with every probe ≤541ms.
+needed). `/api/status` was also ruled out as a *cause of this defect*, but see
+item 8 — the "0.45s, every probe ≤541ms" reading first recorded here was
+incomplete, and the correction is its own entry rather than a footnote.
 
 Fixed by collapsing both screens onto ONE shared read of the **v2** endpoint —
 the `makeObservationsSource` factory in `src/backoffice/observations.ts` —
@@ -370,12 +375,45 @@ Still estimated, deliberately: v2's `totalCost`/`costDetails`/`modelId` come
 back 0/empty/null for this project, so BO-8's "Langfuse has no cost and no
 model" still holds and the Sonnet-class price table stays.
 
-**Not in this branch:** the Overview still renders all-or-nothing (`useAsync`
-holds until all four calls settle), so the page is as slow as its slowest card.
-That mattered enormously at 30s and barely matters at ~1s, but progressive
-per-card rendering is still the right shape. Also unaddressed: 97,540 of the
-97,758 journal rows are `reminderSweep`/`expirySweep` records versus 54 real
-turns — harmless at today's 35ms, worth a retention policy before it isn't.
+**Not in this change:** the Overview still renders all-or-nothing (the
+`useAsync` hook in `backoffice/src/api/use-async.ts` holds until all four calls
+settle), so the page is as slow as its slowest card. That mattered enormously
+at 30s and barely matters at ~1s, but progressive per-card rendering is still
+the right shape. Also unaddressed: 97,540 of the 97,758 journal rows are
+`reminderSweep`/`expirySweep` records versus 54 real turns — harmless at
+today's 35ms, worth a retention policy before it isn't.
+
+### 8. `/api/status` costs ~10.5s on the first two calls after a restart
+**Status:** open, unexplained · **verified** 2026-08-10T19:0xZ on the host,
+immediately after the `v2.3.3` deploy.
+
+Called alone against a freshly started container, past the 30s cache each time:
+**10.500s, 10.496s, then 0.464s**. From the third call on it stays at ~0.45s
+until the next restart. It is *not* contention from other endpoints — a
+`/api/logs` call immediately before a status call left it at 0.452s.
+
+This corrects a claim first recorded under item 7. The initial reading that day
+(10.480s, then 10.479s) was explained away as contention behind a heavy
+Langfuse call and "not reproducible" once later samples came back at 0.45s.
+That was wrong: those were simply the first two calls against a container that
+had started 15 minutes earlier, and the pattern reproduces exactly across
+restarts. The lesson is the ordering — every fast sample was taken *after* two
+slow ones had already warmed whatever this is.
+
+Not root-caused. The per-service latencies rule out the obvious suspects, but
+only on the *fast* path — every capture so far comes from a warm call
+(Postgres 19ms, Anthropic 292ms, Voyage 103ms, Langfuse 90ms, Google Calendar
+447ms, sum well under one second). Nobody has yet captured the service
+breakdown *during* a slow call, which is the measurement that would settle it;
+doing so means restarting the console and catching one of the first two
+requests. Suspicion falls on a cold external path — the Google service-account
+OAuth exchange and the nftables egress allowlist are both plausible and both
+unproven.
+
+Impact is small and bounded: the response is cached 30s, the screen is
+otherwise 0.45s, and this predates `v2.3.3` (the same 10.48s pair was measured
+on `v2.3.1` before any of this work). It is filed because it is a *known
+unknown* with a precise reproduction, not because it is urgent.
 
 ### 7. Backoffice charts — the two things the new chart layer can't reach yet
 **Status:** open · **verified** 2026-08-10 by reading `makeCostClient` in
