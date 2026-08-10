@@ -26,6 +26,9 @@ on:
 jobs:
   refs:
     runs-on: ubuntu-latest
+    # Reads the tree and nothing else; no packages, no deployments, no writes.
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6

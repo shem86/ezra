@@ -93,12 +93,12 @@ live. That run mattered — the adopted host never ran cloud-init, so the
 **Status:** open, builder decision (schema vs adapter-id) · **verified**
 2026-07-21 by reading source.
 
-Production passes a hardcoded constant — the `wasSentByBot: () => false` wiring
-in `src/main.ts`. The real suppression is an **in-memory ring buffer**: the
-`sentIds = new RecentIds(SENT_ID_CAPACITY)` in `src/transport/baileys.ts`,
-populated by `sentIds.add(messageId)` on send and consulted by `sentIds.has(id)`
-on inbound — so it is **lost on restart**. The `IngestionDeps.wasSentByBot` seam
-(declared and checked in `src/orchestration/ingest.ts`) is therefore dead code in
+Production hardcodes the guard off: the `wasSentByBot` constant in
+`src/main.ts` is `() => false`. The real suppression is an **in-memory ring
+buffer** — the `RecentIds` buffer in `src/transport/baileys.ts`, populated on
+send and consulted on inbound — so it is **lost on restart**. The
+`IngestionDeps.wasSentByBot` seam (declared and checked in
+`src/orchestration/ingest.ts`) is therefore dead code in
 prod. `sent_log` exists but is wired only to send-class dedup, not the echo
 guard; no migration adds an echo/adapter-id table (`migrations/` tops out at
 `0008-compaction-log.sql`).
@@ -164,9 +164,12 @@ calendar rollout).
 ## Watch list (from the `TASKS.md` deferred-decisions ledger)
 
 - **#7** — kill-mid-flight flake under load. **No longer unreproduced:**
-  it recurred in CI 2026-08-03 (run `30834016384`, PR #38) — this time in the
-  `handleTurn skeleton (T22)` suite in `tests/integration/handle-turn.test.ts`,
-  not T19's file. The mid-flight
+  it recurred in CI 2026-08-03 — run `30834016384` **attempt 1** (PR #38) —
+  this time in the `handleTurn skeleton (T22)` suite in
+  `tests/integration/handle-turn.test.ts`, not T19's file. Cite the attempt,
+  never the run: the re-run below overwrote the run-level conclusion, so that
+  run id now reports *success* and only attempt 1 still carries the failure.
+  The mid-flight
   child never produced its first effect ("condition not met within 30000ms"),
   and because that test runs first *by design* (it must observe a PENDING
   workflow before `DBOS.launch()` triggers recovery), its failure meant launch
