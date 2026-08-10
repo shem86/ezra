@@ -9,6 +9,10 @@ Added Open item 0 — **production is down** — and four defect records to
 `docs/known-issues.md`. Items 1–5 below were not re-verified on this pass and
 still carry their 2026-07-21 dates.
 
+**Partial update 2026-08-10:** item 0 **resolved** — ezra is back up on
+`v2.3.0`, verified live on the host. Items 1–5 still carry their 2026-07-21
+dates and were not re-verified on this pass either.
+
 This is the **single source of truth for current state**. Everything else is
 history:
 
@@ -38,25 +42,26 @@ history:
 
 ## Open
 
-### 0. 🔴 PRODUCTION DOWN — WhatsApp socket dead since 2026-07-28
-**Status:** open, **P0** — root cause **fixed on a branch, not yet deployed**
-(ADR-0006) · **verified** 2026-08-05T16:09Z by `docker logs` on the host + a
-Postgres query, not by inference. Fix verified green the same day
-(`pnpm lint && pnpm build && pnpm test`, 737 tests incl. integration).
+### 0. ✅ RESOLVED 2026-08-10 — WhatsApp socket was dead 2026-07-28 → 2026-08-10
+**Status:** **resolved**, service restored on `v2.3.0` · **verified**
+2026-08-10T17:05Z on the host: container `ghcr.io/shem86/hh-assistant:2.3.0`,
+`status=running restarts=0`, log shows `[socket] open` +
+`ezra up: … wa-version 2.3000.1043857760` + `[wa-version] pin is current`.
+Firewall re-verified enforcing (the `policed` chain still ends in
+`log … drop`), with GitHub's probe IPs resolved into the `allowed4` set.
 
-**ezra has been unable to send or receive WhatsApp for 7 days 18 hours.** The
-container is `running` with 0 restarts and the dead-man ping is green — the
-*process* is healthy, the *socket* is not. Last `[socket] open` was
-2026-07-28T21:53Z; the adapter burned 12 retries and logged `giving up` at
-22:12Z, then wrote nothing further. `sent_log` and `conversation_inbox` both
-top out at **2026-07-18**, with zero unprocessed rows.
+**ezra was unable to send or receive WhatsApp for 12 days 19 hours**
+(2026-07-28T22:12Z → 2026-08-10T17:02Z). The container was `running` with 0
+restarts and the dead-man ping was green throughout — the *process* was
+healthy, the *socket* was not. `sent_log` and `conversation_inbox` both topped
+out at **2026-07-18**, with zero unprocessed rows.
 
 Three separate defects had to line up, each filed in
 [`docs/known-issues.md`](docs/known-issues.md):
 
 | | Defect | Role | State |
 |---|---|---|---|
-| **cause** | `WA-VERSION-001` | egress blocks Baileys' version probe → frozen WA client version → WhatsApp rejects it (`405`) | **fixed on branch** (ADR-0006), awaiting deploy |
+| **cause** | `WA-VERSION-001` | egress blocks Baileys' version probe → frozen WA client version → WhatsApp rejects it (`405`) | ✅ **RESOLVED** in `v2.3.0` (ADR-0006) |
 | **amplifier** | `SOCKET-DEAD-001` | adapter gives up permanently and never re-arms; process stays alive so Docker never restarts it | **open by decision** — see below |
 | **blind spot** | `HEALTH-GRACE-001` | health monitor alerts **once** and latches; dead-man proves liveness, not connectivity | **open** |
 
@@ -64,23 +69,33 @@ Three separate defects had to line up, each filed in
 reminders, 0 pending actions; the scheduled sweeps ran throughout. The outage
 was deafness, not corruption.
 
-**Recovery** (operator action, **not yet taken**): a container restart alone
-will *not* hold — the frozen version is still rejected. `WA-VERSION-001` must
-land first. That fix is built and green on
-`worktree-wa-version-pin-fallforward`: it pins `WA_CLIENT_VERSION`
-(`2.3000.1043857760`) so the connect path never probes the network, classifies
-`405` as its own `version-rejected` action that falls forward to the current
-upstream version and reconnects, adds a daily out-of-band staleness check with
-edge-triggered alerts, and allowlists `raw.githubusercontent.com` under a new
-`wa-version` category. Baileys stays at rc13 — the whole rc13→rc14 delta is
-Android support, inert for our `Desktop` browser config. Re-pairing should
-**not** be needed — `401` never appeared; the drops were `405`/`408`/`428`/`503`.
+**What shipped** (PRs #39 + #40, released as `v2.3.0` 2026-08-10): the pin
+`WA_CLIENT_VERSION=2.3000.1043857760` so the connect path never probes the
+network, `405` classified as its own `version-rejected` action that falls
+forward to the current upstream version and reconnects, a daily out-of-band
+staleness check with edge-triggered alerts, and `raw.githubusercontent.com`
+allowlisted under a new `wa-version` category. Baileys stayed at rc13. No
+re-pairing was needed — `401` never appeared.
 
-**Next action:** merge, then `pnpm release vX.Y.Z` off green `main`. The host
-firewall also needs to re-render its allowlist for the new host
-(`infra/egress/allowlist.generated.txt` is regenerated on that branch) —
-without it the staleness check stays blind, though the pin alone restores
-service.
+**Deploy gotcha, worth remembering.** The *first* `v2.3.0` deploy **failed its
+healthcheck and auto-rolled back to 2.2.9**, then an identical redeploy nine
+minutes later came up on the first socket attempt. The release was not at
+fault. Two things combined:
+
+1. The deploy's readiness gate is the `ezra up:` marker, which is printed only
+   *after* `await transport.connect()` resolves. So **while the WhatsApp socket
+   cannot open, no deploy can ever pass** — including the deploy that fixes it.
+   That is a genuine catch-22 in the gate and is worth revisiting (a marker
+   printed before `connect()`, or a readiness signal that does not depend on a
+   third party, would decouple "the release is good" from "WhatsApp is
+   answering").
+2. WhatsApp appears to have been in a short cooldown immediately after the
+   retry burst — the same image and the same pinned version were refused at
+   16:53Z and accepted at 17:02Z with no code change in between.
+
+If a future deploy fails this gate, **re-run it before concluding the release
+is bad**, and check the container's own `[socket]`/`[wa-version]` lines rather
+than the pipeline's verdict.
 
 **Why `SOCKET-DEAD-001` is not fixed alongside it.** Both fix directions that
 entry proposes were considered and rejected on the evidence (ADR-0006,
@@ -92,11 +107,16 @@ rejection follows the version and not the process. The give-up remains
 deliberate. What was missing was a socket that could *change* what it announces,
 which is what ADR-0006 adds.
 
-**Diagnosed 2026-08-03, still down 2026-08-05.** The root cause was worked out
-two days before this entry was written; it just never landed in the repo, so
-nothing tracked it and nothing acted on it. That gap is the reason for house
-rule 4 and the reason this item is filed here rather than left in a session
-transcript.
+**Diagnosed 2026-08-03, fixed on a branch 2026-08-05, shipped 2026-08-10.** The
+root cause was worked out a week before it shipped; the fix then sat on an
+unpushed local branch for five days. Twice now the delay was not the diagnosis
+or the code but the work living somewhere the repo could not see it. That is
+the reason for house rule 4.
+
+**Still open from this outage:** `HEALTH-GRACE-001` (the monitor latches after
+one alert, so a *still-down* socket stays silent — the reason 12 days passed
+with no second signal) and the deploy-gate catch-22 described above. Neither
+blocks service today.
 
 ### 1. §5 — apply the cloud-layer SG egress to live prod
 **Status:** open · **verified** 2026-07-21 (`git log` shows nothing under
