@@ -1,12 +1,21 @@
-// Costs data — a zero-dep Langfuse READ client (mirrors the langfuse-*sink*
-// precedent, now a *source*; ADR-0002 zero-dep ethos). The BO-8 spike proved
-// Langfuse has accurate token volume and the cache-read split, but NO cost and
-// NO model name. So USD is ESTIMATED here from token counts × a Sonnet-class
-// price table (conservative — Haiku is cheaper but indistinguishable), and
-// per-model attribution degrades to per-usage-type. `estimated: true` rides on
-// the response so the UI can label it honestly.
+// Costs data — derived from the shared Langfuse v2 observation read
+// (observations.ts), which is also what the Logs screen enriches from. The BO-8
+// spike proved Langfuse has accurate token volume and the cache-read split, but
+// NO cost and NO model name; re-verified against production on 2026-08-10 —
+// v2's `totalCost`/`costDetails`/`modelId` come back 0/empty/null for this
+// project. So USD stays ESTIMATED here from token counts × a Sonnet-class price
+// table (conservative — Haiku is cheaper but indistinguishable), and per-model
+// attribution degrades to per-usage-type. `estimated: true` rides on the
+// response so the UI can label it honestly.
+//
+// This used to read `/api/public/metrics/daily` for the per-day series. That
+// endpoint allows 10 requests per DAY on this plan, which a 5-minute cache
+// exhausts in under an hour — after which the screen 503'd for the rest of the
+// day. The daily series is now folded from the observation records themselves,
+// which also gives a REAL per-day cache split instead of applying one sampled
+// ratio to every day.
 
-import { z } from 'zod';
+import type { ObservationsSource, ObservationUsage } from './observations.js';
 
 // Anthropic Sonnet-class prices, USD per token (the spend backstop is
 // provider-side, V2 §12 — this is a display estimate, not billing).
@@ -18,11 +27,9 @@ export const PRICE_PER_TOKEN = {
 } as const;
 
 export interface CostDeps {
-  readonly baseUrl: string;
-  readonly publicKey: string;
-  readonly secretKey: string;
+  /** The shared Langfuse v2 read — cached and de-duplicated there. */
+  readonly observations: ObservationsSource;
   readonly budgetUsd: number;
-  readonly fetchFn?: typeof fetch;
   /** Injectable clock (month boundaries); defaults to Date.now. */
   readonly now?: () => number;
 }
@@ -51,45 +58,8 @@ export interface CostsResponse {
   readonly byUsage: UsageTypeRow[];
 }
 
-const dailySchema = z.object({
-  data: z.array(
-    z.object({
-      date: z.string(),
-      usage: z
-        .array(
-          z.object({
-            inputUsage: z.number().default(0),
-            outputUsage: z.number().default(0),
-            totalUsage: z.number().default(0),
-          }),
-        )
-        .default([]),
-    }),
-  ),
-});
-
-const observationsSchema = z.object({
-  data: z.array(
-    z.object({
-      usageDetails: z
-        .object({
-          input: z.number().optional(),
-          output: z.number().optional(),
-          cache_read_input_tokens: z.number().optional(),
-          cache_creation_input_tokens: z.number().optional(),
-        })
-        .optional(),
-    }),
-  ),
-});
-
-interface DayUsage {
-  date: string;
-  input: number; // input-side total INCLUDING cache reads/writes (daily can't split)
-  output: number;
-  total: number;
-}
-interface InputSplit {
+/** Token counts split by how they are billed. */
+interface Split {
   fresh: number;
   cacheRead: number;
   cacheWrite: number;
@@ -100,102 +70,91 @@ export interface CostClient {
   getCosts(): Promise<CostsResponse>;
 }
 
-// The Langfuse read API is slow (multi-second over the US region); the Costs
-// data barely moves minute to minute, so memoize for this long. Keeps the
-// screen snappy and avoids hammering Langfuse on every view/refresh.
-const COST_TTL_MS = 5 * 60_000;
+function emptySplit(): Split {
+  return { fresh: 0, cacheRead: 0, cacheWrite: 0, output: 0 };
+}
+
+/** Fold one observation's usage in. `input` is the FRESH (uncached) side —
+ *  Langfuse reports cache reads/writes as separate counters, not inside it. */
+function add(into: Split, u: ObservationUsage): void {
+  into.fresh += u.input;
+  into.cacheRead += u.cacheRead;
+  into.cacheWrite += u.cacheWrite;
+  into.output += u.output;
+}
+
+function merge(into: Split, s: Split): void {
+  into.fresh += s.fresh;
+  into.cacheRead += s.cacheRead;
+  into.cacheWrite += s.cacheWrite;
+  into.output += s.output;
+}
+
+function costOf(s: Split): number {
+  return (
+    s.fresh * PRICE_PER_TOKEN.freshInput +
+    s.cacheRead * PRICE_PER_TOKEN.cacheRead +
+    s.cacheWrite * PRICE_PER_TOKEN.cacheWrite +
+    s.output * PRICE_PER_TOKEN.output
+  );
+}
+
+function tokensOf(s: Split): number {
+  return s.fresh + s.cacheRead + s.cacheWrite + s.output;
+}
 
 export function makeCostClient(deps: CostDeps): CostClient {
-  const fetchFn = deps.fetchFn ?? fetch;
   const now = deps.now ?? Date.now;
-  const auth = 'Basic ' + Buffer.from(`${deps.publicKey}:${deps.secretKey}`).toString('base64');
-  const base = deps.baseUrl.replace(/\/$/, '');
-  let cache: { at: number; value: CostsResponse } | undefined;
-
-  async function getJson(path: string): Promise<unknown> {
-    const res = await fetchFn(`${base}${path}`, {
-      headers: { authorization: auth, accept: 'application/json' },
-      signal: AbortSignal.timeout(30_000),
-    });
-    if (!res.ok) {
-      throw new Error(`langfuse read ${path}: HTTP ${res.status}`);
-    }
-    return res.json();
-  }
-
-  async function fetchDaily(from: Date, to: Date): Promise<DayUsage[]> {
-    const q = `fromTimestamp=${encodeURIComponent(from.toISOString())}&toTimestamp=${encodeURIComponent(to.toISOString())}`;
-    const parsed = dailySchema.parse(await getJson(`/api/public/metrics/daily?${q}`));
-    return parsed.data.map((d) => {
-      const input = d.usage.reduce((a, u) => a + u.inputUsage, 0);
-      const output = d.usage.reduce((a, u) => a + u.outputUsage, 0);
-      const total = d.usage.reduce((a, u) => a + u.totalUsage, 0);
-      return { date: d.date, input, output, total: total || input + output };
-    });
-  }
-
-  // Sample recent generations to learn the input-side cache split (daily can't
-  // provide it). Fractions are applied to daily input tokens for cost + donut.
-  async function fetchSplit(): Promise<InputSplit> {
-    const parsed = observationsSchema.parse(
-      await getJson('/api/public/observations?type=GENERATION&limit=50'),
-    );
-    const acc: InputSplit = { fresh: 0, cacheRead: 0, cacheWrite: 0, output: 0 };
-    for (const o of parsed.data) {
-      const u = o.usageDetails;
-      if (u === undefined) continue;
-      acc.fresh += u.input ?? 0;
-      acc.cacheRead += u.cache_read_input_tokens ?? 0;
-      acc.cacheWrite += u.cache_creation_input_tokens ?? 0;
-      acc.output += u.output ?? 0;
-    }
-    return acc;
-  }
-
-  function estimateDayCost(day: DayUsage, split: InputSplit): number {
-    const inputSide = split.fresh + split.cacheRead + split.cacheWrite;
-    // Fractions of the input-side tokens (fall back to all-fresh if no sample).
-    const fFresh = inputSide > 0 ? split.fresh / inputSide : 1;
-    const fRead = inputSide > 0 ? split.cacheRead / inputSide : 0;
-    const fWrite = inputSide > 0 ? split.cacheWrite / inputSide : 0;
-    const inputCost =
-      day.input *
-      (fFresh * PRICE_PER_TOKEN.freshInput +
-        fRead * PRICE_PER_TOKEN.cacheRead +
-        fWrite * PRICE_PER_TOKEN.cacheWrite);
-    return inputCost + day.output * PRICE_PER_TOKEN.output;
-  }
 
   return {
     async getCosts(): Promise<CostsResponse> {
-      if (cache !== undefined && now() - cache.at < COST_TTL_MS) return cache.value;
+      const records = await deps.observations.recent();
       const nowDate = new Date(now());
       const monthStart = new Date(Date.UTC(nowDate.getUTCFullYear(), nowDate.getUTCMonth(), 1));
       const prevMonthStart = new Date(Date.UTC(nowDate.getUTCFullYear(), nowDate.getUTCMonth() - 1, 1));
-      // Fetch from the start of last month so both calendar months are covered.
-      const [daily, split] = await Promise.all([fetchDaily(prevMonthStart, nowDate), fetchSplit()]);
 
-      const byDay = new Map(daily.map((d) => [d.date, d]));
-      const inMonth = daily.filter((d) => new Date(d.date + 'T00:00:00Z') >= monthStart);
-      const inPrev = daily.filter((d) => {
-        const t = new Date(d.date + 'T00:00:00Z');
-        return t >= prevMonthStart && t < monthStart;
-      });
+      // Fold every observation into its UTC day. Records without usage (tool
+      // spans) carry no tokens and simply contribute nothing here.
+      const byDay = new Map<string, Split>();
+      const window = emptySplit();
+      for (const r of records) {
+        if (r.usage === null || r.startTime === null) continue;
+        const day = r.startTime.slice(0, 10);
+        const bucket = byDay.get(day) ?? emptySplit();
+        add(bucket, r.usage);
+        byDay.set(day, bucket);
+        add(window, r.usage);
+      }
 
-      const monthCostUsd = inMonth.reduce((a, d) => a + estimateDayCost(d, split), 0);
-      const lastMonthCostUsd = inPrev.reduce((a, d) => a + estimateDayCost(d, split), 0);
-      const tokensMonth = inMonth.reduce((a, d) => a + d.total, 0);
+      const inRange = (day: string, from: Date, to?: Date): boolean => {
+        const t = new Date(day + 'T00:00:00Z');
+        return t >= from && (to === undefined || t < to);
+      };
+      const month = emptySplit();
+      const prev = emptySplit();
+      for (const [day, s] of byDay) {
+        if (inRange(day, monthStart)) merge(month, s);
+        else if (inRange(day, prevMonthStart, monthStart)) merge(prev, s);
+      }
+
+      const monthCostUsd = costOf(month);
+      const lastMonthCostUsd = costOf(prev);
+      const tokensMonth = tokensOf(month);
 
       // last-30-days estimated daily cost array (oldest→newest), 0-filled.
       const dailyCost: number[] = [];
       for (let i = 29; i >= 0; i--) {
         const d = new Date(nowDate.getTime() - i * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
         const day = byDay.get(d);
-        dailyCost.push(day ? Math.round(estimateDayCost(day, split) * 10000) / 10000 : 0);
+        dailyCost.push(day === undefined ? 0 : Math.round(costOf(day) * 10000) / 10000);
       }
 
+      // Economics panels describe the CURRENT month; before the month has any
+      // traffic that would be an all-zero donut, so fall back to the whole
+      // read window rather than render nothing.
+      const split = tokensOf(month) > 0 ? month : window;
       const inputSide = split.fresh + split.cacheRead + split.cacheWrite;
-      const totalTokens = inputSide + split.output || 1;
+      const totalTokens = tokensOf(split) || 1;
       const cacheReadPct = inputSide > 0 ? Math.round((split.cacheRead / inputSide) * 100) : 0;
 
       const tokenSplit: TokenSplitSlice[] = [
@@ -215,7 +174,7 @@ export function makeCostClient(deps: CostDeps): CostClient {
         return { ...r, share: r.cost / totalCost };
       });
 
-      const value: CostsResponse = {
+      return {
         estimated: true,
         budgetUsd: deps.budgetUsd,
         monthCostUsd: Math.round(monthCostUsd * 100) / 100,
@@ -226,8 +185,6 @@ export function makeCostClient(deps: CostDeps): CostClient {
         tokenSplit,
         byUsage,
       };
-      cache = { at: now(), value };
-      return value;
     },
   };
 }

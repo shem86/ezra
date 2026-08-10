@@ -7,10 +7,12 @@
 //
 // The journal query is SELECT-only against the dbos schema (the SELECT-only
 // role is granted USAGE+SELECT there, BO-17). Enrichment is a single, cached
-// Langfuse fetch grouped by trace — never one call per turn.
+// Langfuse fetch grouped by trace — never one call per turn — and that fetch is
+// SHARED with the Costs screen (see observations.ts).
 
 import { z } from 'zod';
 import { PRICE_PER_TOKEN } from './cost.js';
+import type { ObservationsSource } from './observations.js';
 import type { Queryable } from './queries.js';
 
 export interface TurnRow {
@@ -78,54 +80,16 @@ export interface TurnEnricher {
   byTrace(): Promise<Map<string, Enrichment>>;
 }
 
-const observationsSchema = z.object({
-  data: z.array(
-    z.object({
-      traceId: z.string().nullable(),
-      type: z.string(),
-      usageDetails: z
-        .object({
-          input: z.number().optional(),
-          output: z.number().optional(),
-          cache_read_input_tokens: z.number().optional(),
-          cache_creation_input_tokens: z.number().optional(),
-        })
-        .optional(),
-      metadata: z.record(z.string(), z.unknown()).optional(),
-    }),
-  ),
-});
-
 export interface EnricherDeps {
-  readonly baseUrl: string;
-  readonly publicKey: string;
-  readonly secretKey: string;
-  readonly fetchFn?: typeof fetch;
-  readonly now?: () => number;
-  /** How many recent observations to scan (covers the turn-list window). */
-  readonly sampleSize?: number;
+  /** The shared Langfuse v2 read — cached and de-duplicated there, so calling
+   *  this per request costs one upstream fetch per TTL across BOTH screens. */
+  readonly observations: ObservationsSource;
 }
 
-const ENRICH_TTL_MS = 5 * 60_000;
-
 export function makeTurnEnricher(deps: EnricherDeps): TurnEnricher {
-  const fetchFn = deps.fetchFn ?? fetch;
-  const now = deps.now ?? Date.now;
-  const auth = 'Basic ' + Buffer.from(`${deps.publicKey}:${deps.secretKey}`).toString('base64');
-  const base = deps.baseUrl.replace(/\/$/, '');
-  // Langfuse caps the observations page at 100; ask for the max.
-  const sample = deps.sampleSize ?? 100;
-  let cache: { at: number; value: Map<string, Enrichment> } | undefined;
-
   return {
     async byTrace(): Promise<Map<string, Enrichment>> {
-      if (cache !== undefined && now() - cache.at < ENRICH_TTL_MS) return cache.value;
-      const res = await fetchFn(`${base}/api/public/observations?limit=${sample}`, {
-        headers: { authorization: auth, accept: 'application/json' },
-        signal: AbortSignal.timeout(30_000),
-      });
-      if (!res.ok) throw new Error(`langfuse observations: HTTP ${res.status}`);
-      const parsed = observationsSchema.parse(await res.json());
+      const records = await deps.observations.recent();
 
       interface Acc {
         fresh: number;
@@ -136,19 +100,19 @@ export function makeTurnEnricher(deps: EnricherDeps): TurnEnricher {
         tool: string | null;
       }
       const acc = new Map<string, Acc>();
-      for (const o of parsed.data) {
+      // A turn's usage rides on its generations and its tier/tool on the tool
+      // spans — both share the traceId, so fold every record into one bucket.
+      for (const o of records) {
         if (o.traceId === null) continue;
         const a = acc.get(o.traceId) ?? { fresh: 0, cacheRead: 0, cacheWrite: 0, output: 0, tier: null, tool: null };
-        const u = o.usageDetails;
-        if (u !== undefined) {
-          a.fresh += u.input ?? 0;
-          a.cacheRead += u.cache_read_input_tokens ?? 0;
-          a.cacheWrite += u.cache_creation_input_tokens ?? 0;
-          a.output += u.output ?? 0;
+        if (o.usage !== null) {
+          a.fresh += o.usage.input;
+          a.cacheRead += o.usage.cacheRead;
+          a.cacheWrite += o.usage.cacheWrite;
+          a.output += o.usage.output;
         }
-        const meta = o.metadata ?? {};
-        if (a.tier === null && typeof meta['riskTier'] === 'string') a.tier = meta['riskTier'];
-        if (a.tool === null && typeof meta['tool'] === 'string') a.tool = meta['tool'];
+        if (a.tier === null && o.tier !== null) a.tier = o.tier;
+        if (a.tool === null && o.tool !== null) a.tool = o.tool;
         acc.set(o.traceId, a);
       }
 
@@ -169,7 +133,6 @@ export function makeTurnEnricher(deps: EnricherDeps): TurnEnricher {
           tool: a.tool,
         });
       }
-      cache = { at: now(), value: out };
       return out;
     },
   };

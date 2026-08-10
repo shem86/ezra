@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { getLogs, makeTurnEnricher, type TurnEnricher } from '../../../src/backoffice/journal.js';
+import type { ObservationsSource } from '../../../src/backoffice/observations.js';
 import type { Queryable } from '../../../src/backoffice/queries.js';
 
 const base = Date.UTC(2026, 5, 24, 12, 0, 0);
@@ -52,29 +53,29 @@ describe('getLogs', () => {
 });
 
 describe('makeTurnEnricher', () => {
-  it('aggregates usageDetails per trace and reads tier/tool from span metadata', async () => {
-    const fetchFn = (async () =>
-      new Response(
-        JSON.stringify({
-          data: [
-            {
-              traceId: 'turn-1',
-              type: 'GENERATION',
-              usageDetails: { input: 1000, output: 50, cache_read_input_tokens: 4000, cache_creation_input_tokens: 200 },
-            },
-            { traceId: 'turn-1', type: 'SPAN', metadata: { tool: 'reminder.add', riskTier: 'autonomous' } },
-          ],
-        }),
-        { status: 200 },
-      )) as unknown as typeof fetch;
+  it('aggregates usage per trace and reads tier/tool from the tool span', async () => {
+    // Usage rides on the generation, tier/tool on the tool span — one turn
+    // contributes both records under the same traceId.
+    const observations: ObservationsSource = {
+      recent: async () => [
+        {
+          traceId: 'turn-1',
+          startTime: '2026-06-24T12:00:00.000Z',
+          usage: { input: 1000, output: 50, cacheRead: 4000, cacheWrite: 200 },
+          tier: null,
+          tool: null,
+        },
+        {
+          traceId: 'turn-1',
+          startTime: '2026-06-24T12:00:01.000Z',
+          usage: null,
+          tier: 'autonomous',
+          tool: 'reminder.add',
+        },
+      ],
+    };
 
-    const enricher = makeTurnEnricher({
-      baseUrl: 'https://cloud.langfuse.com',
-      publicKey: 'pk',
-      secretKey: 'sk',
-      fetchFn,
-      now: () => base,
-    });
+    const enricher = makeTurnEnricher({ observations });
     const map = await enricher.byTrace();
     const e = map.get('turn-1');
     expect(e).toBeDefined();
@@ -83,5 +84,16 @@ describe('makeTurnEnricher', () => {
     expect(e!.tier).toBe('autonomous');
     expect(e!.tool).toBe('reminder.add');
     expect(e!.cost).toBeGreaterThan(0);
+  });
+
+  it('propagates an upstream failure so getLogs can degrade to enriched:false', async () => {
+    const observations: ObservationsSource = {
+      recent: async () => {
+        throw new Error('langfuse v2 observations: HTTP 500');
+      },
+    };
+    const logs = await getLogs(fakeDb(journalRows), makeTurnEnricher({ observations }));
+    expect(logs.enriched).toBe(false);
+    expect(logs.turns).toHaveLength(3);
   });
 });

@@ -12,6 +12,7 @@ import { makeRateLimiter } from './auth.js';
 import { makeCalendarReader } from './calendar.js';
 import { makeCostClient } from './cost.js';
 import { makeTurnEnricher } from './journal.js';
+import { makeObservationsSource } from './observations.js';
 import {
   makeAnthropicPing,
   makeLangfusePing,
@@ -32,17 +33,17 @@ function main(): void {
   // The SELECT-only pool (BO-17 role). A small pool: this is a single-operator
   // console, not a high-throughput service.
   const pool = new Pool({ connectionString: config.databaseUrl, max: 4 });
-  const cost = makeCostClient({
+  // ONE Langfuse read behind both data screens: Costs aggregates it per day,
+  // Logs joins it per trace. Caching, in-flight de-duplication and the failure
+  // cache all live in the source, so the two screens can never stampede it.
+  const observations = makeObservationsSource({
     baseUrl: config.langfuse.baseUrl,
     publicKey: config.langfuse.publicKey,
     secretKey: config.langfuse.secretKey,
-    budgetUsd: config.monthlyBudgetUsd,
+    logger: (msg) => console.error(msg),
   });
-  const enricher = makeTurnEnricher({
-    baseUrl: config.langfuse.baseUrl,
-    publicKey: config.langfuse.publicKey,
-    secretKey: config.langfuse.secretKey,
-  });
+  const cost = makeCostClient({ observations, budgetUsd: config.monthlyBudgetUsd });
+  const enricher = makeTurnEnricher({ observations });
 
   const db = { query: (sql: string, params?: readonly unknown[]) => pool.query(sql, params === undefined ? undefined : [...params]) };
 
@@ -87,10 +88,11 @@ function main(): void {
 
   server.listen(config.port, () => {
     console.log(`backoffice up: read-only console listening on :${config.port} (dist ${distDir})`);
-    // Warm the Langfuse cost cache (a cold read is ~15-20s over the US region);
-    // best-effort so the operator's first Costs view is instant. Never fatal.
-    void cost.getCosts().catch((err: unknown) => {
-      console.error(`backoffice: cost warm-up skipped — ${err instanceof Error ? err.message : String(err)}`);
+    // Warm the shared read once — that covers BOTH Costs and Logs, where the
+    // old warm-up only ever primed Costs and left Logs to pay a cold fetch.
+    // Best-effort; never fatal.
+    void observations.recent().catch((err: unknown) => {
+      console.error(`backoffice: observation warm-up skipped — ${err instanceof Error ? err.message : String(err)}`);
     });
   });
 
