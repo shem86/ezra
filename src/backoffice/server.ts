@@ -43,12 +43,13 @@ const SESSION_MAX_AGE_SECONDS = 2592000; // 30 days
 /** Build the `set-cookie` value for the session. `token: ''` with `maxAge: 0`
  *  clears it.
  *
- *  `Secure` is conditional on the request arriving over HTTPS because both
- *  access paths are real: `tailscale serve` terminates TLS and forwards with
- *  `x-forwarded-proto: https`, but the raw container port is also reachable over
- *  the tailnet as plain http. Setting `Secure` unconditionally would make the
- *  browser silently drop the cookie on that second path — sign-in would appear
- *  to succeed and then not stick. */
+ *  `Secure` is conditional on the request arriving over HTTPS, which in
+ *  production means always: `tailscale serve` terminates TLS and forwards
+ *  `x-forwarded-proto: https`, and the container port is published to loopback
+ *  only (`docker-compose.prod.yml`), so no plaintext path to it exists. The
+ *  conditional is for local dev, where the vite dev server proxies `/api` over a
+ *  plain `http://localhost` origin — one most browsers treat as trustworthy, but
+ *  not consistently enough to bet a silently-dropped cookie on. */
 function sessionCookie(req: IncomingMessage, token: string, maxAgeSeconds: number): string {
   const proto = req.headers['x-forwarded-proto'];
   const scheme = (typeof proto === 'string' ? proto.split(',')[0]!.trim() : '').toLowerCase();

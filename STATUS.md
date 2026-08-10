@@ -278,8 +278,10 @@ be a guess, and those still lock out after 8); a presented token now outranks a
 stored cookie in `extractToken`, so a good token is compared instead of being
 shadowed by the stale one; and `429` joins `401` in routing to the form, which
 says the console is healthy. Also hardened while in there: `Secure` on the cookie
-when the request arrives over HTTPS (conditional — the raw container port is
-plain http over the tailnet), and `X-Frame-Options: DENY` +
+when the request arrives over HTTPS — which in prod is always, since
+`tailscale serve` forwards `x-forwarded-proto: https` and the container port is
+loopback-only; the conditional exists for the plain `http://localhost` origin the
+vite dev server proxies through — and `X-Frame-Options: DENY` +
 `frame-ancestors 'none'`, since a public page now renders a credential form.
 
 Verified end-to-end in a real browser against the built server + built SPA
