@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { parseWaVersion, type WaVersion } from '../transport/wa-version.js';
 
 // The ONLY module allowed to read environment/secrets (SPEC src/ops contract).
 // Everything else receives a Config through its deps object — never process.env.
@@ -25,6 +26,23 @@ const envSchema = z.object({
   ALERT_CHANNEL_CHAT_ID: z.string().min(1, 'required — Telegram chat id the alerts go to'),
   DEADMAN_PING_URL: z.url('must be a URL — external dead-man check endpoint'),
   WA_SESSION_DIR: z.string().min(1).default('.wa-session'),
+  // The WhatsApp Web protocol version the client announces (ADR-0006). WhatsApp
+  // enforces it server-side and retires old builds, so this is NOT cosmetic:
+  // an obsolete value is refused with a 405 and the socket never opens. The
+  // default IS the production pin — it lives in git so it is reviewable and
+  // deterministic, rather than being resolved from the network at connect time
+  // (which is how it silently froze and caused the 2026-07-28 outage).
+  WA_CLIENT_VERSION: z
+    .string()
+    .default('2.3000.1043857760')
+    .transform((value, ctx) => {
+      const parsed = parseWaVersion(value);
+      if (!parsed) {
+        ctx.addIssue({ code: 'custom', message: 'must be a dotted triple, e.g. 2.3000.1043857760' });
+        return z.NEVER;
+      }
+      return parsed;
+    }),
   // Open Q1 (resolved at T34): how long a parked confirm-before action waits
   // for approval. Written into expires_at at park time; T37's sweep consumes it.
   APPROVAL_TTL_HOURS: z.coerce.number().positive().default(12),
@@ -93,6 +111,8 @@ export interface Config {
   readonly alertChannelChatId: string;
   readonly deadmanPingUrl: string;
   readonly waSessionDir: string;
+  /** WhatsApp Web protocol version to announce (ADR-0006). */
+  readonly waClientVersion: WaVersion;
   readonly approvalTtlHours: number;
   readonly googleServiceAccount: { readonly clientEmail: string; readonly privateKey: string };
   readonly calendarIds: { readonly husband: string; readonly wife: string };
@@ -107,6 +127,7 @@ function formatIssues(issues: Array<{ path: PropertyKey[]; message: string }>): 
 // a false coupling.
 export interface TransportOpsConfig {
   readonly waSessionDir: string;
+  readonly waClientVersion: WaVersion;
   readonly alertChannelToken: string;
   readonly alertChannelChatId: string;
   readonly deadmanPingUrl: string;
@@ -118,6 +139,7 @@ export function loadTransportOpsConfig(
   const parsed = envSchema
     .pick({
       WA_SESSION_DIR: true,
+      WA_CLIENT_VERSION: true,
       ALERT_CHANNEL_TOKEN: true,
       ALERT_CHANNEL_CHAT_ID: true,
       DEADMAN_PING_URL: true,
@@ -128,6 +150,7 @@ export function loadTransportOpsConfig(
   }
   return {
     waSessionDir: parsed.data.WA_SESSION_DIR,
+    waClientVersion: parsed.data.WA_CLIENT_VERSION,
     alertChannelToken: parsed.data.ALERT_CHANNEL_TOKEN,
     alertChannelChatId: parsed.data.ALERT_CHANNEL_CHAT_ID,
     deadmanPingUrl: parsed.data.DEADMAN_PING_URL,
@@ -285,6 +308,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     alertChannelChatId: parsed.data.ALERT_CHANNEL_CHAT_ID,
     deadmanPingUrl: parsed.data.DEADMAN_PING_URL,
     waSessionDir: parsed.data.WA_SESSION_DIR,
+    waClientVersion: parsed.data.WA_CLIENT_VERSION,
     approvalTtlHours: parsed.data.APPROVAL_TTL_HOURS,
     googleServiceAccount: parsed.data.GOOGLE_SA_KEY_B64,
     calendarIds: {

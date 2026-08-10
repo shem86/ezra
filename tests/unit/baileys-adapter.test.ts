@@ -4,6 +4,11 @@ import {
   type DisconnectInfo,
   type WaSocketLike,
 } from '../../src/transport/baileys.ts';
+import {
+  createWaVersionSource,
+  type WaVersion,
+  type WaVersionSource,
+} from '../../src/transport/wa-version.ts';
 import type { SessionStore } from '../../src/transport/session-store.ts';
 import type { InboundMessage, TransportState } from '../../src/transport/types.ts';
 
@@ -47,18 +52,22 @@ function flush(): Promise<void> {
 }
 
 /** Builds a transport whose createSocket hands out fresh fake sockets. */
-function harness(overrides: { maxAttempts?: number } = {}) {
+function harness(overrides: { maxAttempts?: number; versionSource?: WaVersionSource } = {}) {
   const sockets: FakeSocket[] = [];
   const states: TransportState[] = [];
   const messages: InboundMessage[] = [];
   const sleeps: number[] = [];
   const disconnects: DisconnectInfo[] = [];
+  /** The version handed to each socket, in creation order. */
+  const versions: Array<WaVersion | undefined> = [];
   const transport = createBaileysTransport({
     sessionStore: fakeSessionStore(),
     onDisconnect: (info) => disconnects.push(info),
-    createSocket: () => {
+    ...(overrides.versionSource ? { versionSource: overrides.versionSource } : {}),
+    createSocket: (_auth, version) => {
       const s = fakeSocket();
       sockets.push(s);
+      versions.push(version);
       return s;
     },
     sleep: async (ms: number) => {
@@ -76,7 +85,7 @@ function harness(overrides: { maxAttempts?: number } = {}) {
   });
   transport.onStateChange((s) => states.push(s));
   transport.onMessage((m) => messages.push(m));
-  return { transport, sockets, states, messages, sleeps, disconnects };
+  return { transport, sockets, states, messages, sleeps, disconnects, versions };
 }
 
 async function connectOpen(h: ReturnType<typeof harness>): Promise<void> {
@@ -336,6 +345,149 @@ describe('baileys adapter: disconnect reasons', () => {
     await flush();
 
     expect(h.disconnects).toEqual([]);
+  });
+});
+
+// 2026-07-28 outage. WhatsApp enforces the client version server-side and
+// answers an obsolete one with 405. Ours had silently frozen at the Baileys
+// bundled fallback (the upstream probe failed behind the egress allowlist
+// without throwing), so the adapter burned its whole retry budget against a
+// rejection that could never clear, then went terminally 'closed' — deaf for
+// 5.7 days. The pin makes the version explicit; falling forward makes a
+// deprecation self-heal instead of waiting for a human.
+describe('baileys adapter: WhatsApp client version', () => {
+  const PINNED: WaVersion = [2, 3000, 1043857760];
+  const NEWER: WaVersion = [2, 3000, 1050000000];
+
+  /** Lets the fall-forward probe + reconnect chain settle. */
+  async function settle(): Promise<void> {
+    await flush();
+    await flush();
+  }
+
+  it('hands the pinned version to every socket it creates', async () => {
+    const source = createWaVersionSource({ pinned: PINNED, fetchUpstream: async () => null });
+    const h = harness({ versionSource: source });
+    await connectOpen(h);
+    expect(h.versions).toEqual([PINNED]);
+  });
+
+  it('passes no version when no source is configured (unchanged default)', async () => {
+    const h = harness();
+    await connectOpen(h);
+    expect(h.versions).toEqual([undefined]);
+  });
+
+  it('falls forward to the upstream version on 405 and reconnects with it', async () => {
+    const source = createWaVersionSource({ pinned: PINNED, fetchUpstream: async () => NEWER });
+    const h = harness({ versionSource: source });
+    await connectOpen(h);
+
+    h.sockets[0]!.emit('connection.update', {
+      connection: 'close',
+      lastDisconnect: { error: { output: { statusCode: 405 } } },
+    });
+    await settle();
+
+    expect(h.sockets).toHaveLength(2);
+    expect(h.versions).toEqual([PINNED, NEWER]);
+    // A newly adopted version is a genuinely different attempt, not a repeat —
+    // it reconnects at once rather than serving out the backoff.
+    expect(h.sleeps).toEqual([]);
+
+    h.sockets[1]!.emit('connection.update', { connection: 'open' });
+    await flush();
+    expect(h.states.at(-1)).toBe('open');
+  });
+
+  it('reports 405 as its own action so the log says why the socket dropped', async () => {
+    const source = createWaVersionSource({ pinned: PINNED, fetchUpstream: async () => NEWER });
+    const h = harness({ versionSource: source });
+    await connectOpen(h);
+
+    h.sockets[0]!.emit('connection.update', {
+      connection: 'close',
+      lastDisconnect: { error: { output: { statusCode: 405 } } },
+    });
+    await settle();
+
+    expect(h.disconnects[0]).toMatchObject({ statusCode: 405, action: 'version-rejected' });
+  });
+
+  it('a fall-forward resets the retry budget — the new version gets a full one', async () => {
+    const versions = [NEWER, PINNED, NEWER];
+    let i = 0;
+    const source = createWaVersionSource({
+      pinned: PINNED,
+      fetchUpstream: async () => versions[i++] ?? null,
+    });
+    const h = harness({ versionSource: source, maxAttempts: 2 });
+    await connectOpen(h);
+
+    // Three consecutive 405s, each yielding a genuinely different version:
+    // with a maxAttempts of 2 this would have given up by now if the budget
+    // were shared with the ordinary retry path.
+    for (let n = 0; n < 3; n++) {
+      h.sockets.at(-1)!.emit('connection.update', {
+        connection: 'close',
+        lastDisconnect: { error: { output: { statusCode: 405 } } },
+      });
+      await settle();
+    }
+
+    expect(h.sockets).toHaveLength(4);
+    expect(h.states).not.toContain('closed');
+    expect(h.disconnects.every((d) => !d.gaveUp)).toBe(true);
+  });
+
+  it('falls back to bounded retry when there is no newer version to adopt', async () => {
+    // Upstream agrees with the pin, so the rejection is not something we can
+    // fix by moving the version. Retrying the same one is bounded, not endless.
+    const source = createWaVersionSource({ pinned: PINNED, fetchUpstream: async () => PINNED });
+    const h = harness({ versionSource: source, maxAttempts: 2 });
+    await connectOpen(h);
+
+    h.sockets[0]!.emit('connection.update', {
+      connection: 'close',
+      lastDisconnect: { error: { output: { statusCode: 405 } } },
+    });
+    await settle();
+
+    expect(h.sockets).toHaveLength(2);
+    expect(h.versions).toEqual([PINNED, PINNED]);
+    expect(h.sleeps).toEqual([100]); // served the backoff — it IS a repeat
+  });
+
+  it('still gives up on a 405 that no version change can fix', async () => {
+    const source = createWaVersionSource({ pinned: PINNED, fetchUpstream: async () => PINNED });
+    const h = harness({ versionSource: source, maxAttempts: 2 });
+    await connectOpen(h);
+
+    for (let n = 0; n < 3; n++) {
+      h.sockets.at(-1)!.emit('connection.update', {
+        connection: 'close',
+        lastDisconnect: { error: { output: { statusCode: 405 } } },
+      });
+      await settle();
+    }
+
+    expect(h.states.at(-1)).toBe('closed');
+    expect(h.disconnects.at(-1)).toMatchObject({ gaveUp: true, action: 'version-rejected' });
+  });
+
+  it('survives a 405 with no version source configured at all', async () => {
+    const h = harness({ maxAttempts: 2 });
+    await connectOpen(h);
+
+    h.sockets[0]!.emit('connection.update', {
+      connection: 'close',
+      lastDisconnect: { error: { output: { statusCode: 405 } } },
+    });
+    await settle();
+
+    // Nothing to fall forward to, so it degrades to the ordinary retry path.
+    expect(h.sockets).toHaveLength(2);
+    expect(h.sleeps).toEqual([100]);
   });
 });
 

@@ -39,9 +39,10 @@ history:
 ## Open
 
 ### 0. 🔴 PRODUCTION DOWN — WhatsApp socket dead since 2026-07-28
-**Status:** open, **P0, unresolved at time of writing** · **verified**
-2026-08-05T16:09Z by `docker logs` on the host + a Postgres query, not by
-inference.
+**Status:** open, **P0** — root cause **fixed on a branch, not yet deployed**
+(ADR-0006) · **verified** 2026-08-05T16:09Z by `docker logs` on the host + a
+Postgres query, not by inference. Fix verified green the same day
+(`pnpm lint && pnpm build && pnpm test`, 737 tests incl. integration).
 
 **ezra has been unable to send or receive WhatsApp for 7 days 18 hours.** The
 container is `running` with 0 restarts and the dead-man ping is green — the
@@ -53,18 +54,43 @@ top out at **2026-07-18**, with zero unprocessed rows.
 Three separate defects had to line up, each filed in
 [`docs/known-issues.md`](docs/known-issues.md):
 
-| | Defect | Role |
-|---|---|---|
-| **cause** | `WA-VERSION-001` | egress blocks Baileys' version probe → frozen WA client version → WhatsApp rejects it (`405`) |
-| **amplifier** | `SOCKET-DEAD-001` | adapter gives up permanently and never re-arms; process stays alive so Docker never restarts it |
-| **blind spot** | `HEALTH-GRACE-001` | health monitor alerts **once** and latches; dead-man proves liveness, not connectivity |
+| | Defect | Role | State |
+|---|---|---|---|
+| **cause** | `WA-VERSION-001` | egress blocks Baileys' version probe → frozen WA client version → WhatsApp rejects it (`405`) | **fixed on branch** (ADR-0006), awaiting deploy |
+| **amplifier** | `SOCKET-DEAD-001` | adapter gives up permanently and never re-arms; process stays alive so Docker never restarts it | **open by decision** — see below |
+| **blind spot** | `HEALTH-GRACE-001` | health monitor alerts **once** and latches; dead-man proves liveness, not connectivity | **open** |
 
-**Immediate recovery** (operator action, **not yet taken**): a container restart
-alone will *not* hold — the client version is still frozen and WhatsApp is still
-rejecting it, so it will re-fail within minutes. Recovery requires fixing
-`WA-VERSION-001` first (allowlist the probe host, or bump the `baileys` pin),
-then restarting. Re-pairing should **not** be needed — `401` never appeared; the
-drops were `405`/`408`/`428`/`503`.
+**No data loss.** 13,825 workflows SUCCESS, 0 errored, 0 stranded, 0 overdue
+reminders, 0 pending actions; the scheduled sweeps ran throughout. The outage
+was deafness, not corruption.
+
+**Recovery** (operator action, **not yet taken**): a container restart alone
+will *not* hold — the frozen version is still rejected. `WA-VERSION-001` must
+land first. That fix is built and green on
+`worktree-wa-version-pin-fallforward`: it pins `WA_CLIENT_VERSION`
+(`2.3000.1043857760`) so the connect path never probes the network, classifies
+`405` as its own `version-rejected` action that falls forward to the current
+upstream version and reconnects, adds a daily out-of-band staleness check with
+edge-triggered alerts, and allowlists `raw.githubusercontent.com` under a new
+`wa-version` category. Baileys stays at rc13 — the whole rc13→rc14 delta is
+Android support, inert for our `Desktop` browser config. Re-pairing should
+**not** be needed — `401` never appeared; the drops were `405`/`408`/`428`/`503`.
+
+**Next action:** merge, then `pnpm release vX.Y.Z` off green `main`. The host
+firewall also needs to re-render its allowlist for the new host
+(`infra/egress/allowlist.generated.txt` is regenerated on that branch) —
+without it the staleness check stays blind, though the pin alone restores
+service.
+
+**Why `SOCKET-DEAD-001` is not fixed alongside it.** Both fix directions that
+entry proposes were considered and rejected on the evidence (ADR-0006,
+"Alternatives rejected"): retrying forever would not have helped, because a
+`405` is a permanent rejection rather than a transient failure — it converts a
+dead socket into a dead socket that also generates load; and restarting the
+container on give-up would have crash-looped through this outage, since the
+rejection follows the version and not the process. The give-up remains
+deliberate. What was missing was a socket that could *change* what it announces,
+which is what ADR-0006 adds.
 
 **Diagnosed 2026-08-03, still down 2026-08-05.** The root cause was worked out
 two days before this entry was written; it just never landed in the repo, so

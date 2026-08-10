@@ -112,6 +112,16 @@ describe('egress allowlist contents (T16)', () => {
     // literal scan below can never see, so this name-check is the only guard.
     expect(isHostAllowed('whatsapp-cdn-shv-01-iad3.fbcdn.net')).toBe(true);
   });
+
+  it('allows the WhatsApp client-version probe host (2026-07-28 outage, ADR-0006)', () => {
+    // Baileys resolves the current WhatsApp Web version from a JSON file in its
+    // GitHub repo. That host was never allowlisted, so once the firewall
+    // stopped failing open (2026-06-27) the probe timed out — and because it
+    // RESOLVES with an error field instead of throwing, the version silently
+    // froze at the bundled fallback until WhatsApp rejected it with a 405.
+    // Reached via Baileys internals, so the src literal scan cannot see it.
+    expect(isHostAllowed('raw.githubusercontent.com')).toBe(true);
+  });
 });
 
 describe('allowlist covers every outbound host literal in src (anti-drift)', () => {

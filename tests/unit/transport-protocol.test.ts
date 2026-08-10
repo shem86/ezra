@@ -21,6 +21,14 @@ describe('classifyDisconnect', () => {
     expect(classifyDisconnect(515)).toBe('restart');
   });
 
+  // 2026-07-28 outage: WhatsApp answers an obsolete client version with
+  // <failure reason="405">. Retrying the SAME version can never succeed, so
+  // 405 gets its own action — the adapter falls forward to a newer version
+  // instead of burning the retry budget against a permanent rejection.
+  it('treats 405 (version rejected) as its own action, not a generic retry', () => {
+    expect(classifyDisconnect(405)).toBe('version-rejected');
+  });
+
   it('treats other codes and unknown errors as retryable', () => {
     expect(classifyDisconnect(408)).toBe('retry');
     expect(classifyDisconnect(500)).toBe('retry');

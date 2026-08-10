@@ -67,7 +67,9 @@ import { makeVoyageEmbedder } from './memory/embedder.js';
 import { makeV1ToolRegistry } from './tools/index.js';
 import { makeGoogleCalendarClient } from './tools/calendar-client.js';
 import { makeRunTool, toToolSet } from './tools/registry.js';
-import { createBaileysTransport } from './transport/baileys.js';
+import { createBaileysTransport, fetchUpstreamWaVersion } from './transport/baileys.js';
+import { createWaVersionSource, formatWaVersion } from './transport/wa-version.js';
+import { createWaVersionWatch } from './ops/wa-version-watch.js';
 import { createSessionStore } from './transport/session-store.js';
 import { computeHumanSendDelay } from './transport/protocol.js';
 import {
@@ -225,9 +227,24 @@ async function main(): Promise<void> {
     { name: 'handleTurn' },
   );
 
+  // --- WhatsApp client version (ADR-0006) -----------------------------------
+  // The pin is authoritative; upstream is consulted out of band to report
+  // staleness, and a 405 rejection falls forward automatically so a
+  // deprecation self-heals instead of waiting for the builder to be reachable.
+  const versionWatch = createWaVersionWatch({
+    alert: (text) => alertChannel.sendAlert(text),
+    log: (line) => console.warn(line),
+  });
+  const waVersionSource = createWaVersionSource({
+    pinned: config.waClientVersion,
+    fetchUpstream: fetchUpstreamWaVersion,
+    onEvent: versionWatch.onEvent,
+  });
+
   // --- Transport (declared early: the reply step below closes over it) ------
   const transport = createBaileysTransport({
     sessionStore: createSessionStore({ dir: config.waSessionDir }),
+    versionSource: waVersionSource,
     // The [socket] transitions below say the socket went away; they never say
     // why, so a multi-minute 'connecting' stretch (2 in prod over 3.5 days,
     // 4.1 and 5.5 min — past the 3-min alert grace) read as an unexplained
@@ -482,8 +499,12 @@ async function main(): Promise<void> {
   await replyDb.connect();
   await transport.connect();
   deadman.start();
+  // After connect: a staleness probe must never sit between the process
+  // starting and the socket opening (ADR-0006 — the version probe was on the
+  // connect path once, and that is what made a firewall drop an outage).
+  versionWatch.startPolling(() => waVersionSource.checkUpstream());
   console.log(
-    `ezra up: serving ${config.householdConversations.length} conversation(s), sweeps scheduled, dead-man pinging`,
+    `ezra up: serving ${config.householdConversations.length} conversation(s), sweeps scheduled, dead-man pinging, wa-version ${formatWaVersion(waVersionSource.current())}`,
   );
 
   // --- Graceful shutdown ------------------------------------------------------
@@ -493,6 +514,7 @@ async function main(): Promise<void> {
     shuttingDown = true;
     console.log(`${signal} received — shutting down`);
     deadman.stop();
+    versionWatch.stop();
     health.stop();
     await transport.disconnect().catch(() => {});
     await replyDb.end().catch(() => {});

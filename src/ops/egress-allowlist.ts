@@ -21,6 +21,7 @@ export const egressCategories = [
   'alerts',
   'deadman',
   'whatsapp',
+  'wa-version',
   'backup',
   'tailscale',
 ] as const;
@@ -111,6 +112,24 @@ export const egressAllowlist: readonly EgressDestination[] = [
     subdomains: true,
     category: 'whatsapp',
     reason: 'WhatsApp media CDN (whatsapp-cdn-*.fbcdn.net) — image/video downloads (2026-06-17)',
+  },
+  // --- WhatsApp client-version probe (ADR-0006) -----------------------------
+  {
+    // Baileys resolves the current WhatsApp Web protocol version from a JSON
+    // file in its GitHub repo. This host was never listed, so once the firewall
+    // stopped failing open (2026-06-27) the probe timed out — and because it
+    // resolves with an error field instead of throwing, the version silently
+    // froze at the bundled fallback until WhatsApp refused it with a 405
+    // (2026-07-28 outage, 5.7 days deaf).
+    //
+    // It is deliberately NOT on the connect path any more: the pin in config is
+    // authoritative, and this host is dialled only for the out-of-band
+    // staleness check and the fall-forward after a rejection. Reached through
+    // baileys internals, so the src-literal drift scan cannot see it — the
+    // named test in egress-allowlist.test.ts is the guard.
+    host: 'raw.githubusercontent.com',
+    category: 'wa-version',
+    reason: 'Baileys WhatsApp-Web version probe — staleness check + fall-forward (ADR-0006)',
   },
   // --- Backups (T17 — AWS S3, same account/region as the EC2 host) ----------
   // Both the path-style regional endpoint and bucket virtual-host

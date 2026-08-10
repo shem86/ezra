@@ -29,6 +29,11 @@ import {
   type DisconnectAction,
   type ReconnectPolicy,
 } from './protocol.js';
+import {
+  interpretProbeResult,
+  type WaVersion,
+  type WaVersionSource,
+} from './wa-version.js';
 
 // Real Baileys adapter for the Transport seam. The socket factory is
 // injectable so the full lifecycle (reconnects, echo suppression, timeouts)
@@ -94,8 +99,17 @@ export interface BaileysTransportDeps {
    * caller decides where this goes, mirroring deadman's onPingError.
    */
   onDisconnect?: (info: DisconnectInfo) => void;
+  /**
+   * Supplies the WhatsApp Web version each socket announces, and decides what
+   * to do when WhatsApp rejects it (ADR-0006). Absent ⇒ no version is passed
+   * and baileys uses its bundled default — the dev/stub path.
+   */
+  versionSource?: WaVersionSource;
   /** Test seams; default to the real socket, timer, and Math.random. */
-  createSocket?: (auth: AuthenticationState) => Promise<WaSocketLike> | WaSocketLike;
+  createSocket?: (
+    auth: AuthenticationState,
+    version?: WaVersion,
+  ) => Promise<WaSocketLike> | WaSocketLike;
   sleep?: (ms: number) => Promise<void>;
   random?: () => number;
 }
@@ -121,22 +135,36 @@ const silentLogger: SilentLogger = {
   error: () => {},
 };
 
-async function defaultCreateSocket(auth: AuthenticationState): Promise<WaSocketLike> {
-  // Static fallback if the version probe fails: baileys' bundled default.
-  // (Egress note in docs/dep-reviews/baileys-7.0.0-rc13.md; revisit at T16.)
-  let version: [number, number, number] | undefined;
+/**
+ * Resolves the current WhatsApp Web version from upstream, or null when the
+ * probe did not genuinely reach it.
+ *
+ * `fetchLatestBaileysVersion()` resolves with `{version: <bundled fallback>,
+ * isLatest: false, error}` on failure instead of throwing, so a bare try/catch
+ * silently accepts a stale version — the 2026-07-28 outage (ADR-0006).
+ * interpretProbeResult is what makes the failure visible.
+ */
+export async function fetchUpstreamWaVersion(): Promise<WaVersion | null> {
   try {
-    ({ version } = await fetchLatestBaileysVersion());
+    return interpretProbeResult(await fetchLatestBaileysVersion());
   } catch {
-    version = undefined;
+    return null;
   }
+}
+
+async function defaultCreateSocket(
+  auth: AuthenticationState,
+  version?: WaVersion,
+): Promise<WaSocketLike> {
+  // No version means no source was configured; baileys then falls back to its
+  // own bundled default. Production always passes the config pin (ADR-0006).
   const logger = silentLogger as never;
   return makeWASocket({
     auth: {
       creds: auth.creds,
       keys: makeCacheableSignalKeyStore(auth.keys, logger),
     },
-    ...(version ? { version } : {}),
+    ...(version ? { version: [...version] as [number, number, number] } : {}),
     logger,
     browser: ['hh-assistant', 'Desktop', '1.0.0'],
     syncFullHistory: false,
@@ -234,27 +262,46 @@ export function createBaileysTransport(deps: BaileysTransportDeps): Transport {
         report({ statusCode, action, attempt: 0, retryDelayMs: null, gaveUp: false });
         void startSocket();
         return;
-      case 'retry': {
-        retryAttempts += 1;
-        if (retryAttempts > policy.maxAttempts) {
-          report({
-            statusCode,
-            action,
-            attempt: retryAttempts,
-            retryDelayMs: null,
-            gaveUp: true,
-          });
-          setState('closed');
-          return;
-        }
-        const delay = computeReconnectDelay(retryAttempts - 1, policy, random);
-        report({ statusCode, action, attempt: retryAttempts, retryDelayMs: delay, gaveUp: false });
-        void sleep(delay).then(() => {
-          if (!intentionalClose) return startSocket();
-        });
+      case 'version-rejected':
+        // ADR-0006. WhatsApp refused the client version we announced, so the
+        // one thing that cannot help is announcing it again — the ordinary
+        // backoff would burn the whole budget against a permanent rejection
+        // (that is precisely the 2026-07-28 outage). Try to move to a
+        // different version first; only if there is none to move to does this
+        // degrade to the bounded retry path.
+        void (async () => {
+          const adopted = (await deps.versionSource?.fallForward()) ?? false;
+          if (intentionalClose) return;
+          if (adopted) {
+            // A different version is a genuinely new attempt, not a repeat:
+            // it earns a fresh budget and reconnects without serving backoff.
+            retryAttempts = 0;
+            report({ statusCode, action, attempt: 0, retryDelayMs: 0, gaveUp: false });
+            await startSocket();
+            return;
+          }
+          scheduleRetry(statusCode, action);
+        })();
         return;
-      }
+      case 'retry':
+        scheduleRetry(statusCode, action);
+        return;
     }
+  }
+
+  /** Bounded exponential-backoff reconnect; gives up when the budget is spent. */
+  function scheduleRetry(statusCode: number | undefined, action: DisconnectAction): void {
+    retryAttempts += 1;
+    if (retryAttempts > policy.maxAttempts) {
+      report({ statusCode, action, attempt: retryAttempts, retryDelayMs: null, gaveUp: true });
+      setState('closed');
+      return;
+    }
+    const delay = computeReconnectDelay(retryAttempts - 1, policy, random);
+    report({ statusCode, action, attempt: retryAttempts, retryDelayMs: delay, gaveUp: false });
+    void sleep(delay).then(() => {
+      if (!intentionalClose) return startSocket();
+    });
   }
 
   function handleUpsert(event: UpsertLike): void {
@@ -289,7 +336,7 @@ export function createBaileysTransport(deps: BaileysTransportDeps): Transport {
   async function startSocket(): Promise<void> {
     setState('connecting');
     const { state: authState, saveCreds } = await deps.sessionStore.loadAuthState();
-    const socket = await createSocket(authState);
+    const socket = await createSocket(authState, deps.versionSource?.current());
     sock = socket;
     socket.ev.on('creds.update', () => {
       void saveCreds();
