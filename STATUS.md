@@ -13,8 +13,12 @@ still carry their 2026-07-21 dates.
 `v2.3.0`, verified live on the host. Item 7 (backoffice Langfuse reads — both
 data screens measured broken on prod) **resolved** and live on `v2.3.3`,
 verified on the host after the deploy. Added item 8, which corrects a
-`/api/status` timing claim made under item 7. Items 1–5 still carry their
-2026-07-21 dates and were not re-verified on this pass either.
+`/api/status` timing claim made under item 7 — and was itself refined after
+`v2.3.4`, when the symptom stopped reproducing. `v2.3.4` shipped the
+self-service sign-in, the auth-lockout fix and the doc-ref checker; auth
+verified live on the host (valid token 200, credential-less 401 that does not
+lock out, SPA shell now serving HTML rather than raw JSON). Items 1–5 still
+carry their 2026-07-21 dates and were not re-verified on this pass either.
 
 This is the **single source of truth for current state**. Everything else is
 history:
@@ -383,14 +387,31 @@ the right shape. Also unaddressed: 97,540 of the 97,758 journal rows are
 `reminderSweep`/`expirySweep` records versus 54 real turns — harmless at
 today's 35ms, worth a retention policy before it isn't.
 
-### 8. `/api/status` costs ~10.5s on the first two calls after a restart
-**Status:** open, unexplained · **verified** 2026-08-10T19:0xZ on the host,
-immediately after the `v2.3.3` deploy.
+### 8. `/api/status` showed a ~10.5s cold cost twice — cause unknown, no longer reproducing
+**Status:** open, unexplained, **not currently reproducible** · **verified**
+2026-08-10T19:0xZ (observed) and again after the `v2.3.4` deploy (did *not*
+recur).
 
-Called alone against a freshly started container, past the 30s cache each time:
-**10.500s, 10.496s, then 0.464s**. From the third call on it stays at ~0.45s
-until the next restart. It is *not* contention from other endpoints — a
-`/api/logs` call immediately before a status call left it at 0.452s.
+Observed twice, on two different container generations. Called alone against a
+freshly started container, past the 30s cache each time: **10.500s, 10.496s,
+then 0.464s**, staying ~0.45s thereafter. It was *not* contention from other
+endpoints — a `/api/logs` call immediately before a status call left it at
+0.452s.
+
+**It then failed to recur after the very next deploy.** On the fresh `v2.3.4`
+container the *first* status call was 0.52s and later calls 0.42s. `v2.3.4`
+does not touch the status path — `runProbes` in `src/backoffice/probes.ts`, the
+`status` closure that `main` composes in `src/backoffice/cli.ts`, and
+`makeGoogleCalendarClient` are all unchanged between the two releases — so
+whatever changed is **not in this repo's code**, and "the first two calls after
+a container restart" is the wrong frame. Container-scoped warming is ruled out
+by that alone.
+
+The better-fitting suspect is something **host-level that stays warm across
+container restarts**: the nftables egress allowlist IP set or DNS. That failure
+mode has bitten this host before (`WA-VERSION-001`, where an unallowlisted host
+silently blocked an outbound call), and it would explain a fixed multi-second
+penalty on first contact that never returns once the set is warm. Unproven.
 
 This corrects a claim first recorded under item 7. The initial reading that day
 (10.480s, then 10.479s) was explained away as contention behind a heavy
@@ -400,20 +421,20 @@ had started 15 minutes earlier, and the pattern reproduces exactly across
 restarts. The lesson is the ordering — every fast sample was taken *after* two
 slow ones had already warmed whatever this is.
 
-Not root-caused. The per-service latencies rule out the obvious suspects, but
-only on the *fast* path — every capture so far comes from a warm call
-(Postgres 19ms, Anthropic 292ms, Voyage 103ms, Langfuse 90ms, Google Calendar
-447ms, sum well under one second). Nobody has yet captured the service
-breakdown *during* a slow call, which is the measurement that would settle it;
-doing so means restarting the console and catching one of the first two
-requests. Suspicion falls on a cold external path — the Google service-account
-OAuth exchange and the nftables egress allowlist are both plausible and both
-unproven.
+Not root-caused, and now hard to root-cause: every per-service capture comes
+from the *fast* path (Postgres 19ms, Anthropic 292ms, Voyage 103ms, Langfuse
+90ms, Google Calendar 447ms — well under a second in total). The measurement
+that would settle it is the service breakdown *during* a slow call, and with
+the symptom no longer reproducing on demand there is currently no way to take
+it. If it returns, capture `/api/status`'s own JSON on the slow call before
+anything else — the per-service `latency` fields name the culprit directly.
 
 Impact is small and bounded: the response is cached 30s, the screen is
-otherwise 0.45s, and this predates `v2.3.3` (the same 10.48s pair was measured
-on `v2.3.1` before any of this work). It is filed because it is a *known
-unknown* with a precise reproduction, not because it is urgent.
+otherwise ~0.45s, and it predates all of this work (the same 10.48s pair was
+measured on `v2.3.1`). Filed as a *known unknown* with its evidence, not as
+something urgent — and deliberately left open rather than closed, because
+"stopped reproducing" is not the same as "fixed" and nothing in this repo
+explains why it stopped.
 
 ---
 
