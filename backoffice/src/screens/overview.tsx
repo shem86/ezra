@@ -3,7 +3,9 @@
 // (/api/status), recent turns (/api/logs). Read-only; Approve/Deny disabled.
 import type { ReactNode } from 'react';
 import { Icon, type IconName } from '../components/icon';
-import { Badge, BarChart, Card, Dot, SectionTitle } from '../components/primitives';
+import { Badge, Card, Dot, SectionTitle } from '../components/primitives';
+import { SpendChart } from '../charts/spend-chart';
+import { Sparkline } from '../charts/sparkline';
 import { sColor, tierTone } from '../components/status';
 import { api, ApiError, type ApiClient } from '../api/client';
 import { useAsync } from '../api/use-async';
@@ -44,6 +46,7 @@ function KpiTile({
   tone,
   icon,
   onClick,
+  spark,
 }: {
   label: string;
   value: ReactNode;
@@ -51,6 +54,8 @@ function KpiTile({
   tone?: 'amber';
   icon?: IconName;
   onClick?: () => void;
+  /** Only supplied where a real series exists — never a synthesised trend. */
+  spark?: { values: readonly number[]; ariaLabel: string };
 }): React.JSX.Element {
   return (
     <Card
@@ -79,6 +84,11 @@ function KpiTile({
         </span>
         {sub && <span style={{ fontSize: 12.5, color: tone === 'amber' ? 'var(--amber-ink)' : 'var(--muted)' }}>{sub}</span>}
       </div>
+      {spark && (
+        <div className="chart-host" style={{ marginTop: 2 }}>
+          <Sparkline values={spark.values} ariaLabel={spark.ariaLabel} height={30} />
+        </div>
+      )}
     </Card>
   );
 }
@@ -188,9 +198,11 @@ function SpendCard({ costs }: { costs: CostsResponse }): React.JSX.Element {
         <span>{pct}% of budget</span>
         <span style={{ fontFamily: 'var(--mono)' }}>{costs.cacheReadPct}% billed as cache reads</span>
       </div>
-      <div style={{ marginTop: 18 }}>
-        <BarChart data={costs.dailyCost} height={96} fmt={(v) => '$' + v.toFixed(3)} />
-        <div style={{ fontSize: 11, color: 'var(--muted-2)', marginTop: 6, textAlign: 'right' }}>daily · last 30 days (est.)</div>
+      <div style={{ marginTop: 18 }} className="chart-host">
+        <SpendChart dailyCost={costs.dailyCost} budgetUsd={costs.budgetUsd} height={124} />
+        <div style={{ fontSize: 11, color: 'var(--muted-2)', marginTop: 6, textAlign: 'right' }}>
+          daily · last {costs.dailyCost.length} days (est.)
+        </div>
       </div>
     </Card>
   );
@@ -273,8 +285,24 @@ export function OverviewScreen({ onOpen, client = api }: { onOpen: (r: Route) =>
 
   const parked = (pending ?? []).filter((p) => p['status'] === 'pending');
   const errCount = (logs?.turns ?? []).filter((t) => t.level === 'error').length;
-  const tiles: { label: string; value: ReactNode; sub?: ReactNode; tone?: 'amber'; icon?: IconName; go?: Route }[] = [
-    { label: 'Spend (MTD, est.)', value: costs ? '$' + costs.monthCostUsd.toFixed(2) : '—', ...(costs ? { sub: `of $${costs.budgetUsd}` } : {}), icon: 'costs' },
+  const tiles: {
+    label: string;
+    value: ReactNode;
+    sub?: ReactNode;
+    tone?: 'amber';
+    icon?: IconName;
+    go?: Route;
+    spark?: { values: readonly number[]; ariaLabel: string };
+  }[] = [
+    {
+      label: 'Spend (MTD, est.)',
+      value: costs ? '$' + costs.monthCostUsd.toFixed(2) : '—',
+      ...(costs ? { sub: `of $${costs.budgetUsd}` } : {}),
+      icon: 'costs',
+      // The only tile with a real series behind it; the other three have no
+      // history in the API, and a fabricated trend would be worse than none.
+      ...(costs ? { spark: { values: costs.dailyCost, ariaLabel: 'Daily estimated spend trend' } } : {}),
+    },
     { label: 'Turns today', value: status ? status.turnsToday : '—', ...(status ? { sub: `avg ${status.avgLatency}` } : {}), icon: 'flow' },
     { label: 'Pending approvals', value: pending ? parked.length : '—', sub: 'awaiting', tone: 'amber', icon: 'pause', go: 'database' },
     { label: 'Errors · recent', value: logs ? errCount : '—', sub: 'of last 60 turns', icon: 'alert' },
@@ -295,6 +323,7 @@ export function OverviewScreen({ onOpen, client = api }: { onOpen: (r: Route) =>
             {...(t.sub !== undefined ? { sub: t.sub } : {})}
             {...(t.tone !== undefined ? { tone: t.tone } : {})}
             {...(t.icon !== undefined ? { icon: t.icon } : {})}
+            {...(t.spark !== undefined ? { spark: t.spark } : {})}
             {...(t.go !== undefined ? { onClick: () => onOpen(t.go!) } : {})}
           />
         ))}

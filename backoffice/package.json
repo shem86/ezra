@@ -3,9 +3,20 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "pnpm": {
+    "peerDependencyRules": {
+      "//": "@tanstack/react-charts@0.9.0 declares react@^19 but only uses hooks stable in 18 (useCallback/useId/useLayoutEffect/useMemo/useRef/useState) plus createPortal. Verified by inspection AND enforced by src/charts/ezra-chart.test.tsx, which renders a real chart on the pinned React 18 — if that assumption ever breaks, the test fails rather than the browser.",
+      "allowedVersions": {
+        "@tanstack/react-charts>react": "18",
+        "@tanstack/react-charts>react-dom": "18"
+      }
+    }
+  },
   "description": "Read-only operations console for Ezra — isolated frontend sub-package (mirrors infra/pulumi: own deps/lockfile/tsconfig, kept out of the app's strict-TS/DBOS-lint scope).",
   "scripts": {
     "dev": "vite",
+    "dev:mock": "node scripts/mock-api.mjs --vite",
+    "mock-api": "node scripts/mock-api.mjs",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "lint": "eslint .",
@@ -13,6 +24,9 @@
     "ui:debug": "node scripts/ui-debug.mjs"
   },
   "dependencies": {
+    "@tanstack/charts": "0.9.0",
+    "@tanstack/react-charts": "0.9.0",
+    "d3-scale": "4.0.2",
     "react": "18.3.1",
     "react-dom": "18.3.1"
   },
@@ -20,6 +34,7 @@
     "@eslint/js": "10.0.1",
     "@testing-library/jest-dom": "6.9.1",
     "@testing-library/react": "16.3.2",
+    "@types/d3-scale": "4.0.9",
     "@types/react": "18.3.31",
     "@types/react-dom": "18.3.7",
     "@vitejs/plugin-react": "6.0.3",

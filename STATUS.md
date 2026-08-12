@@ -17,8 +17,10 @@ verified on the host after the deploy. Added item 8, which corrects a
 `v2.3.4`, when the symptom stopped reproducing. `v2.3.4` shipped the
 self-service sign-in, the auth-lockout fix and the doc-ref checker; auth
 verified live on the host (valid token 200, credential-less 401 that does not
-lock out, SPA shell now serving HTML rather than raw JSON). Items 1–5 still
-carry their 2026-07-21 dates and were not re-verified on this pass either.
+lock out, SPA shell now serving HTML rather than raw JSON). Added item 9 — the
+lookback and retention ceilings the new TanStack chart layer cannot reach from
+the client. Items 1–5 still carry their 2026-07-21 dates and were not
+re-verified on this pass either.
 
 This is the **single source of truth for current state**. Everything else is
 history:
@@ -435,6 +437,45 @@ measured on `v2.3.1`). Filed as a *known unknown* with its evidence, not as
 something urgent — and deliberately left open rather than closed, because
 "stopped reproducing" is not the same as "fixed" and nothing in this repo
 explains why it stopped.
+
+### 9. Backoffice charts — the two things the new chart layer can't reach yet
+**Status:** open · **verified** 2026-08-10 by reading `makeCostClient` in
+`src/backoffice/cost.ts` and `getLogs` in `src/backoffice/journal.ts` while
+porting the console's charts to TanStack Charts
+(`worktree-backoffice-tanstack-charts`; frontend `lint`/`build`/`test` green,
+52 tests after merging main).
+
+Distinct from item 7, and not in tension with it: that item was about the reads
+being **broken and slow** and is fixed. This one is about how far back they can
+*see* at all, which the v2 rewrite did not change — `makeCostClient` still
+builds the same fixed 30-slot series it did before.
+
+The chart layer landed and every hand-rolled widget is replaced, but two limits
+are in the **server**, not the charts, so they were deliberately left alone:
+
+| | Limit | Where |
+|---|---|---|
+| **lookback** | `/api/costs` takes no parameters and builds a fixed 30-slot daily series; `/api/logs` takes only `?limit` (≤200, always newest-first), so its level/search filters are client-side over a truncated window | `makeCostClient` · `getLogs` |
+| **retention** | every token/cost figure comes from Langfuse Cloud. **Confirm the plan**: Hobby keeps a 30-day access window, Core 90 days, Pro 3 years. On Hobby, 30 days is all the cost history that exists anywhere — no API change reaches further back | `makeCostClient` in `src/backoffice/cost.ts` |
+
+Journal-backed charts (turn volume, outcome, latency) have no such ceiling —
+`dbos.workflow_status` is local and complete — but they currently render only
+the fetched window because the endpoint can't be asked for more.
+
+The durable fix for cost history is small and was scoped but **not built**
+(schema changes are ask-first): `makeCallModel` in `src/agent/call-model.ts`
+already reads exact per-call usage (input / output / cache-read / cache-write)
+and hands it to `tracer.onModelUsage` in `src/main.ts` alone — nothing persists
+it. An append-only `model_usage` row written inside the turn's existing
+transaction would give unbounded history *and* retire the "estimated" label,
+since the caller knows the model name that Langfuse lacks (the gap BO-8
+recorded). `makeVoyageEmbedder` in `src/memory/embedder.ts` reports Voyage usage
+through the same shape of `onUsage` hook and is likewise dropped, so the Costs
+total under-reports by the whole embedding line.
+
+Also unbuilt for the same reason: the Status screen's uptime strip and probe
+latency trend need probe results persisted — `ServiceRow` carries latency and
+uptime as *strings*, and no history exists to chart.
 
 ---
 

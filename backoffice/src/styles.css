@@ -33,7 +33,31 @@
   --gap: 18px;
   --mono: 'JetBrains Mono', ui-monospace, monospace;
   font-family: 'Hanken Grotesk', system-ui, sans-serif;
+
+  /* Chart series colours — deliberately separate from the semantic tokens
+     above (see src/charts/palette.ts for why). Validated against --surface:
+     lightness band, chroma floor, CVD separation, normal-vision floor, and
+     >=3:1 contrast all pass. Assign by identity, never by rank. */
+  --chart-1: #0f74c5; /* fresh input */
+  --chart-2: #b38d00; /* cache write */
+  --chart-3: #94468f; /* output      */
+  --chart-4: #8c3d12; /* cache read  */
+
+  /* TanStack Charts reads its own chrome from these. Grid and axes stay
+     recessive so the data is the only thing with weight. */
+  --ts-chart-1: var(--chart-1);
+  --ts-chart-2: var(--chart-2);
+  --ts-chart-3: var(--chart-3);
+  --ts-chart-4: var(--chart-4);
+  --ts-chart-grid: var(--border);
+  --ts-chart-axis: var(--border-strong);
+  --ts-chart-label: var(--muted);
+  --ts-chart-focus-fill: var(--surface);
 }
+
+/* Charts inherit ink for anything the library draws with currentColor. */
+.chart-host { color: var(--muted); }
+.chart-host svg { display: block; overflow: visible; }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
@@ -136,6 +160,7 @@ table.grid.logs tbody tr.detail td { border-bottom: 2px solid var(--border); }
 .db-rail { position: sticky; top: 0; }
 .db-tablist { display: flex; flex-direction: column; gap: 2px; }
 .grid-costs { display: grid; grid-template-columns: 1.2fr 1fr 1fr; gap: 16px; }
+.grid-logs-charts { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; }
 .grid-status-edges { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
 .grid-status-services { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
 /* Wide tables scroll inside their card instead of overflowing the viewport. */
@@ -172,7 +197,7 @@ table.grid.logs tbody tr.detail td { border-bottom: 2px solid var(--border); }
   .content { padding: 14px 16px 56px; }
 
   /* Collapse every multi-column screen grid so columns can't be clipped. */
-  .grid-ov-hero, .grid-ov-feed, .grid-db, .grid-costs, .grid-status-services { grid-template-columns: 1fr; }
+  .grid-ov-hero, .grid-ov-feed, .grid-db, .grid-costs, .grid-status-services, .grid-logs-charts { grid-template-columns: 1fr; }
   .grid-ov-kpis, .grid-status-edges { grid-template-columns: repeat(2, 1fr); }
 
   /* The database table rail becomes a horizontal picker above the grid. */
