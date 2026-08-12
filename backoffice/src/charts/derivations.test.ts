@@ -41,8 +41,20 @@ describe('projectMonthEnd', () => {
     expect(projectMonthEnd(10, new Date(2026, 7, 10))).toBeCloseTo(31, 10);
   });
 
-  it('is a no-op rather than a division blow-up at the very start of a month', () => {
+  // Named for what it actually proves: `getDate()` is 1-based, so the divisor
+  // is never 0 and no guard is needed — but on the 1st the projection is one
+  // day's spend times the month length, its maximum-amplification case.
+  it('extrapolates a single day across the whole month on the 1st', () => {
     expect(projectMonthEnd(0.5, new Date(2026, 7, 1))).toBeCloseTo(15.5, 10);
+  });
+
+  it('never divides by zero — getDate() is 1-based on every day of the year', () => {
+    for (let month = 0; month < 12; month++) {
+      for (let day = 1; day <= 31; day++) {
+        const date = new Date(2026, month, day);
+        expect(Number.isFinite(projectMonthEnd(10, date))).toBe(true);
+      }
+    }
   });
 });
 

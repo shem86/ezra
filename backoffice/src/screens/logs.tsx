@@ -87,9 +87,13 @@ export function LogsScreen({ client = api }: { client?: ApiClient }): React.JSX.
         </div>
       </div>
 
-      {/* The two charts this screen never had. Both are derived from the rows
-          already fetched, so they describe the fetched window and say so —
-          widening it is a server change, not a chart change. */}
+      {/* The two charts this screen never had. Both take `turns`, not the
+          filtered `rows`: they are labelled "fetched window" and must keep
+          describing it, and the level filter would otherwise reduce the
+          outcome stacking to the single level being viewed — destroying the
+          comparison the volume chart exists to make. The filter belongs to the
+          table below. Widening the window itself is a server change, not a
+          chart change. */}
       {turns.length > 0 && (
         <div className="grid-logs-charts">
           <Card>
@@ -97,7 +101,7 @@ export function LogsScreen({ client = api }: { client?: ApiClient }): React.JSX.
               Turn volume &amp; outcome
             </SectionTitle>
             <div className="chart-host">
-              <TurnVolumeChart turns={rows} height={132} />
+              <TurnVolumeChart turns={turns} height={132} />
             </div>
           </Card>
           <Card>
@@ -105,7 +109,7 @@ export function LogsScreen({ client = api }: { client?: ApiClient }): React.JSX.
               Turn latency
             </SectionTitle>
             <div className="chart-host">
-              <LatencyChart turns={rows} height={132} />
+              <LatencyChart turns={turns} height={132} />
             </div>
           </Card>
         </div>

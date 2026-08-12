@@ -26,11 +26,14 @@ function fmtTokens(n: number): string {
  * Straight-line projection of month-end spend from what's been spent so far.
  * The budget question is "am I going to blow it", which the MTD figure alone
  * cannot answer — $9 on the 3rd and $9 on the 28th are very different months.
+ *
+ * `getDate()` is 1-based, so `elapsed` is never 0 and the divisor needs no
+ * guard. It IS 1 on the first of the month, which makes that day's projection a
+ * single sample multiplied by the month length — see `projectedOver` below.
  */
 export function projectMonthEnd(monthCostUsd: number, today = new Date()): number {
   const elapsed = today.getDate();
   const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
-  if (elapsed <= 0) return monthCostUsd;
   return (monthCostUsd / elapsed) * daysInMonth;
 }
 
