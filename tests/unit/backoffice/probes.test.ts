@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { runProbes, type Ping } from '../../../src/backoffice/probes.js';
 import type { Queryable } from '../../../src/backoffice/queries.js';
 
@@ -77,5 +77,31 @@ describe('runProbes', () => {
       now: () => NOW,
     });
     expect(status.services.find((s) => s.name === 'Voyage API')!.status).toBe('down');
+  });
+
+  it("gives up on a hanging external ping within a few seconds, not undici's 10s connect timeout", async () => {
+    // A ping whose TCP SYN is silently dropped (an egress-allowlist miss —
+    // STATUS.md item 8) never rejects on its own until undici's 10s connect
+    // timeout, and the old 12s race let it. /api/status is one Promise.all, so
+    // that single probe held the whole response — and the Overview — for 10.5s.
+    vi.useFakeTimers();
+    try {
+      const hang: Ping = () => new Promise<number>(() => {});
+      const pending = runProbes({
+        db: fakeDb(30_000),
+        pingAnthropic: ok(1),
+        pingVoyage: ok(1),
+        pingLangfuse: ok(1),
+        pingCalendar: hang,
+        now: () => NOW,
+      });
+      await vi.advanceTimersByTimeAsync(3_000);
+      const status = await pending;
+      const cal = status.services.find((s) => s.name === 'Google Calendar')!;
+      expect(cal.status).toBe('down');
+      expect(cal.detail).toBe('timeout');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

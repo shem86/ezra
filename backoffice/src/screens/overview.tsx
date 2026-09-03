@@ -7,34 +7,53 @@ import { Badge, Card, Dot, SectionTitle } from '../components/primitives';
 import { SpendChart } from '../charts/spend-chart';
 import { Sparkline } from '../charts/sparkline';
 import { sColor, tierTone } from '../components/status';
-import { api, ApiError, type ApiClient } from '../api/client';
+import { api, type ApiClient } from '../api/client';
 import { useAsync } from '../api/use-async';
 import type { CostsResponse, LogsResponse, Row, ServiceRow, StatusResponse } from '../api/types';
 import type { Route } from '../routes';
 
-// Each tile/card sources its own endpoint; a section is either loaded or carries
-// the reason it failed, so one bad endpoint degrades a single card — never the
-// whole page (that was the Promise.all bug).
-type Section<T> = { ok: true; value: T } | { ok: false; error: string };
+// Each tile/card sources its own endpoint and LOADS INDEPENDENTLY: a section is
+// loading, loaded, or carries the reason it failed, so one bad endpoint degrades
+// a single card (the Promise.all bug) and one SLOW endpoint delays a single card
+// (the Promise.allSettled bug — /api/status spent 10.5s on a blocked calendar
+// probe while the other three answered in <1s, and the page waited for all
+// four; STATUS.md item 8).
+type Section<T> = { state: 'loading' } | { state: 'ok'; value: T } | { state: 'error'; error: string };
 
-interface OverviewData {
-  costs: Section<CostsResponse>;
-  status: Section<StatusResponse>;
-  logs: Section<LogsResponse>;
-  pending: Section<Row[]>;
+function useSection<T>(loader: (signal: AbortSignal) => Promise<T>): Section<T> {
+  const { data, error, loading } = useAsync<T>(loader);
+  if (error !== null) return { state: 'error', error };
+  if (loading || data === null) return { state: 'loading' };
+  return { state: 'ok', value: data };
 }
 
-function errOf(r: PromiseRejectedResult): string {
-  return r.reason instanceof Error ? r.reason.message : 'failed to load';
+function valueOf<T>(s: Section<T>): T | null {
+  return s.state === 'ok' ? s.value : null;
 }
 
-function CardError({ title, error }: { title: string; error: string }): React.JSX.Element {
+function isUnauthorized(s: Section<unknown>): boolean {
+  return s.state === 'error' && s.error === 'unauthorized';
+}
+
+function SectionMessage({ section }: { section: Section<unknown> }): React.JSX.Element | null {
+  if (section.state === 'loading') {
+    return <span style={{ color: 'var(--muted)', fontSize: 13 }}>Loading…</span>;
+  }
+  if (section.state === 'error') {
+    return (
+      <span style={{ color: 'var(--err)', fontSize: 13 }}>
+        {section.error === 'unauthorized' ? 'Session expired — sign in again.' : `Couldn't load: ${section.error}`}
+      </span>
+    );
+  }
+  return null;
+}
+
+function CardPending({ title, section }: { title: string; section: Section<unknown> }): React.JSX.Element {
   return (
     <Card>
       <SectionTitle>{title}</SectionTitle>
-      <span style={{ color: 'var(--err)', fontSize: 13 }}>
-        {error === 'unauthorized' ? 'Session expired — sign in again.' : `Couldn't load: ${error}`}
-      </span>
+      <SectionMessage section={section} />
     </Card>
   );
 }
@@ -243,45 +262,26 @@ function HealthCard({ services, onOpen }: { services: ServiceRow[]; onOpen: (r: 
 }
 
 export function OverviewScreen({ onOpen, client = api }: { onOpen: (r: Route) => void; client?: ApiClient }): React.JSX.Element {
-  const { data, error, loading } = useAsync<OverviewData>(async (signal) => {
-    const [costs, status, logs, pending] = await Promise.allSettled([
-      client.costs(signal),
-      client.status(signal),
-      client.logs(60, signal),
-      client.table('pending_actions', 200, signal),
-    ]);
-    // If every section is 401 the whole console is unauthed — surface the single
-    // sign-in prompt instead of four identical per-card errors.
-    const all = [costs, status, logs, pending];
-    if (all.every((r) => r.status === 'rejected' && r.reason instanceof ApiError && r.reason.status === 401)) {
-      throw new ApiError(401, 'unauthorized');
-    }
-    return {
-      costs: costs.status === 'fulfilled' ? { ok: true, value: costs.value } : { ok: false, error: errOf(costs) },
-      status: status.status === 'fulfilled' ? { ok: true, value: status.value } : { ok: false, error: errOf(status) },
-      logs: logs.status === 'fulfilled' ? { ok: true, value: logs.value } : { ok: false, error: errOf(logs) },
-      pending:
-        pending.status === 'fulfilled' ? { ok: true, value: pending.value.rows } : { ok: false, error: errOf(pending) },
-    };
-  });
+  const costsS = useSection<CostsResponse>((signal) => client.costs(signal));
+  const statusS = useSection<StatusResponse>((signal) => client.status(signal));
+  const logsS = useSection<LogsResponse>((signal) => client.logs(60, signal));
+  const pendingS = useSection<Row[]>((signal) => client.table('pending_actions', 200, signal).then((t) => t.rows));
 
-  if (error !== null) {
+  // If every section is 401 the whole console is unauthed — surface the single
+  // sign-in prompt instead of four identical per-card errors.
+  const sections: Section<unknown>[] = [costsS, statusS, logsS, pendingS];
+  if (sections.every(isUnauthorized)) {
     return (
       <Card>
-        <span style={{ color: 'var(--err)' }}>
-          {error === 'unauthorized' ? 'Session expired — sign in again.' : `Could not load overview: ${error}`}
-        </span>
+        <span style={{ color: 'var(--err)' }}>Session expired — sign in again.</span>
       </Card>
     );
   }
-  if (data === null) {
-    return <Card>{loading ? 'Loading overview…' : 'No data.'}</Card>;
-  }
 
-  const costs = data.costs.ok ? data.costs.value : null;
-  const status = data.status.ok ? data.status.value : null;
-  const logs = data.logs.ok ? data.logs.value : null;
-  const pending = data.pending.ok ? data.pending.value : null;
+  const costs = valueOf(costsS);
+  const status = valueOf(statusS);
+  const logs = valueOf(logsS);
+  const pending = valueOf(pendingS);
 
   const parked = (pending ?? []).filter((p) => p['status'] === 'pending');
   const errCount = (logs?.turns ?? []).filter((t) => t.level === 'error').length;
@@ -311,8 +311,8 @@ export function OverviewScreen({ onOpen, client = api }: { onOpen: (r: Route) =>
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <div className="grid-ov-hero">
-        {costs ? <SpendCard costs={costs} /> : <CardError title="Spend this month (est.)" error={data.costs.ok ? '' : data.costs.error} />}
-        {pending ? <ApprovalsCard parked={parked} /> : <CardError title="Awaiting approval" error={data.pending.ok ? '' : data.pending.error} />}
+        {costs ? <SpendCard costs={costs} /> : <CardPending title="Spend this month (est.)" section={costsS} />}
+        {pending ? <ApprovalsCard parked={parked} /> : <CardPending title="Awaiting approval" section={pendingS} />}
       </div>
       <div className="grid-ov-kpis">
         {tiles.map((t) => (
@@ -334,14 +334,10 @@ export function OverviewScreen({ onOpen, client = api }: { onOpen: (r: Route) =>
             <SectionTitle>Recent turns</SectionTitle>
           </div>
           <div style={{ padding: '4px 18px 12px' }}>
-            {logs ? <ActivityFeed logs={logs} onOpen={onOpen} /> : (
-              <span style={{ color: 'var(--err)', fontSize: 13 }}>
-                {data.logs.ok ? '' : data.logs.error === 'unauthorized' ? 'Session expired — sign in again.' : `Couldn't load: ${data.logs.error}`}
-              </span>
-            )}
+            {logs ? <ActivityFeed logs={logs} onOpen={onOpen} /> : <SectionMessage section={logsS} />}
           </div>
         </Card>
-        {status ? <HealthCard services={status.services} onOpen={onOpen} /> : <CardError title="Service health" error={data.status.ok ? '' : data.status.error} />}
+        {status ? <HealthCard services={status.services} onOpen={onOpen} /> : <CardPending title="Service health" section={statusS} />}
       </div>
     </div>
   );

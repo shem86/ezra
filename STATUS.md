@@ -22,6 +22,11 @@ lookback and retention ceilings the new TanStack chart layer cannot reach from
 the client. Items 1–5 still carry their 2026-07-21 dates and were not
 re-verified on this pass either.
 
+**Partial update 2026-09-03:** item 8 **root-caused** on the host (the egress
+allowlist was dropping the rotating `oauth2.googleapis.com` answer; the
+"stopped reproducing" claim was wrong) and fixed at the egress, server and UI
+layers. Nothing else re-verified on this pass.
+
 This is the **single source of truth for current state**. Everything else is
 history:
 
@@ -389,54 +394,73 @@ the right shape. Also unaddressed: 97,540 of the 97,758 journal rows are
 `reminderSweep`/`expirySweep` records versus 54 real turns — harmless at
 today's 35ms, worth a retention policy before it isn't.
 
-### 8. `/api/status` showed a ~10.5s cold cost twice — cause unknown, no longer reproducing
-**Status:** open, unexplained, **not currently reproducible** · **verified**
-2026-08-10T19:0xZ (observed) and again after the `v2.3.4` deploy (did *not*
-recur).
+### 8. ✅ ROOT-CAUSED 2026-09-03 — `/api/status` 10.5s cold cost = egress allowlist dropping `oauth2.googleapis.com`
+**Status:** **root-caused and fixed in this PR**; **live on the host as an
+interim roll** (see below) pending the release that carries the code · **verified**
+2026-09-03 on the host — reproduced (`/api/status` **10.496s** cold, 0.002s
+warm; every other Overview endpoint ≤0.7s), then the per-service JSON on the
+slow call named the culprit exactly as this entry predicted: **`Google
+Calendar: down — fetch failed`**, every other probe ≤211ms.
 
-Observed twice, on two different container generations. Called alone against a
-freshly started container, past the 30s cache each time: **10.500s, 10.496s,
-then 0.464s**, staying ~0.45s thereafter. It was *not* contention from other
-endpoints — a `/api/logs` call immediately before a status call left it at
-0.452s.
+"No longer reproducing" was wrong; it reproduced on the first try. The chain:
 
-**It then failed to recur after the very next deploy.** On the fresh `v2.3.4`
-container the *first* status call was 0.52s and later calls 0.42s. `v2.3.4`
-does not touch the status path — `runProbes` in `src/backoffice/probes.ts`, the
-`status` closure that `main` composes in `src/backoffice/cli.ts`, and
-`makeGoogleCalendarClient` are all unchanged between the two releases — so
-whatever changed is **not in this repo's code**, and "the first two calls after
-a container restart" is the wrong frame. Container-scoped warming is ruled out
-by that alone.
+1. The Overview's first paint waited on **all four** endpoints
+   (`Promise.allSettled` in `OverviewScreen`, `backoffice/src/screens/overview.tsx`),
+   so the page rendered at the speed of `/api/status`.
+2. `/api/status` is one `Promise.all` over the probes (`runProbes` in
+   `src/backoffice/probes.ts`), so it rendered at the speed of the slowest one.
+3. The calendar probe (`pingCalendar` in `src/backoffice/cli.ts`) needs a
+   service-account token from **`oauth2.googleapis.com`** (`accessToken` in
+   `src/tools/calendar-client.ts`). Google serves that name as a **single A
+   record with a ~200s TTL that rotates** across its `*-in-f95.1e100.net` pool
+   (seen: 142.250.31.95 → 172.253.63.95 → 192.178.218.95 → 142.251.111.95),
+   whereas `www.googleapis.com` answers 8 stable IPs.
+4. The egress refresh (`refresh` in `infra/egress/nftables.sh`, every 15 min on
+   `hh-egress.timer`) **flushed** the `allowed4` set and re-added whichever
+   single answer it got. The container then resolved the *next* answer and its
+   SYNs were dropped — `journalctl -k` showed 7 retransmits to
+   `172.253.63.95:443` per call, and 14 drops to that IP + 7 to
+   `192.178.218.95` over 7 days, while the set held only `142.250.31.95`.
+5. 7 SYN retries ≈ 10s; undici's default 10s connect timeout then rejects with
+   `fetch failed`. The old 12s `PROBE_TIMEOUT_MS` never fired first. Hence
+   **10.5s, every time** — the number both earlier observations recorded.
 
-The better-fitting suspect is something **host-level that stays warm across
-container restarts**: the nftables egress allowlist IP set or DNS. That failure
-mode has bitten this host before (`WA-VERSION-001`, where an unallowlisted host
-silently blocked an outbound call), and it would explain a fixed multi-second
-penalty on first contact that never returns once the set is warm. Unproven.
+Why it looked intermittent: the calendar client caches the token for ~59 min.
+An exchange that happens to land while DNS and the set agree makes every
+calendar call fast for an hour (the "447ms" fast-path readings); once the token
+expires and the current answer is not in the set, nothing gets cached and
+*every* cold `/api/status` costs 10.5s until DNS rotates back. Restarts and
+deploys were never the variable — the earlier "container-scoped warming" and
+"not in this repo's code" framings are withdrawn.
 
-This corrects a claim first recorded under item 7. The initial reading that day
-(10.480s, then 10.479s) was explained away as contention behind a heavy
-Langfuse call and "not reproducible" once later samples came back at 0.45s.
-That was wrong: those were simply the first two calls against a container that
-had started 15 minutes earlier, and the pattern reproduces exactly across
-restarts. The lesson is the ordering — every fast sample was taken *after* two
-slow ones had already warmed whatever this is.
+Fixed at all three layers, each with a failing test or on-host proof first:
 
-Not root-caused, and now hard to root-cause: every per-service capture comes
-from the *fast* path (Postgres 19ms, Anthropic 292ms, Voyage 103ms, Langfuse
-90ms, Google Calendar 447ms — well under a second in total). The measurement
-that would settle it is the service breakdown *during* a slow call, and with
-the symptom no longer reproducing on demand there is currently no way to take
-it. If it returns, capture `/api/status`'s own JSON on the slow call before
-anything else — the per-service `latency` fields name the culprit directly.
+- **Egress (root cause):** `refresh` no longer flushes — it re-adds the current
+  answers on top of the loaded set, and re-adding refreshes an element's 1h
+  timeout in place (proven on the host kernel, 6.17, with a scratch table:
+  `timeout 10m` → re-add → `expires 59m59s`). The set therefore accumulates
+  every answer seen in the last hour and ages the stale ones out.
+  `hh-egress.timer` runs every **3 min** (inside the 200s TTL) instead of 15.
+  **Host roll:** the unit file is a copy under `/etc/systemd/system`, so the
+  timer cadence needs `sudo bash infra/host/reconcile-host-config.sh` on the
+  host after the release lands (the deploy's `git checkout --force` brings the
+  script itself). Done as an interim on 2026-09-03 straight from this branch —
+  see the verification line below.
+- **Server:** `PROBE_TIMEOUT_MS` 12s → **3s** (`src/backoffice/probes.ts`), so a
+  dropped SYN costs 3s and reads `down · timeout` rather than 10.5s and `fetch
+  failed`. `tests/unit/backoffice/probes.test.ts` pins it with a hanging ping
+  under fake timers.
+- **UI:** each Overview card loads on its own `useSection` hook
+  (`backoffice/src/screens/overview.tsx`); spend, approvals and recent turns
+  paint as they land and only the status-backed cards show "Loading…".
+  `backoffice/src/screens/overview.test.tsx` renders with a never-resolving
+  `/api/status` and asserts the rest of the page is there.
 
-Impact is small and bounded: the response is cached 30s, the screen is
-otherwise ~0.45s, and it predates all of this work (the same 10.48s pair was
-measured on `v2.3.1`). Filed as a *known unknown* with its evidence, not as
-something urgent — and deliberately left open rather than closed, because
-"stopped reproducing" is not the same as "fixed" and nothing in this repo
-explains why it stopped.
+Same-class side finding, **not** fixed here: the same 7-day drop log's top
+entries (57 drops) are `57.144.75.32` / `31.13.66.56` =
+`whatsapp-cdn-*.fbcdn.net`, the WhatsApp media CDN rotating the same way. The
+accumulating refresh should cover it too; worth confirming media downloads in
+the spine log after the roll.
 
 ### 9. Backoffice charts — the two things the new chart layer can't reach yet
 **Status:** open · **verified** 2026-08-10 by reading `makeCostClient` in
