@@ -395,8 +395,10 @@ the right shape. Also unaddressed: 97,540 of the 97,758 journal rows are
 today's 35ms, worth a retention policy before it isn't.
 
 ### 8. ✅ ROOT-CAUSED 2026-09-03 — `/api/status` 10.5s cold cost = egress allowlist dropping `oauth2.googleapis.com`
-**Status:** **root-caused and fixed in this PR**; **not yet live** — the egress
-change needs the host roll below, the code needs a release · **verified**
+**Status:** **root-caused and fixed in this PR**; **partially live** — the
+script + 3-min timer were rolled to the host 2026-09-03 21:58 UTC and a cold
+`/api/status` measured **0.45s**, but the refresh *unit* fix (below) still
+needs its host roll, and the code needs a release · **verified**
 2026-09-03 on the host — reproduced (`/api/status` **10.496s** cold, 0.002s
 warm; every other Overview endpoint ≤0.7s), then the per-service JSON on the
 slow call named the culprit exactly as this entry predicted: **`Google
@@ -441,17 +443,31 @@ Fixed at all three layers, each with a failing test or on-host proof first:
   `timeout 10m` → re-add → `expires 59m59s`). The set therefore accumulates
   every answer seen in the last hour and ages the stale ones out.
   `hh-egress.timer` runs every **3 min** (inside the 200s TTL) instead of 15.
-  **Host roll:** the unit file is a copy under `/etc/systemd/system`, so the
-  timer cadence needs `sudo bash infra/host/reconcile-host-config.sh` on the
-  host after the release lands (the deploy's `git checkout --force` brings the
-  script itself). An interim roll straight from the branch (copy the two
-  files into the host checkout, install the timer, `daemon-reload`, restart the
-  timer, `start hh-egress-refresh.service`) is safe — the deploy's forced
-  checkout supersedes it — but was NOT done on 2026-09-03: the automated
-  session was not permitted to write to the host. Verify after the roll by
-  checking the container's current `oauth2.googleapis.com` answer is in
-  `nft list set inet hh_egress allowed4` and that a cold `/api/status` is
-  <1s.
+  **Second finding, same day, from the first roll:** the set still did not
+  accumulate — `held` equalled `resolved` on every tick and all elements
+  carried one expiry. The journal showed why: **`hh-egress.service` (the full
+  `apply`, table delete + rebuild) ran 1s before every refresh tick**, because
+  `infra/egress/hh-egress-refresh.service` had `Wants=hh-egress.service` and
+  the apply unit is a oneshot without `RemainAfterExit` (always "inactive"
+  between runs, so `Wants=` re-runs it). So the V2_NOTES §11 claim that the
+  apply is "boot-only" and refresh has "no fail-open window" was never true
+  on the host — every 15-min tick deleted the table. Fixed by dropping the
+  `Wants=` (the `After=` alone gives the boot ordering); `RemainAfterExit=yes`
+  on the apply unit was rejected because the deploy re-applies with
+  `systemctl start`, which would then be a silent no-op.
+  **Host roll:** all three files are copies under `/etc/systemd/system` /
+  the host checkout, so the durable path is `sudo bash
+  infra/host/reconcile-host-config.sh` on the host after the release lands
+  (the deploy's `git checkout --force` brings the script itself). Interim
+  roll straight from the branch, 2026-09-03: script + timer installed 21:58
+  UTC (`refreshed allowed4 (+47 addresses resolved, 55 held)`, timer at 3
+  min), cold `/api/status` re-timed at **0.451s** with Google Calendar
+  operational 439ms; the refresh-unit fix was found after that and needs the
+  same interim install of `hh-egress-refresh.service` + `daemon-reload`.
+  Verify after any roll: the journal shows NO "applied table" line before a
+  "refreshed" line, `held` grows past `resolved` across ticks, the container's
+  current `oauth2.googleapis.com` answer is in `nft list set inet hh_egress
+  allowed4`, and a cold `/api/status` is <1s.
 - **Server:** `PROBE_TIMEOUT_MS` 12s → **3s** (`src/backoffice/probes.ts`), so a
   dropped SYN costs 3s and reads `down · timeout` rather than 10.5s and `fetch
   failed`. `tests/unit/backoffice/probes.test.ts` pins it with a hanging ping
