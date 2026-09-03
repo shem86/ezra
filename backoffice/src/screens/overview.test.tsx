@@ -57,9 +57,11 @@ describe('OverviewScreen (composed live)', () => {
     const onOpen = vi.fn();
     render(<OverviewScreen onOpen={onOpen} client={client} />);
 
-    // MTD spend shows in both the SpendCard and the KPI tile
-    expect(await screen.findByText('Spend this month (est.)')).toBeInTheDocument();
-    expect(screen.getAllByText('$3.94').length).toBeGreaterThanOrEqual(2);
+    // MTD spend shows in both the SpendCard and the KPI tile. Wait on the data,
+    // not the card title: the loading placeholder already carries the title,
+    // and the loaded card replaces that node.
+    expect((await screen.findAllByText('$3.94')).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText('Spend this month (est.)')).toBeInTheDocument();
     expect(screen.getByText('96')).toBeInTheDocument(); // turns today
     // one parked (status==='pending') approval, not the approved one
     expect(screen.getByText('1 pending')).toBeInTheDocument();
@@ -92,5 +94,25 @@ describe('OverviewScreen (composed live)', () => {
     expect(screen.queryByText(/Could not load overview/)).not.toBeInTheDocument();
     // the failed section shows its own inline error
     expect(screen.getByText(/HTTP 500/)).toBeInTheDocument();
+  });
+
+  it('paints each card as its endpoint lands — a slow /api/status does not hold the page', async () => {
+    // Prod measured /api/status at 10.5s cold (a blocked calendar probe,
+    // STATUS.md item 8) while the other three endpoints answered in <1s. The
+    // page used to await all four before painting anything, so the operator
+    // stared at "Loading overview…" for the slowest one. Here status never
+    // resolves at all; everything else must still render, and only the
+    // status-backed sections carry a loading placeholder.
+    const slow: ApiClient = { ...client, status: () => new Promise<StatusResponse>(() => {}) };
+    render(<OverviewScreen onOpen={vi.fn()} client={slow} />);
+
+    expect(await screen.findByText('turn-ok')).toBeInTheDocument();
+    expect(screen.getAllByText('$3.94').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText('1 pending')).toBeInTheDocument();
+    expect(screen.queryByText('Loading overview…')).not.toBeInTheDocument();
+    // health card is still waiting, and says so rather than erroring
+    expect(screen.getByText('Service health')).toBeInTheDocument();
+    expect(screen.getByText(/Loading/)).toBeInTheDocument();
+    expect(screen.queryByText('1 down')).not.toBeInTheDocument();
   });
 });

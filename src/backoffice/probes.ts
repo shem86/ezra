@@ -49,7 +49,13 @@ export interface ProbeDeps {
   readonly now?: () => number;
 }
 
-const PROBE_TIMEOUT_MS = 12_000;
+// Bound on the SLOWEST probe, which is what /api/status (one Promise.all) and
+// therefore the Overview's first paint waits for. Must sit well UNDER undici's
+// default 10s connect timeout: a silently dropped SYN (an egress-allowlist
+// miss — STATUS.md item 8) is the realistic failure, it only rejects when
+// undici gives up, and the old 12s ceiling let every such call cost 10.5s.
+// The healthy probes answer in ≤0.5s; 3s is generous for "reachable at all".
+const PROBE_TIMEOUT_MS = 3_000;
 const SWEEP_STALE_MS = 180_000; // 3× the 1-minute sweep cadence
 
 function fmtMs(ms: number): string {
@@ -60,7 +66,7 @@ async function timed(ping: Ping): Promise<{ status: ServiceRow['status']; latenc
   try {
     const ms = await Promise.race([
       ping(),
-      new Promise<never>((_, rej) => setTimeout(() => rej(new Error('timeout')), PROBE_TIMEOUT_MS)),
+      new Promise<never>((_, rej) => setTimeout(() => rej(new Error('timeout')), PROBE_TIMEOUT_MS).unref()),
     ]);
     return { status: 'operational', latency: fmtMs(ms) };
   } catch (e) {

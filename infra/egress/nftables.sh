@@ -14,7 +14,9 @@
 # behind CDNs. We resolve the allowlist into nft sets with a timeout and
 # refresh them on a timer (`refresh` subcommand → systemd timer, see
 # infra/runtime.md). Apex coverage is the floor; the refresh re-resolves the
-# rotating subdomains the apps actually hit.
+# rotating subdomains the apps actually hit, and ACCUMULATES answers rather
+# than replacing them (see the refresh subcommand) because single-record
+# rotators outpace any sane timer cadence.
 #
 # STATUS: T45 drill PASS on host (2026-06-15, docs/ops-drills.md). On-host
 # enforcement is proven both directions: a non-listed host (1.1.1.1) is dropped,
@@ -168,18 +170,25 @@ case "$cmd" in
     echo "applied table inet ${TABLE} on iface ${EGRESS_IFACE}"
     ;;
   refresh)
-    # Re-resolve and replace only the set elements (ruleset stays loaded).
+    # Re-resolve and ADD the current answers on top of the loaded sets — never
+    # flush first. Some allowlisted names (oauth2.googleapis.com, the WhatsApp
+    # media CDN on fbcdn.net) answer with a SINGLE A record that rotates every
+    # few minutes, so a flush-and-replace pins the set to whichever answer this
+    # tick happened to get; the container then resolves the next one and its
+    # SYNs are dropped until the answers line up again (backoffice /api/status
+    # spent 10.5s in undici's connect timeout on exactly this — STATUS.md item
+    # 8, 2026-09-03). Re-adding an existing element refreshes its 1h timeout in
+    # place (verified on the host kernel, 6.17), so across ticks the set holds
+    # every answer seen in the last hour and lets the stale ones age out.
     ips="$(resolve_ipv4)"
     nets="$(aws_s3_cidrs)"
-    nft flush set inet "${TABLE}" allowed4
-    nft flush set inet "${TABLE}" allowed_nets4
     while read -r ip; do
       [[ -n "$ip" ]] && nft add element inet "${TABLE}" allowed4 "{ ${ip} timeout 1h }"
     done <<<"$ips"
     while read -r n; do
       [[ -n "$n" ]] && nft add element inet "${TABLE}" allowed_nets4 "{ ${n} timeout 1h }"
     done <<<"$nets"
-    echo "refreshed allowed4 ($(wc -w <<<"$ips" | tr -d ' ') addresses) + allowed_nets4 ($(wc -w <<<"$nets" | tr -d ' ') nets)"
+    echo "refreshed allowed4 (+$(wc -w <<<"$ips" | tr -d ' ') addresses resolved, $(nft list set inet "${TABLE}" allowed4 | grep -oE '([0-9]+\.){3}[0-9]+' | wc -l | tr -d ' ') held) + allowed_nets4 (+$(wc -w <<<"$nets" | tr -d ' ') nets)"
     ;;
   *)
     echo "usage: $0 {apply|refresh|print}" >&2
