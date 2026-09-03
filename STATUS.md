@@ -395,8 +395,8 @@ the right shape. Also unaddressed: 97,540 of the 97,758 journal rows are
 today's 35ms, worth a retention policy before it isn't.
 
 ### 8. ✅ ROOT-CAUSED 2026-09-03 — `/api/status` 10.5s cold cost = egress allowlist dropping `oauth2.googleapis.com`
-**Status:** **root-caused and fixed in this PR**; **live on the host as an
-interim roll** (see below) pending the release that carries the code · **verified**
+**Status:** **root-caused and fixed in this PR**; **not yet live** — the egress
+change needs the host roll below, the code needs a release · **verified**
 2026-09-03 on the host — reproduced (`/api/status` **10.496s** cold, 0.002s
 warm; every other Overview endpoint ≤0.7s), then the per-service JSON on the
 slow call named the culprit exactly as this entry predicted: **`Google
@@ -444,8 +444,14 @@ Fixed at all three layers, each with a failing test or on-host proof first:
   **Host roll:** the unit file is a copy under `/etc/systemd/system`, so the
   timer cadence needs `sudo bash infra/host/reconcile-host-config.sh` on the
   host after the release lands (the deploy's `git checkout --force` brings the
-  script itself). Done as an interim on 2026-09-03 straight from this branch —
-  see the verification line below.
+  script itself). An interim roll straight from the branch (copy the two
+  files into the host checkout, install the timer, `daemon-reload`, restart the
+  timer, `start hh-egress-refresh.service`) is safe — the deploy's forced
+  checkout supersedes it — but was NOT done on 2026-09-03: the automated
+  session was not permitted to write to the host. Verify after the roll by
+  checking the container's current `oauth2.googleapis.com` answer is in
+  `nft list set inet hh_egress allowed4` and that a cold `/api/status` is
+  <1s.
 - **Server:** `PROBE_TIMEOUT_MS` 12s → **3s** (`src/backoffice/probes.ts`), so a
   dropped SYN costs 3s and reads `down · timeout` rather than 10.5s and `fetch
   failed`. `tests/unit/backoffice/probes.test.ts` pins it with a hanging ping
