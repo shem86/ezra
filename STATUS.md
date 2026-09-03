@@ -395,10 +395,10 @@ the right shape. Also unaddressed: 97,540 of the 97,758 journal rows are
 today's 35ms, worth a retention policy before it isn't.
 
 ### 8. ✅ ROOT-CAUSED 2026-09-03 — `/api/status` 10.5s cold cost = egress allowlist dropping `oauth2.googleapis.com`
-**Status:** **root-caused and fixed in this PR**; **partially live** — the
-script + 3-min timer were rolled to the host 2026-09-03 21:58 UTC and a cold
-`/api/status` measured **0.45s**, but the refresh *unit* fix (below) still
-needs its host roll, and the code needs a release · **verified**
+**Status:** **root-caused and fixed in this PR**; **egress fix live on the
+host** (interim roll of all three `infra/egress/` files, 2026-09-03 21:58 +
+22:55 UTC — verified below); the server/UI code still needs a release, and
+`reconcile-host-config.sh` after it makes the roll permanent · **verified**
 2026-09-03 on the host — reproduced (`/api/status` **10.496s** cold, 0.002s
 warm; every other Overview endpoint ≤0.7s), then the per-service JSON on the
 slow call named the culprit exactly as this entry predicted: **`Google
@@ -462,9 +462,12 @@ Fixed at all three layers, each with a failing test or on-host proof first:
   roll straight from the branch, 2026-09-03: script + timer installed 21:58
   UTC (`refreshed allowed4 (+47 addresses resolved, 55 held)`, timer at 3
   min), cold `/api/status` re-timed at **0.451s** with Google Calendar
-  operational 439ms; the refresh-unit fix was found after that and needs the
-  same interim install of `hh-egress-refresh.service` + `daemon-reload`.
-  Verify after any roll: the journal shows NO "applied table" line before a
+  operational 439ms; the refresh-unit fix was found after that and rolled the
+  same way at 22:55 UTC. Verified across a timer tick at 22:59: `refreshed
+  allowed4 (+48 addresses resolved, 83 held)` with NO `applied table` line
+  before it, `allowed4` holding both rotation answers (`142.250.31.95`,
+  `172.253.63.95`), 0 egress drops in 10 min, cold `/api/status` **0.76s**.
+  Verify after any future roll: the journal shows NO "applied table" line before a
   "refreshed" line, `held` grows past `resolved` across ticks, the container's
   current `oauth2.googleapis.com` answer is in `nft list set inet hh_egress
   allowed4`, and a cold `/api/status` is <1s.
