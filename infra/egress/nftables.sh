@@ -159,6 +159,72 @@ table inet ${TABLE} {
 EOF
 }
 
+# --- refresh helpers -------------------------------------------------------
+# An element timeout is NOT restarted by re-adding the element. Upstream is
+# explicit that only the packet-path `update` operation refreshes a previous
+# element timeout, while plain `add` does not — and the host agreed: at
+# 2026-09-04T01:16Z, 47s after a SUCCESSFUL refresh tick had re-added them,
+# hc-ping.com's four addresses still read `expires 43m`, not 60m.
+#
+# So the original add-only refresh never held anything past the hour. Every
+# element died exactly 1h after its FIRST insertion and stayed dropped until a
+# later tick re-created it — an ~hourly outage window one tick wide. It bit the
+# STABLE addresses hardest: a rotating name (oauth2.googleapis.com) keeps
+# producing brand-new answers that enter as brand-new elements carrying a full
+# hour, whereas hc-ping.com's four A records never change and so never earned a
+# fresh element. Seen as 13 dropped dead-man SYNs at 2026-09-03T23:55Z and
+# again at 00:57Z, plus the same pattern against Google and Meta addresses.
+#
+# Restarting a timeout therefore takes delete-then-add, and both halves go into
+# ONE `nft -f` batch: nft applies a batch as a single kernel transaction (there
+# is "no moment when the firewall is partially configured"), so the element is
+# never observably absent and the reset cannot open a drop window of its own.
+render_refresh_batch() {
+  local set_name="$1" timeout="$2" elements="$3" present="$4"
+  local held elem
+  # The element tokens the set currently holds, one per line. The delete is
+  # emitted ONLY for elements actually present, because `delete element` on a
+  # missing element aborts the whole atomic batch. In steady state a resolved
+  # element is re-timed every tick and so never approaches expiry, which is
+  # what keeps this snapshot from racing its own apply.
+  held="$(printf '%s' "$present" | tr ',' '\n' \
+    | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?' || true)"
+  for elem in $elements; do
+    # -x -F: an exact whole-line token match, so a held 10.0.0.45 is never
+    # mistaken for 10.0.0.4 (a substring test would emit a delete for an
+    # element that is not there and fail the batch).
+    if printf '%s\n' "$held" | grep -qxF "$elem"; then
+      printf 'delete element inet %s %s { %s }\n' "$TABLE" "$set_name" "$elem"
+    fi
+    printf 'add element inet %s %s { %s timeout %s }\n' \
+      "$TABLE" "$set_name" "$elem" "$timeout"
+  done
+}
+
+# Give every element resolved for set $1 a fresh $2 timeout, atomically.
+refresh_set_elements() {
+  local set_name="$1" timeout="$2" elements="$3" batch
+  # A DNS blip (or a failed ip-ranges fetch against a cold cache) must never
+  # rewrite the set: with nothing resolved there is nothing to refresh, and the
+  # elements already held keep aging out on their own clock. Failing closed
+  # here would drop the very traffic the allowlist exists to permit.
+  if [[ -z "${elements//[[:space:]]/}" ]]; then
+    echo "refresh: resolved nothing for ${set_name} — left untouched" >&2
+    return 0
+  fi
+  batch="$(render_refresh_batch "$set_name" "$timeout" "$elements" \
+    "$(nft list set inet "${TABLE}" "${set_name}" 2>/dev/null || true)")"
+  printf '%s' "$batch" | nft -f -
+}
+
+# Test seam: `HH_EGRESS_LIB=1 source nftables.sh` loads the helpers above
+# WITHOUT dispatching a subcommand, so the batch renderer is unit-testable off
+# the host (tests/unit/egress-refresh.test.ts), where there is no nft and no
+# kernel to hold a set.
+if [[ -n "${HH_EGRESS_LIB:-}" ]]; then
+  return 0 2>/dev/null || exit 0
+fi
+
 cmd="${1:-print}"
 case "$cmd" in
   print)
@@ -170,24 +236,20 @@ case "$cmd" in
     echo "applied table inet ${TABLE} on iface ${EGRESS_IFACE}"
     ;;
   refresh)
-    # Re-resolve and ADD the current answers on top of the loaded sets — never
-    # flush first. Some allowlisted names (oauth2.googleapis.com, the WhatsApp
-    # media CDN on fbcdn.net) answer with a SINGLE A record that rotates every
-    # few minutes, so a flush-and-replace pins the set to whichever answer this
-    # tick happened to get; the container then resolves the next one and its
-    # SYNs are dropped until the answers line up again (backoffice /api/status
-    # spent 10.5s in undici's connect timeout on exactly this — STATUS.md item
-    # 8, 2026-09-03). Re-adding an existing element refreshes its 1h timeout in
-    # place (verified on the host kernel, 6.17), so across ticks the set holds
-    # every answer seen in the last hour and lets the stale ones age out.
+    # Re-resolve the current answers and give them a FRESH timeout on top of
+    # the loaded sets — never flush first. Some allowlisted names
+    # (oauth2.googleapis.com, the WhatsApp media CDN on fbcdn.net) answer with
+    # a SINGLE A record that rotates every few minutes, so a flush-and-replace
+    # pins the set to whichever answer this tick happened to get; the container
+    # then resolves the next one and its SYNs are dropped until the answers
+    # line up again (backoffice /api/status spent 10.5s in undici's connect
+    # timeout on exactly this — STATUS.md item 8, 2026-09-03). Elements absent
+    # from this tick's answers are left alone and age out on their own clock,
+    # so the set still holds every answer seen in the last hour.
     ips="$(resolve_ipv4)"
     nets="$(aws_s3_cidrs)"
-    while read -r ip; do
-      [[ -n "$ip" ]] && nft add element inet "${TABLE}" allowed4 "{ ${ip} timeout 1h }"
-    done <<<"$ips"
-    while read -r n; do
-      [[ -n "$n" ]] && nft add element inet "${TABLE}" allowed_nets4 "{ ${n} timeout 1h }"
-    done <<<"$nets"
+    refresh_set_elements allowed4 1h "$ips"
+    refresh_set_elements allowed_nets4 1h "$nets"
     echo "refreshed allowed4 (+$(wc -w <<<"$ips" | tr -d ' ') addresses resolved, $(nft list set inet "${TABLE}" allowed4 | grep -oE '([0-9]+\.){3}[0-9]+' | wc -l | tr -d ' ') held) + allowed_nets4 (+$(wc -w <<<"$nets" | tr -d ' ') nets)"
     ;;
   *)
