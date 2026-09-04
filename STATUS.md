@@ -395,14 +395,14 @@ the right shape. Also unaddressed: 97,540 of the 97,758 journal rows are
 today's 35ms, worth a retention policy before it isn't.
 
 ### 8. ✅ ROOT-CAUSED 2026-09-03 — `/api/status` 10.5s cold cost = egress allowlist dropping `oauth2.googleapis.com`
-**Status:** **root-caused and fixed in this PR**; the first two egress fixes are
-**live on the host** (interim roll of all three `infra/egress/` files,
-2026-09-03 21:58 + 22:55 UTC — verified below), but the **third finding
-(2026-09-04, element timeouts never restarted) is fixed in the repo and NOT yet
-on the host** — until it is rolled, the allowlist still drops every stable
-destination for up to 3 min once an hour, including the dead-man ping. The
-server/UI code still needs a release, and `reconcile-host-config.sh` after it
-makes the roll permanent · **verified**
+**Status:** **root-caused and fixed in this PR**; all three egress fixes are
+**live on the host** (interim rolls of the `infra/egress/` files, 2026-09-03
+21:58 + 22:55 UTC and 2026-09-04 01:32 UTC — each verified below). ⚠️ The
+interim roll is a hand-copied file, so the **next deploy's `git checkout
+--force` reverts the host to whatever ships in the release** — until this PR
+merges and a release carries it, a deploy silently reinstates the hourly drop.
+The server/UI code still needs that release, and `reconcile-host-config.sh`
+after it makes the roll permanent · **verified**
 2026-09-03 on the host — reproduced (`/api/status` **10.496s** cold, 0.002s
 warm; every other Overview endpoint ≤0.7s), then the per-service JSON on the
 slow call named the culprit exactly as this entry predicted: **`Google
@@ -492,7 +492,22 @@ Fixed at all three layers, each with a failing test or on-host proof first:
   `tests/unit/egress-refresh.test.ts` pin the shape, driving the script's
   `HH_EGRESS_LIB` source-only seam so they need no nft and no kernel (verified
   RED: disabling the delete fails 3 of its 6 cases).
-  **Not yet rolled to the host** — needs the roll below.
+  **Rolled to the host 2026-09-04 01:32 UTC** (hand-copied over
+  `/home/hh/hh-assistant/infra/egress/nftables.sh`, which was byte-identical to
+  `origin/main` first — no local drift overwritten; prior file kept as
+  `nftables.sh.bak-20260904`; the systemd units are unchanged by this fix).
+  **Verified on the host:** the element timeout now resets, where before it
+  decayed straight through every tick — `hc-ping.com` read `expires 27m53s` two
+  minutes after the 01:29:18Z tick, and `expires 59m59s816ms` immediately after
+  the first refresh on the new script. Then a clean sawtooth across three
+  consecutive timer ticks (01:36:15Z, 01:39:18Z, 01:42:18Z): 59m23s → 58m23s →
+  57m23s → **59m28s** → 58m28s → 57m28s → **59m31s** → … → **59m31s**. Over the
+  37 min to 02:09:22Z: **0** `hh-egress-drop` entries — including across the
+  ~01:57–02:00Z slot where the ~62-min cluster was next due — **0** refresh-unit
+  failures, **0** `[deadman] ping failed` lines (they had been recurring), no
+  `applied table` line before any `refreshed` line, and `held` still growing
+  across ticks (299 → 315 → 320 → 323), so the accumulate behaviour survived
+  the change.
   **Host roll:** all three files are copies under `/etc/systemd/system` /
   the host checkout, so the durable path is `sudo bash
   infra/host/reconcile-host-config.sh` on the host after the release lands
