@@ -394,11 +394,15 @@ the right shape. Also unaddressed: 97,540 of the 97,758 journal rows are
 `reminderSweep`/`expirySweep` records versus 54 real turns — harmless at
 today's 35ms, worth a retention policy before it isn't.
 
-### 8. ✅ ROOT-CAUSED 2026-09-03 — `/api/status` 10.5s cold cost = egress allowlist dropping `oauth2.googleapis.com`
-**Status:** **root-caused and fixed in this PR**; **egress fix live on the
-host** (interim roll of all three `infra/egress/` files, 2026-09-03 21:58 +
-22:55 UTC — verified below); the server/UI code still needs a release, and
-`reconcile-host-config.sh` after it makes the roll permanent · **verified**
+### 8. ✅ CLOSED 2026-09-04 — `/api/status` 10.5s cold cost = egress allowlist dropping `oauth2.googleapis.com`
+**Status:** **closed** — root-caused and fixed in PR #50, released as
+**v2.3.6** (deploy run green 2026-09-04 00:22 UTC, all three containers on
+`:2.3.6`). Post-release verification on the host: cold `/api/status`
+**0.52s / 0.44s**, the served bundle is the per-card Overview, and the
+installed egress units + sudoers are byte-identical to the checkout, so the
+`reconcile-host-config.sh` step was a no-op (the interim roll below already
+matched). Egress fix live on the host since 2026-09-03 21:58 + 22:55 UTC ·
+**verified**
 2026-09-03 on the host — reproduced (`/api/status` **10.496s** cold, 0.002s
 warm; every other Overview endpoint ≤0.7s), then the per-service JSON on the
 slow call named the culprit exactly as this entry predicted: **`Google
