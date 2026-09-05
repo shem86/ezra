@@ -52,7 +52,13 @@ function flush(): Promise<void> {
 }
 
 /** Builds a transport whose createSocket hands out fresh fake sockets. */
-function harness(overrides: { maxAttempts?: number; versionSource?: WaVersionSource } = {}) {
+function harness(
+  overrides: {
+    maxAttempts?: number;
+    versionSource?: WaVersionSource;
+    connectWatchdogMs?: number;
+  } = {},
+) {
   const sockets: FakeSocket[] = [];
   const states: TransportState[] = [];
   const messages: InboundMessage[] = [];
@@ -60,11 +66,31 @@ function harness(overrides: { maxAttempts?: number; versionSource?: WaVersionSou
   const disconnects: DisconnectInfo[] = [];
   /** The version handed to each socket, in creation order. */
   const versions: Array<WaVersion | undefined> = [];
+  /** How many of the next connect attempts must reject instead of socketing. */
+  let failNext = 0;
+  /** How many of the next connect attempts hang until releaseConnects(). */
+  let deferNext = 0;
+  const releases: Array<() => void> = [];
   const transport = createBaileysTransport({
     sessionStore: fakeSessionStore(),
     onDisconnect: (info) => disconnects.push(info),
     ...(overrides.versionSource ? { versionSource: overrides.versionSource } : {}),
     createSocket: (_auth, version) => {
+      if (failNext > 0) {
+        failNext -= 1;
+        return Promise.reject(new Error('createSocket rejected'));
+      }
+      if (deferNext > 0) {
+        deferNext -= 1;
+        return new Promise<WaSocketLike>((resolve) => {
+          releases.push(() => {
+            const late = fakeSocket();
+            sockets.push(late);
+            versions.push(version);
+            resolve(late);
+          });
+        });
+      }
       const s = fakeSocket();
       sockets.push(s);
       versions.push(version);
@@ -80,12 +106,32 @@ function harness(overrides: { maxAttempts?: number; versionSource?: WaVersionSou
       factor: 2,
       jitter: 0,
       maxAttempts: overrides.maxAttempts ?? 3,
+      // Far longer than any case that is not exercising it, so the watchdog
+      // stays invisible unless a test opts in.
+      connectWatchdogMs: overrides.connectWatchdogMs ?? 60_000,
     },
     sendTimeoutMs: 50,
   });
   transport.onStateChange((s) => states.push(s));
   transport.onMessage((m) => messages.push(m));
-  return { transport, sockets, states, messages, sleeps, disconnects, versions };
+  return {
+    transport,
+    sockets,
+    states,
+    messages,
+    sleeps,
+    disconnects,
+    versions,
+    failConnects: (n: number) => {
+      failNext = n;
+    },
+    deferConnects: (n: number) => {
+      deferNext = n;
+    },
+    releaseConnects: () => {
+      for (const release of releases.splice(0)) release();
+    },
+  };
 }
 
 async function connectOpen(h: ReturnType<typeof harness>): Promise<void> {
@@ -630,5 +676,341 @@ describe('baileys adapter: messages', () => {
       h.transport.send({ conversationId: 'conv-run-7f3a-no-server', text: 'reminder' }),
     ).rejects.toThrow(/unroutable destination/i);
     expect(h.sockets[0]!.sendMessage).not.toHaveBeenCalled();
+  });
+});
+
+// SOCKET-DEAD-001 (docs/known-issues.md). 2026-09-04T20:12:56Z → 2026-09-05T13:16:17Z,
+// 17h03m deaf: the socket entered 'connecting' and never emitted 'open' or
+// 'close' again. connection.update is the only caller of handleClose, which is
+// the only caller of scheduleRetry — so an attempt that yields neither outcome
+// scheduled nothing and `retry #1` never advanced. A container restart was the
+// only cure. These cover both doors into that wedge: a silent socket, and a
+// connect attempt that rejects on a background (non-connect()) path.
+describe('baileys adapter: connect watchdog', () => {
+  /** Fakes only the timers the watchdog uses, so flush()'s setImmediate stays real. */
+  function fakeConnectTimers(): void {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  }
+
+  it('retries a connect that never reaches open, instead of resting in connecting', async () => {
+    fakeConnectTimers();
+    try {
+      const h = harness({ connectWatchdogMs: 5_000 });
+      void h.transport.connect().catch(() => {});
+      await flush();
+      expect(h.states).toEqual(['connecting']);
+      expect(h.sockets).toHaveLength(1);
+
+      vi.advanceTimersByTime(5_000);
+      await flush();
+
+      expect(h.sockets[0]!.end).toHaveBeenCalled(); // half-open socket torn down
+      expect(h.sleeps).toEqual([100]); // went through the existing backoff
+      expect(h.sockets).toHaveLength(2); // a genuine second attempt
+      expect(h.disconnects).toEqual([
+        {
+          statusCode: undefined,
+          action: 'connect-timeout',
+          attempt: 1,
+          retryDelayMs: 100,
+          gaveUp: false,
+        },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not fire once the socket opens', async () => {
+    fakeConnectTimers();
+    try {
+      const h = harness({ connectWatchdogMs: 5_000 });
+      await connectOpen(h);
+
+      vi.advanceTimersByTime(60_000);
+      await flush();
+
+      expect(h.sockets).toHaveLength(1);
+      expect(h.states).toEqual(['connecting', 'open']);
+      expect(h.disconnects).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not fire after an intentional disconnect', async () => {
+    fakeConnectTimers();
+    try {
+      const h = harness({ connectWatchdogMs: 5_000 });
+      void h.transport.connect().catch(() => {});
+      await flush();
+      await h.transport.disconnect();
+
+      vi.advanceTimersByTime(60_000);
+      await flush();
+
+      expect(h.sockets).toHaveLength(1); // no reconnect
+      expect(h.states.at(-1)).toBe('closed');
+      expect(h.sleeps).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cancels the watchdog when the attempt closes on its own', async () => {
+    fakeConnectTimers();
+    try {
+      const h = harness({ connectWatchdogMs: 5_000 });
+      void h.transport.connect().catch(() => {});
+      await flush();
+
+      // The close path already schedules retry #1; the dead attempt's watchdog
+      // must not add a second one on top of it.
+      h.sockets[0]!.emit('connection.update', {
+        connection: 'close',
+        lastDisconnect: { error: { output: { statusCode: 408 } } },
+      });
+      await flush();
+      expect(h.sleeps).toEqual([100]);
+      expect(h.sockets).toHaveLength(2);
+
+      vi.advanceTimersByTime(5_000);
+      await flush();
+
+      // Exactly one further retry — socket 2's own watchdog, not socket 1's.
+      expect(h.sleeps).toEqual([100, 200]);
+      expect(h.sockets).toHaveLength(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('is disarmed by a logged-out close, which starts no new attempt', async () => {
+    fakeConnectTimers();
+    try {
+      const h = harness({ connectWatchdogMs: 5_000 });
+      void h.transport.connect().catch(() => {});
+      await flush();
+
+      h.sockets[0]!.emit('connection.update', {
+        connection: 'close',
+        lastDisconnect: { error: { output: { statusCode: 401 } } },
+      });
+      await flush();
+      expect(h.states.at(-1)).toBe('logged-out');
+
+      vi.advanceTimersByTime(60_000);
+      await flush();
+
+      // Reconnecting a revoked pairing is exactly what must never happen.
+      expect(h.sockets).toHaveLength(1);
+      expect(h.states.at(-1)).toBe('logged-out');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('is disarmed when the close path spends the last of the budget', async () => {
+    fakeConnectTimers();
+    try {
+      const h = harness({ maxAttempts: 1, connectWatchdogMs: 5_000 });
+      void h.transport.connect().catch(() => {});
+      await flush();
+
+      for (let i = 0; i < 2; i++) {
+        h.sockets.at(-1)!.emit('connection.update', {
+          connection: 'close',
+          lastDisconnect: { error: { output: { statusCode: 408 } } },
+        });
+        await flush();
+      }
+      expect(h.states.at(-1)).toBe('closed');
+      expect(h.disconnects.filter((d) => d.gaveUp)).toHaveLength(1);
+
+      vi.advanceTimersByTime(60_000);
+      await flush();
+
+      // A transport that gave up stays given up; no leftover timer re-opens it.
+      expect(h.sockets).toHaveLength(2);
+      expect(h.disconnects.filter((d) => d.gaveUp)).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('ignores a late close from the socket it abandoned', async () => {
+    fakeConnectTimers();
+    try {
+      const h = harness({ connectWatchdogMs: 5_000 });
+      void h.transport.connect().catch(() => {});
+      await flush();
+      vi.advanceTimersByTime(5_000);
+      await flush();
+      expect(h.sleeps).toEqual([100]);
+      expect(h.sockets).toHaveLength(2);
+
+      // A real socket may emit its close only after end() — that is the attempt
+      // the watchdog already replaced, so it must schedule nothing.
+      h.sockets[0]!.emit('connection.update', {
+        connection: 'close',
+        lastDisconnect: { error: { output: { statusCode: 408 } } },
+      });
+      await flush();
+
+      expect(h.sleeps).toEqual([100]);
+      expect(h.sockets).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('discards a connect that finally resolves after it was abandoned', async () => {
+    fakeConnectTimers();
+    try {
+      const h = harness({ connectWatchdogMs: 5_000 });
+      h.deferConnects(1); // the first attempt hangs inside createSocket itself
+      void h.transport.connect().catch(() => {});
+      await flush();
+      expect(h.sockets).toHaveLength(0);
+
+      vi.advanceTimersByTime(5_000);
+      await flush();
+      expect(h.sleeps).toEqual([100]);
+      expect(h.sockets).toHaveLength(1); // the retry's socket
+
+      // The hung attempt lands late. Adopting it would overwrite the live
+      // socket that send() reaches for, with one whose events are ignored.
+      h.releaseConnects();
+      await flush();
+
+      expect(h.sockets).toHaveLength(2);
+      expect(h.sockets[1]!.end).toHaveBeenCalled(); // the late one, discarded
+      expect(h.sockets[0]!.end).not.toHaveBeenCalled(); // the live one, kept
+
+      h.sockets[0]!.emit('connection.update', { connection: 'open' });
+      await flush();
+      expect(h.states.at(-1)).toBe('open');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('abandons the wedged attempt even when no retry follows it', async () => {
+    fakeConnectTimers();
+    try {
+      // maxAttempts 0 — the watchdog fires and the budget is spent in the same
+      // breath, so nothing starts a fresh attempt to invalidate the old one.
+      const h = harness({ maxAttempts: 0, connectWatchdogMs: 5_000 });
+      void h.transport.connect().catch(() => {});
+      await flush();
+
+      vi.advanceTimersByTime(5_000);
+      await flush();
+      expect(h.states.at(-1)).toBe('closed');
+      expect(h.disconnects.filter((d) => d.gaveUp)).toHaveLength(1);
+
+      // The socket it walked away from reports its close afterwards.
+      h.sockets[0]!.emit('connection.update', {
+        connection: 'close',
+        lastDisconnect: { error: { output: { statusCode: 408 } } },
+      });
+      await flush();
+
+      expect(h.disconnects.filter((d) => d.gaveUp)).toHaveLength(1);
+      expect(h.sockets).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('watchdog retries spend the budget and give up rather than looping forever', async () => {
+    fakeConnectTimers();
+    try {
+      const h = harness({ maxAttempts: 2, connectWatchdogMs: 5_000 });
+      void h.transport.connect().catch(() => {});
+      await flush();
+
+      // Every attempt wedges: two retries inside the budget, then give up.
+      for (let i = 0; i < 3; i++) {
+        vi.advanceTimersByTime(5_000);
+        await flush();
+      }
+
+      expect(h.sockets).toHaveLength(3); // initial + 2 retries
+      expect(h.states.at(-1)).toBe('closed');
+      expect(h.disconnects.at(-1)).toEqual({
+        statusCode: undefined,
+        action: 'connect-timeout',
+        attempt: 3,
+        retryDelayMs: null,
+        gaveUp: true,
+      });
+
+      // Spent means spent — no watchdog is left armed to resurrect it.
+      vi.advanceTimersByTime(60_000);
+      await flush();
+      expect(h.sockets).toHaveLength(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('retries when a background connect rejects, with nothing left unhandled', async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const h = harness();
+      await connectOpen(h);
+
+      // The reconnect after this drop is the second door: startSocket is invoked
+      // from scheduleRetry's .then(), so a rejecting createSocket used to escape
+      // as an unhandled rejection and schedule no further retry.
+      h.failConnects(1);
+      h.sockets[0]!.emit('connection.update', {
+        connection: 'close',
+        lastDisconnect: { error: { output: { statusCode: 408 } } },
+      });
+      await flush();
+      await flush();
+
+      expect(h.sleeps).toEqual([100, 200]);
+      expect(h.disconnects.at(-1)).toEqual({
+        statusCode: undefined,
+        action: 'connect-failed',
+        attempt: 2,
+        retryDelayMs: 200,
+        gaveUp: false,
+      });
+      expect(h.sockets).toHaveLength(2); // the first socket, plus the retry that worked
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
+  it('a rejecting connect on the restart path also schedules a retry', async () => {
+    const h = harness();
+    await connectOpen(h);
+
+    // 515 restarts via `void startSocket()` — the same unguarded door.
+    h.failConnects(1);
+    h.sockets[0]!.emit('connection.update', {
+      connection: 'close',
+      lastDisconnect: { error: { output: { statusCode: 515 } } },
+    });
+    await flush();
+    await flush();
+
+    expect(h.disconnects.at(-1)).toEqual({
+      statusCode: undefined,
+      action: 'connect-failed',
+      attempt: 1,
+      retryDelayMs: 100,
+      gaveUp: false,
+    });
+    expect(h.sockets).toHaveLength(2);
   });
 });

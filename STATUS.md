@@ -27,6 +27,12 @@ allowlist was dropping the rotating `oauth2.googleapis.com` answer; the
 "stopped reproducing" claim was wrong) and fixed at the egress, server and UI
 layers. Nothing else re-verified on this pass.
 
+**Partial update 2026-09-05:** added item 10 — the 17h connecting-state socket
+wedge of 2026-09-04/05, which had no entry here at all (PR #53 flagged the gap
+while adding the handover brief). Its fix is **built and green but not
+released**; nothing was verified on the host on this pass. Item 8 closed the
+same day.
+
 This is the **single source of truth for current state**. Everything else is
 history:
 
@@ -630,6 +636,77 @@ total under-reports by the whole embedding line.
 Also unbuilt for the same reason: the Status screen's uptime strip and probe
 latency trend need probe results persisted — `ServiceRow` carries latency and
 uptime as *strings*, and no history exists to chart.
+
+### 10. Socket can wedge in `connecting` forever — fix built, not yet released
+**Status:** open — **the fix is written and green locally, and has shipped
+nowhere.** Until it is released and deployed, prod still carries the bug.
+**Outage 2026-09-04T20:12:56Z → 2026-09-05T13:16:17Z, 17h 03m deaf**, ended by
+`docker restart hh-assistant-ezra-1` only. Filed as the second mechanism under
+`SOCKET-DEAD-001` in [`docs/known-issues.md`](docs/known-issues.md); the
+briefing that scoped this work is PR #53.
+
+The container stayed `Up` with `RestartCount 0` and kept logging its scheduled
+version check, so the process was alive and only the socket was dead — the
+dead-man ping stayed green through the whole outage, as it structurally must.
+
+**Root cause.** `connection.update` is the only caller of `handleClose`, and
+`handleClose` the only caller of `scheduleRetry`. A connect attempt that emits
+neither `open` nor `close` therefore scheduled *nothing*: the transport sat in
+`connecting` with `retry #1` never advancing. A second door reached the same
+state — `startSocket` runs in the background (`void startSocket()`, and inside
+`scheduleRetry`'s `.then()`), so a rejecting `loadAuthState()`/`createSocket()`
+escaped as an unhandled rejection and likewise scheduled nothing.
+
+**Built (this PR).** A connect watchdog closing both doors:
+
+| | What |
+|---|---|
+| bound | `connectWatchdogMs` in `src/transport/protocol.ts`, on `ReconnectPolicy` beside `maxAttempts` — **20s** |
+| door 1 | `onConnectTimeout` in `src/transport/baileys.ts` — abandons the half-open socket and re-enters the *existing* `scheduleRetry`, never a parallel loop |
+| door 2 | `startSocketInBackground` in `src/transport/baileys.ts` — every background start now catches and retries instead of leaking a rejection |
+| staleness | an attempt id gates `connection.update` and the post-`await` adoption, so a socket the watchdog walked away from cannot double-drive the retry path or clobber the live `sock` |
+
+Two decisions the brief deliberately left open, decided here:
+
+- **A watchdog retry spends the `maxAttempts` budget** rather than resetting
+  it. Resetting would let a permanently wedging socket retry forever — the same
+  never-gives-up, never-alerts shape this watchdog exists to end. The budget
+  resets only where a genuinely new input is introduced (the ADR-0006
+  fall-forward changes the announced version) or where the socket actually
+  opened.
+- **20s**, against `DEFAULT_DOWN_GRACE_MS` in `src/ops/health.ts` (60s, now
+  exported): a healthy connect opens in ~5s, so 20s is slack, and
+  the ceiling is asserted mechanically — `DEFAULT_RECONNECT_POLICY` in
+  `tests/unit/transport-protocol.test.ts` requires the bound to sit at or under
+  half the grace, so a wedge is already retrying before Telegram pages.
+
+**Verified 2026-09-05, locally only:** 12 new cases behind `fakeConnectTimers`
+in `tests/unit/baileys-adapter.test.ts` (fake timers scoped to
+`setTimeout`/`clearTimeout` so the suite's real `setImmediate` flush still
+works) — both doors, plus disarm on open, on an intentional disconnect, on a
+`logged-out` close and on a spent budget. **Every guard was verified RED by
+mutation:** removing any one of the timer, either `clearWatchdog`, either
+attempt-id check, or the background-start catch fails a named case. Before the
+fix the suite reproduced the wedge and vitest itself caught the unhandled
+rejection from door 2. `pnpm lint` · `pnpm build` · `pnpm test` (**631 passed /
+57 files**, 618 before this PR: 12 new adapter cases plus the
+policy-bound assertion) · `pnpm check:docs` clean.
+
+**Residual, unchanged by this PR:** budget exhaustion still ends in a permanent
+`closed` that nothing re-arms — the *first* half of `SOCKET-DEAD-001`. With the
+default policy that is ~12 attempts over ~4 minutes, so a sustained wedge storm
+can still park ezra until a human restarts it. The watchdog converts silence
+into that bounded, alerting path; it does not make the transport self-healing
+without limit. Deliberate, and still open.
+
+**On the host after the release that carries it** — a wedge is `[socket]
+connecting` with no following `open` or `disconnected`. `retry #` must climb
+past 1, and a watchdog-driven attempt logs as `code=none connect-timeout #N`
+(a rejecting start logs `code=none connect-failed #N`), which is what
+distinguishes it from an ordinary WhatsApp drop carrying no status code. Note a
+restart sends **no** ✅ all-clear to Telegram — `downAlertSent` in
+`createHealthMonitor` (`src/ops/health.ts`) is in-process state a restart
+resets, so silence is not evidence of still-down.
 
 ---
 

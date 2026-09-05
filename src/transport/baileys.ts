@@ -74,11 +74,21 @@ interface UpsertLike {
   }>;
 }
 
+/**
+ * Why the adapter is reconnecting. Extends the codes WhatsApp actually sends
+ * with the two failures it never reports, because in both the socket simply
+ * stops talking (SOCKET-DEAD-001):
+ * - `connect-timeout` — the attempt sat in 'connecting' past the watchdog.
+ * - `connect-failed`  — the attempt itself rejected (auth load or socket build).
+ * Kept out of DisconnectAction so classifyDisconnect's switch stays exhaustive.
+ */
+export type RetryReason = DisconnectAction | 'connect-timeout' | 'connect-failed';
+
 /** Why the socket dropped, and what the adapter decided to do about it. */
 export interface DisconnectInfo {
   /** WhatsApp's disconnect code; undefined when the error carried none. */
   statusCode: number | undefined;
-  action: DisconnectAction;
+  action: RetryReason;
   /** Retry number within the current budget; 0 for 'restart'/'re-pair'. */
   attempt: number;
   /** Backoff before the next attempt; null when not retrying. */
@@ -207,6 +217,19 @@ export function createBaileysTransport(deps: BaileysTransportDeps): Transport {
   let intentionalClose = false;
   let forceRestart = false;
   let retryAttempts = 0;
+  /**
+   * Identifies the in-flight connect attempt. Bumped on every new attempt AND
+   * when the watchdog abandons one, so a socket the adapter has already walked
+   * away from cannot drive a second retry with its late 'close'.
+   */
+  let connectAttempt = 0;
+  let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function clearWatchdog(): void {
+    if (watchdogTimer === null) return;
+    clearTimeout(watchdogTimer);
+    watchdogTimer = null;
+  }
 
   function setState(next: TransportState): void {
     if (next === state) return;
@@ -240,14 +263,62 @@ export function createBaileysTransport(deps: BaileysTransportDeps): Transport {
     }
   }
 
+  /**
+   * SOCKET-DEAD-001. connection.update is the only caller of handleClose, and
+   * handleClose the only caller of scheduleRetry — so an attempt that emits
+   * neither 'open' nor 'close' scheduled nothing and the transport sat in
+   * 'connecting' until a human restarted the container (17h03m on 2026-09-04).
+   * This is that missing edge: abandon the half-open socket and re-enter the
+   * SAME bounded retry path, never a parallel loop of its own.
+   */
+  function onConnectTimeout(attemptId: number): void {
+    // The attempt id is the whole guard. An intentional close cancels this
+    // timer synchronously (disconnect() is the only writer of intentionalClose,
+    // and no path arms a watchdog while it is set), so there is nothing else
+    // left to check here. Checked before the handle is dropped, so a stale
+    // firing can never clear the live attempt's watchdog.
+    if (attemptId !== connectAttempt) return;
+    watchdogTimer = null;
+    // Bump first: end() may make the socket emit its 'close' late, and that
+    // attempt is already being retried here.
+    connectAttempt += 1;
+    const abandoned = sock;
+    sock = null;
+    try {
+      abandoned?.end(undefined);
+    } catch {
+      // Tearing down a wedged socket must not take the retry down with it.
+    }
+    scheduleRetry(undefined, 'connect-timeout');
+  }
+
+  /**
+   * The second door into the same wedge: startSocket is invoked in the
+   * background (`void startSocket()`, and inside scheduleRetry's `.then()`),
+   * so a rejecting loadAuthState()/createSocket() used to escape as an
+   * unhandled rejection — again scheduling nothing. connect() is deliberately
+   * NOT routed through here: its caller awaits the rejection and owns it.
+   */
+  function startSocketInBackground(): void {
+    void startSocket().catch(() => {
+      clearWatchdog();
+      if (intentionalClose) return;
+      scheduleRetry(undefined, 'connect-failed');
+    });
+  }
+
   function handleClose(statusCode: number | undefined): void {
+    // Every exit from 'connecting' disarms, including the ones that start no
+    // new attempt (logged-out, and a spent budget) — those would otherwise
+    // leave a timer that reconnects a transport deliberately left down.
+    clearWatchdog();
     if (intentionalClose) {
       setState('closed');
       return;
     }
     if (forceRestart) {
       forceRestart = false;
-      void startSocket();
+      startSocketInBackground();
       return;
     }
     const action = classifyDisconnect(statusCode);
@@ -260,7 +331,7 @@ export function createBaileysTransport(deps: BaileysTransportDeps): Transport {
         return;
       case 'restart':
         report({ statusCode, action, attempt: 0, retryDelayMs: null, gaveUp: false });
-        void startSocket();
+        startSocketInBackground();
         return;
       case 'version-rejected':
         // ADR-0006. WhatsApp refused the client version we announced, so the
@@ -277,7 +348,7 @@ export function createBaileysTransport(deps: BaileysTransportDeps): Transport {
             // it earns a fresh budget and reconnects without serving backoff.
             retryAttempts = 0;
             report({ statusCode, action, attempt: 0, retryDelayMs: 0, gaveUp: false });
-            await startSocket();
+            startSocketInBackground();
             return;
           }
           scheduleRetry(statusCode, action);
@@ -289,8 +360,17 @@ export function createBaileysTransport(deps: BaileysTransportDeps): Transport {
     }
   }
 
-  /** Bounded exponential-backoff reconnect; gives up when the budget is spent. */
-  function scheduleRetry(statusCode: number | undefined, action: DisconnectAction): void {
+  /**
+   * Bounded exponential-backoff reconnect; gives up when the budget is spent.
+   *
+   * A watchdog- or failure-triggered retry SPENDS the budget like any other.
+   * The alternative — resetting it — would let a permanently wedging socket
+   * retry forever, which is the same never-gives-up, never-alerts shape this
+   * watchdog exists to end. The budget resets only where a genuinely new input
+   * is introduced (the fall-forward above changes the announced version) or
+   * where the socket actually opened; an identical repeat spends it.
+   */
+  function scheduleRetry(statusCode: number | undefined, action: RetryReason): void {
     retryAttempts += 1;
     if (retryAttempts > policy.maxAttempts) {
       report({ statusCode, action, attempt: retryAttempts, retryDelayMs: null, gaveUp: true });
@@ -300,7 +380,8 @@ export function createBaileysTransport(deps: BaileysTransportDeps): Transport {
     const delay = computeReconnectDelay(retryAttempts - 1, policy, random);
     report({ statusCode, action, attempt: retryAttempts, retryDelayMs: delay, gaveUp: false });
     void sleep(delay).then(() => {
-      if (!intentionalClose) return startSocket();
+      if (intentionalClose) return;
+      startSocketInBackground();
     });
   }
 
@@ -334,17 +415,34 @@ export function createBaileysTransport(deps: BaileysTransportDeps): Transport {
   }
 
   async function startSocket(): Promise<void> {
+    const attemptId = ++connectAttempt;
     setState('connecting');
+    // Armed before the awaits, not after: loadAuthState and createSocket are
+    // themselves inside the connecting window this bounds.
+    clearWatchdog();
+    watchdogTimer = setTimeout(() => onConnectTimeout(attemptId), policy.connectWatchdogMs);
+    // Nothing keeps the process alive on the watchdog's account alone.
+    watchdogTimer.unref?.();
+
     const { state: authState, saveCreds } = await deps.sessionStore.loadAuthState();
     const socket = await createSocket(authState, deps.versionSource?.current());
+    if (attemptId !== connectAttempt) {
+      // Superseded while connecting — this socket is nobody's.
+      socket.end(undefined);
+      return;
+    }
     sock = socket;
     socket.ev.on('creds.update', () => {
       void saveCreds();
     });
     socket.ev.on('messages.upsert', (event: UpsertLike) => handleUpsert(event));
     socket.ev.on('connection.update', (update: ConnectionUpdateLike) => {
+      // Events from an attempt the adapter already walked away from would
+      // double-drive the retry path.
+      if (attemptId !== connectAttempt) return;
       if (update.qr) deps.onQr?.(update.qr);
       if (update.connection === 'open') {
+        clearWatchdog();
         retryAttempts = 0;
         setState('open');
       } else if (update.connection === 'close') {
@@ -413,6 +511,7 @@ export function createBaileysTransport(deps: BaileysTransportDeps): Transport {
 
     async disconnect(): Promise<void> {
       intentionalClose = true;
+      clearWatchdog();
       sock?.end(undefined);
       setState('closed');
     },

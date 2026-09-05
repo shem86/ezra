@@ -24,7 +24,9 @@ export interface HealthMonitor {
   stop(): void;
 }
 
-const DEFAULT_DOWN_GRACE_MS = 60_000;
+// Exported so the transport's connect watchdog can be asserted to fire well
+// inside it — a socket wedge must self-heal before it pages a human.
+export const DEFAULT_DOWN_GRACE_MS = 60_000;
 
 export function createHealthMonitor(deps: HealthMonitorDeps): HealthMonitor {
   const downGraceMs = deps.downGraceMs ?? DEFAULT_DOWN_GRACE_MS;
