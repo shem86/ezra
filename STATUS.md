@@ -394,22 +394,31 @@ the right shape. Also unaddressed: 97,540 of the 97,758 journal rows are
 `reminderSweep`/`expirySweep` records versus 54 real turns — harmless at
 today's 35ms, worth a retention policy before it isn't.
 
-### 8. ⏳ REOPENED 2026-09-04 — `/api/status` 10.5s cold cost = egress allowlist dropping `oauth2.googleapis.com`
-**Status:** the **original symptom is closed** — root-caused and fixed in PR
-#50, released as **v2.3.6** (deploy run green 2026-09-04 00:22 UTC, all three
-containers on `:2.3.6`); post-release verification on the host: cold
-`/api/status` **0.52s / 0.44s**, the served bundle is the per-card Overview,
-and the installed egress units + sudoers were byte-identical to the checkout,
-so the `reconcile-host-config.sh` step was a no-op. **Reopened the same day**
-by the third finding below: the accumulating refresh never survived the hour,
-because `nft add element` does not restart an element timeout — an ~hourly
-drop window against every *stable* destination, the dead-man ping included.
-Fixed in **PR #52**, **live on the host** since 2026-09-04 01:32 UTC and
-hardened after review 2026-09-05 (both verified below). ⚠️ That roll is a
-hand-copied file, so the **next deploy's `git checkout --force` reverts the
-host to whatever ships in the release** — until PR #52 is released a deploy
-silently reinstates the hourly drop, and `reconcile-host-config.sh` after that
-release is what makes the roll permanent · **verified**
+### 8. ✅ CLOSED 2026-09-05 — `/api/status` 10.5s cold cost = egress allowlist dropping `oauth2.googleapis.com`
+**Status:** **closed in two rounds.** The original symptom was root-caused and
+fixed in PR #50, released as **v2.3.6** (deploy run green 2026-09-04 00:22
+UTC, all three containers on `:2.3.6`); post-release verification on the host:
+cold `/api/status` **0.52s / 0.44s**, the served bundle is the per-card
+Overview, and the installed egress units + sudoers were byte-identical to the
+checkout, so the `reconcile-host-config.sh` step was a no-op. **Reopened the
+same day** by the third finding below: the accumulating refresh never survived
+the hour, because `nft add element` does not restart an element timeout — an
+~hourly drop window against every *stable* destination, the dead-man ping
+included. Fixed in **PR #52**, hand-rolled to the host 2026-09-04 01:32 UTC,
+hardened after review 2026-09-05, and **released as `v2.3.7`** (deploy run
+green 2026-09-05 15:05:57 UTC) — which is what makes the roll survive the next
+deploy's `git checkout --force` · **verified**
+2026-09-05 on the host after that deploy — the first refresh tick on the
+*released* file (15:08:18 UTC) logged `refreshed allowed4 (+48 addresses
+resolved, 295 held) + allowed_nets4 (+23 nets)` with `Result=success` and
+`ExecMainStatus=0`, and **0** `hh-egress-drop` entries in the preceding 40 min.
+That success line is itself the assertion: since the hardening, an unreadable
+set, a malformed element, or a batch the kernel refused would each fail the
+unit loudly rather than pass silently. ⏳ **Still to do:** `sudo bash
+infra/host/reconcile-host-config.sh` on the host — expected to be a no-op as
+it was for v2.3.6 (this fix changes no systemd unit), and the `expires`-goes-UP
+reading below wants a root `nft list set` that has not been re-taken since the
+release · **first verified**
 2026-09-03 on the host — reproduced (`/api/status` **10.496s** cold, 0.002s
 warm; every other Overview endpoint ≤0.7s), then the per-service JSON on the
 slow call named the culprit exactly as this entry predicted: **`Google
@@ -528,11 +537,12 @@ Fixed at all three layers, each with a failing test or on-host proof first:
   failures, **0** `[deadman] ping failed` lines (they had been recurring), no
   `applied table` line before any `refreshed` line, and `held` still growing
   across ticks (299 → 315 → 320 → 323), so the accumulate behaviour survived
-  the change. ⚠️ That hand-copied host file is the **2026-09-04 revision** —
-  the delete-then-add fix as verified above, but *without* the 2026-09-05
-  hardening; the three hardening items change only failure paths the sawtooth
-  never exercised, so the host's behaviour is unchanged, and the release
-  carrying this PR (or another hand-copy) supersedes it.
+  the change. That sawtooth was read off the hand-copied **2026-09-04
+  revision** — the delete-then-add fix without the 2026-09-05 hardening, which
+  touches only failure paths the sawtooth never exercised. **Superseded by the
+  `v2.3.7` deploy on 2026-09-05**, which put the hardened file on the host
+  through the release path; the first tick on it is recorded in the status
+  line above.
   **Host roll:** all three files are copies under `/etc/systemd/system` /
   the host checkout, so the durable path is `sudo bash
   infra/host/reconcile-host-config.sh` on the host after the release lands
