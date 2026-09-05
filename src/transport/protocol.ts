@@ -36,6 +36,13 @@ export interface ReconnectPolicy {
   /** Total jitter band, e.g. 0.25 spreads delays across ±12.5%. */
   readonly jitter: number;
   readonly maxAttempts: number;
+  /**
+   * How long a connect attempt may sit in 'connecting' before the adapter
+   * abandons it and retries (SOCKET-DEAD-001). WhatsApp can leave the socket
+   * half-open: no 'open', no 'close', and therefore nothing to drive the
+   * close-triggered retry path — 17h deaf on 2026-09-04.
+   */
+  readonly connectWatchdogMs: number;
 }
 
 // Values OpenClaw converged on in production; revisit after our own M2 drill.
@@ -45,6 +52,12 @@ export const DEFAULT_RECONNECT_POLICY: ReconnectPolicy = {
   factor: 1.8,
   jitter: 0.25,
   maxAttempts: 12,
+  // A healthy connect opens in ~5s (measured on the 2026-09-05 restart), so
+  // 20s is slack rather than a hair trigger. The ceiling is what matters: it
+  // must stay well inside DEFAULT_DOWN_GRACE_MS (src/ops/health.ts) so a wedge
+  // is already retrying before the monitor pages a human — asserted in
+  // tests/unit/transport-protocol.test.ts.
+  connectWatchdogMs: 20_000,
 };
 
 export function computeReconnectDelay(

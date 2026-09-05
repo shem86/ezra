@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { DEFAULT_DOWN_GRACE_MS } from '../../src/ops/health.ts';
 import {
   classifyDisconnect,
   computeReconnectDelay,
@@ -59,6 +60,16 @@ describe('computeReconnectDelay', () => {
 
   it('default policy gives up after maxAttempts', () => {
     expect(DEFAULT_RECONNECT_POLICY.maxAttempts).toBeGreaterThan(0);
+  });
+
+  // SOCKET-DEAD-001: the watchdog only earns its keep if a wedged connect is
+  // already being retried before the health monitor pages a human. Half the
+  // grace leaves room for the retry to land inside the same window.
+  it('the connect watchdog fires well inside the health monitor down grace', () => {
+    expect(DEFAULT_RECONNECT_POLICY.connectWatchdogMs).toBeGreaterThan(0);
+    expect(DEFAULT_RECONNECT_POLICY.connectWatchdogMs).toBeLessThanOrEqual(
+      DEFAULT_DOWN_GRACE_MS / 2,
+    );
   });
 });
 
