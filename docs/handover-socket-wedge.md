@@ -1,13 +1,16 @@
 # Handover — the socket that never finishes connecting
 
-**Status of this doc:** briefing for whoever fixes `SOCKET-DEAD-001`. Written
-2026-09-05, after the outage below. The bug is **unfixed**; service was restored
-by a container restart only. Current state lives in [`STATUS.md`](../STATUS.md),
-not here.
+**Status of this doc:** the briefing that scoped the fix, kept as the record of
+*why* the watchdog is shaped the way it is. Written 2026-09-05 after the outage
+below, when the bug was still unfixed; the watchdog it specifies was built in
+PR #56 and both open decisions are settled (see the end of "The job"). Whether
+that has shipped to the host is asserted **only** in
+[`STATUS.md`](../STATUS.md), item 10 — not here.
 
 Baileys can enter `connecting` and stay there forever. Nothing retries, nothing
 errors, nothing restarts. A container restart cures it; only a watchdog prevents
-a recurrence.
+a recurrence. The tenses below are as-written, describing the code before the
+fix.
 
 | | |
 |---|---|
@@ -64,9 +67,18 @@ and again no retry is scheduled. Fix both doors or it recurs through the other.
 - Keep the bound well under `DEFAULT_DOWN_GRACE_MS` in `src/ops/health.ts`, so
   the system self-heals before it pages a human.
 
-**One decision left open on purpose:** whether a watchdog-triggered retry should
-consume the `maxAttempts` budget or reset it. Both are defensible — decide it
-deliberately and write down why.
+**The decision this left open — settled in PR #56: a watchdog-triggered retry
+SPENDS the `maxAttempts` budget.** Resetting it would let a permanently wedging
+socket retry forever, which is the same never-gives-up, never-alerts shape the
+watchdog exists to end. The budget resets only where a genuinely new input is
+introduced (the ADR-0006 fall-forward changes the announced version) or where
+the socket actually opened; an identical repeat spends it. The bound landed at
+**20s** against a 60s `DEFAULT_DOWN_GRACE_MS`, which is now exported so the
+relation is asserted by a test rather than by a comment.
+
+Note the consequence, recorded as residual in `STATUS.md` item 10: budget
+exhaustion still ends in a permanent `closed` that nothing re-arms — the *first*
+half of `SOCKET-DEAD-001`, which this work did not touch.
 
 ## Tests — both doors, no real WhatsApp
 
