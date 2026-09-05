@@ -394,15 +394,22 @@ the right shape. Also unaddressed: 97,540 of the 97,758 journal rows are
 `reminderSweep`/`expirySweep` records versus 54 real turns — harmless at
 today's 35ms, worth a retention policy before it isn't.
 
-### 8. ✅ CLOSED 2026-09-04 — `/api/status` 10.5s cold cost = egress allowlist dropping `oauth2.googleapis.com`
-**Status:** **closed** — root-caused and fixed in PR #50, released as
-**v2.3.6** (deploy run green 2026-09-04 00:22 UTC, all three containers on
-`:2.3.6`). Post-release verification on the host: cold `/api/status`
-**0.52s / 0.44s**, the served bundle is the per-card Overview, and the
-installed egress units + sudoers are byte-identical to the checkout, so the
-`reconcile-host-config.sh` step was a no-op (the interim roll below already
-matched). Egress fix live on the host since 2026-09-03 21:58 + 22:55 UTC ·
-**verified**
+### 8. ⏳ REOPENED 2026-09-04 — `/api/status` 10.5s cold cost = egress allowlist dropping `oauth2.googleapis.com`
+**Status:** the **original symptom is closed** — root-caused and fixed in PR
+#50, released as **v2.3.6** (deploy run green 2026-09-04 00:22 UTC, all three
+containers on `:2.3.6`); post-release verification on the host: cold
+`/api/status` **0.52s / 0.44s**, the served bundle is the per-card Overview,
+and the installed egress units + sudoers were byte-identical to the checkout,
+so the `reconcile-host-config.sh` step was a no-op. **Reopened the same day**
+by the third finding below: the accumulating refresh never survived the hour,
+because `nft add element` does not restart an element timeout — an ~hourly
+drop window against every *stable* destination, the dead-man ping included.
+Fixed in **PR #52**, **live on the host** since 2026-09-04 01:32 UTC and
+hardened after review 2026-09-05 (both verified below). ⚠️ That roll is a
+hand-copied file, so the **next deploy's `git checkout --force` reverts the
+host to whatever ships in the release** — until PR #52 is released a deploy
+silently reinstates the hourly drop, and `reconcile-host-config.sh` after that
+release is what makes the roll permanent · **verified**
 2026-09-03 on the host — reproduced (`/api/status` **10.496s** cold, 0.002s
 warm; every other Overview endpoint ≤0.7s), then the per-service JSON on the
 slow call named the culprit exactly as this entry predicted: **`Google
@@ -442,11 +449,14 @@ deploys were never the variable — the earlier "container-scoped warming" and
 Fixed at all three layers, each with a failing test or on-host proof first:
 
 - **Egress (root cause):** `refresh` no longer flushes — it re-adds the current
-  answers on top of the loaded set, and re-adding refreshes an element's 1h
-  timeout in place (proven on the host kernel, 6.17, with a scratch table:
-  `timeout 10m` → re-add → `expires 59m59s`). The set therefore accumulates
-  every answer seen in the last hour and ages the stale ones out.
-  `hh-egress.timer` runs every **3 min** (inside the 200s TTL) instead of 15.
+  answers on top of the loaded set, so the set accumulates every answer seen in
+  the last hour and ages the stale ones out. `hh-egress.timer` runs every
+  **3 min** (inside the 200s TTL) instead of 15. ⚠️ This bullet originally also
+  claimed that "re-adding refreshes an element's 1h timeout in place (proven on
+  the host kernel, 6.17, with a scratch table: `timeout 10m` → re-add →
+  `expires 59m59s`)". **That claim is false** — see the third finding below.
+  The scratch-table reading was never reproduced against the live set and is
+  withdrawn; the accumulate behaviour above is unaffected.
   **Second finding, same day, from the first roll:** the set still did not
   accumulate — `held` equalled `resolved` on every tick and all elements
   carried one expiry. The journal showed why: **`hh-egress.service` (the full
@@ -459,6 +469,70 @@ Fixed at all three layers, each with a failing test or on-host proof first:
   `Wants=` (the `After=` alone gives the boot ordering); `RemainAfterExit=yes`
   on the apply unit was rejected because the deploy re-applies with
   `systemctl start`, which would then be a silent no-op.
+  **Third finding, 2026-09-04 — the accumulate never survived the hour.**
+  Investigating a burst of 13 egress drops at 2026-09-03T23:55Z to four
+  Hetzner addresses showed they were `hc-ping.com` / `healthchecks.io` — the
+  **dead-man ping**, already allowlisted (`deadman`), dialled by the spine
+  container `172.19.0.2`. The set held all four *at the time of the check*, and
+  the timer was healthy, so the drop was not a policy gap: **`nft add element`
+  does not restart the timeout of an element the set already holds.** Upstream
+  is explicit that only the packet-path `update` operation refreshes a previous
+  element timeout while `add` does not, and the live set agrees — 47s after a
+  successful `refreshed allowed4 (+48 addresses resolved, 312 held)` tick at
+  01:15:28Z, the four addresses read `expires 43m`, not 60m, and counted
+  monotonically down through the next tick (43m03s at 01:16:15Z → 41m53s at
+  01:17:24Z). So every element died exactly 1h after its **first** insertion
+  and stayed dropped until a later tick re-created it: an ~hourly outage window
+  one tick (≤3 min) wide. Drop windows 22:00Z, 23:55Z and 00:57–00:59Z — ~62
+  min apart — and the spine log carried the matching `[deadman] ping failed:
+  fetch failed`. It bit **stable** addresses hardest: a rotating name keeps
+  producing new answers that enter as new elements with a full hour, whereas
+  `hc-ping.com`'s four A records never change. The 3-day drop tally shows the
+  same mechanism against Google (`172.253.63.95`, `142.250.31.95`) and Meta
+  (`57.144.75.32`, `31.13.66.56`), and `allowed_nets4` (the static S3 backup
+  CIDRs) was exposed identically. Fixed by making `refresh` emit
+  **delete-then-add in one atomic `nft -f` batch** (`render_refresh_batch` /
+  `refresh_set_elements` in `infra/egress/nftables.sh`); a batch is a single
+  kernel transaction, so the element is never observably absent and the reset
+  opens no drop window of its own. An empty resolve leaves the set untouched
+  rather than rewriting it. The `renderBatch` cases in
+  `tests/unit/egress-refresh.test.ts` pin the batch shape and the `refreshSet`
+  cases pin what the function actually hands nft, both driving the script's
+  `HH_EGRESS_LIB` source-only seam so they need no nft and no kernel — 11 cases,
+  each guard verified RED by mutation on 2026-09-05 (disabling the delete fails
+  4; removing the empty-resolve guard, the unreadable-set failure, the element
+  validation, the trailing newline or the seam note each fail their own case).
+  **Hardened 2026-09-05 after review of this PR**, all three closing the same
+  class — a refresh that looks healthy while doing the wrong thing: (1) a
+  failed `nft list set` is now a **hard failure** instead of being swallowed
+  into an empty snapshot, which would have emitted no deletes and silently
+  degraded the tick back to the add-only refresh this entry is about, still
+  printing "refreshed …" and exiting 0; (2) every element is matched against an
+  anchored IPv4/CIDR pattern before it can enter a batch, since `nft -f` reads
+  a command language rather than an argv slot and the S3 ranges arrive as
+  remote JSON (not attacker-reachable today — this keeps it so); (3) the
+  `HH_EGRESS_LIB` seam announces itself on stderr, so the var leaking into the
+  refresh unit's environment cannot turn the timer into a silent exit-0 no-op.
+  **Rolled to the host 2026-09-04 01:32 UTC** (hand-copied over
+  `/home/hh/hh-assistant/infra/egress/nftables.sh`, which was byte-identical to
+  `origin/main` first — no local drift overwritten; prior file kept as
+  `nftables.sh.bak-20260904`; the systemd units are unchanged by this fix).
+  **Verified on the host:** the element timeout now resets, where before it
+  decayed straight through every tick — `hc-ping.com` read `expires 27m53s` two
+  minutes after the 01:29:18Z tick, and `expires 59m59s816ms` immediately after
+  the first refresh on the new script. Then a clean sawtooth across three
+  consecutive timer ticks (01:36:15Z, 01:39:18Z, 01:42:18Z): 59m23s → 58m23s →
+  57m23s → **59m28s** → 58m28s → 57m28s → **59m31s** → … → **59m31s**. Over the
+  37 min to 02:09:22Z: **0** `hh-egress-drop` entries — including across the
+  ~01:57–02:00Z slot where the ~62-min cluster was next due — **0** refresh-unit
+  failures, **0** `[deadman] ping failed` lines (they had been recurring), no
+  `applied table` line before any `refreshed` line, and `held` still growing
+  across ticks (299 → 315 → 320 → 323), so the accumulate behaviour survived
+  the change. ⚠️ That hand-copied host file is the **2026-09-04 revision** —
+  the delete-then-add fix as verified above, but *without* the 2026-09-05
+  hardening; the three hardening items change only failure paths the sawtooth
+  never exercised, so the host's behaviour is unchanged, and the release
+  carrying this PR (or another hand-copy) supersedes it.
   **Host roll:** all three files are copies under `/etc/systemd/system` /
   the host checkout, so the durable path is `sudo bash
   infra/host/reconcile-host-config.sh` on the host after the release lands
@@ -474,7 +548,12 @@ Fixed at all three layers, each with a failing test or on-host proof first:
   Verify after any future roll: the journal shows NO "applied table" line before a
   "refreshed" line, `held` grows past `resolved` across ticks, the container's
   current `oauth2.googleapis.com` answer is in `nft list set inet hh_egress
-  allowed4`, and a cold `/api/status` is <1s.
+  allowed4`, and a cold `/api/status` is <1s. Since the third finding, also:
+  a **resolved** element's `expires` must go back UP across a tick — read
+  `nft list set inet hh_egress allowed4` for `hc-ping.com`'s addresses before
+  and after a refresh; ~60m after each tick is the fix working, a monotonic
+  countdown is the bug back. And 24h of `journalctl -k | grep hh-egress-drop`
+  should show no hourly cluster.
 - **Server:** `PROBE_TIMEOUT_MS` 12s → **3s** (`src/backoffice/probes.ts`), so a
   dropped SYN costs 3s and reads `down · timeout` rather than 10.5s and `fetch
   failed`. `tests/unit/backoffice/probes.test.ts` pins it with a hanging ping
@@ -485,11 +564,12 @@ Fixed at all three layers, each with a failing test or on-host proof first:
   `backoffice/src/screens/overview.test.tsx` renders with a never-resolving
   `/api/status` and asserts the rest of the page is there.
 
-Same-class side finding, **not** fixed here: the same 7-day drop log's top
-entries (57 drops) are `57.144.75.32` / `31.13.66.56` =
-`whatsapp-cdn-*.fbcdn.net`, the WhatsApp media CDN rotating the same way. The
-accumulating refresh should cover it too; worth confirming media downloads in
-the spine log after the roll.
+Same-class side finding: the same 7-day drop log's top entries (57 drops) are
+`57.144.75.32` / `31.13.66.56` = `whatsapp-cdn-*.fbcdn.net`, the WhatsApp media
+CDN rotating the same way. Those addresses still led the 3-day tally on
+2026-09-04, i.e. the accumulating refresh alone did **not** cover them — the
+third finding above explains why, and its fix is what should. Worth confirming
+media downloads in the spine log after that roll.
 
 ### 9. Backoffice charts — the two things the new chart layer can't reach yet
 **Status:** open · **verified** 2026-08-10 by reading `makeCostClient` in
