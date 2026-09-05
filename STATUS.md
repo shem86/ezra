@@ -394,15 +394,22 @@ the right shape. Also unaddressed: 97,540 of the 97,758 journal rows are
 `reminderSweep`/`expirySweep` records versus 54 real turns — harmless at
 today's 35ms, worth a retention policy before it isn't.
 
-### 8. ✅ ROOT-CAUSED 2026-09-03 — `/api/status` 10.5s cold cost = egress allowlist dropping `oauth2.googleapis.com`
-**Status:** **root-caused and fixed in this PR**; all three egress fixes are
-**live on the host** (interim rolls of the `infra/egress/` files, 2026-09-03
-21:58 + 22:55 UTC and 2026-09-04 01:32 UTC — each verified below). ⚠️ The
-interim roll is a hand-copied file, so the **next deploy's `git checkout
---force` reverts the host to whatever ships in the release** — until this PR
-merges and a release carries it, a deploy silently reinstates the hourly drop.
-The server/UI code still needs that release, and `reconcile-host-config.sh`
-after it makes the roll permanent · **verified**
+### 8. ⏳ REOPENED 2026-09-04 — `/api/status` 10.5s cold cost = egress allowlist dropping `oauth2.googleapis.com`
+**Status:** the **original symptom is closed** — root-caused and fixed in PR
+#50, released as **v2.3.6** (deploy run green 2026-09-04 00:22 UTC, all three
+containers on `:2.3.6`); post-release verification on the host: cold
+`/api/status` **0.52s / 0.44s**, the served bundle is the per-card Overview,
+and the installed egress units + sudoers were byte-identical to the checkout,
+so the `reconcile-host-config.sh` step was a no-op. **Reopened the same day**
+by the third finding below: the accumulating refresh never survived the hour,
+because `nft add element` does not restart an element timeout — an ~hourly
+drop window against every *stable* destination, the dead-man ping included.
+Fixed in **PR #52**, **live on the host** since 2026-09-04 01:32 UTC and
+hardened after review 2026-09-05 (both verified below). ⚠️ That roll is a
+hand-copied file, so the **next deploy's `git checkout --force` reverts the
+host to whatever ships in the release** — until PR #52 is released a deploy
+silently reinstates the hourly drop, and `reconcile-host-config.sh` after that
+release is what makes the roll permanent · **verified**
 2026-09-03 on the host — reproduced (`/api/status` **10.496s** cold, 0.002s
 warm; every other Overview endpoint ≤0.7s), then the per-service JSON on the
 slow call named the culprit exactly as this entry predicted: **`Google
