@@ -179,16 +179,33 @@ EOF
 # ONE `nft -f` batch: nft applies a batch as a single kernel transaction (there
 # is "no moment when the firewall is partially configured"), so the element is
 # never observably absent and the reset cannot open a drop window of its own.
+# The ONLY token shape allowed into a batch: one IPv4 address, optionally with
+# a prefix length. Elements reach this script from `getent` and — for the S3
+# ranges — from REMOTE JSON, and `nft -f` reads a full command language, not an
+# argv slot, so an element carrying `}` or `;` would be nft *syntax* rather
+# than data. Every element is matched against this anchored before it can enter
+# a batch; the same pattern unanchored pulls the held tokens out of `nft list
+# set`. Neither input is attacker-controlled today (getent cannot emit a
+# non-address, and the ranges arrive over TLS) — this keeps it that way.
+readonly IPV4_ELEMENT='([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?'
+
 render_refresh_batch() {
   local set_name="$1" timeout="$2" elements="$3" present="$4"
   local held elem
+  # Validate FIRST, emit second: a batch is all-or-nothing, so a bad token
+  # found halfway through must leave nothing behind for a caller to run.
+  for elem in $elements; do
+    if ! [[ $elem =~ ^${IPV4_ELEMENT}$ ]]; then
+      echo "refresh: refusing to batch malformed ${set_name} element: ${elem}" >&2
+      return 1
+    fi
+  done
   # The element tokens the set currently holds, one per line. The delete is
   # emitted ONLY for elements actually present, because `delete element` on a
   # missing element aborts the whole atomic batch. In steady state a resolved
   # element is re-timed every tick and so never approaches expiry, which is
   # what keeps this snapshot from racing its own apply.
-  held="$(printf '%s' "$present" | tr ',' '\n' \
-    | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?' || true)"
+  held="$(printf '%s' "$present" | tr ',' '\n' | grep -oE "$IPV4_ELEMENT" || true)"
   for elem in $elements; do
     # -x -F: an exact whole-line token match, so a held 10.0.0.45 is never
     # mistaken for 10.0.0.4 (a substring test would emit a delete for an
@@ -203,7 +220,7 @@ render_refresh_batch() {
 
 # Give every element resolved for set $1 a fresh $2 timeout, atomically.
 refresh_set_elements() {
-  local set_name="$1" timeout="$2" elements="$3" batch
+  local set_name="$1" timeout="$2" elements="$3" present batch
   # A DNS blip (or a failed ip-ranges fetch against a cold cache) must never
   # rewrite the set: with nothing resolved there is nothing to refresh, and the
   # elements already held keep aging out on their own clock. Failing closed
@@ -212,16 +229,34 @@ refresh_set_elements() {
     echo "refresh: resolved nothing for ${set_name} — left untouched" >&2
     return 0
   fi
-  batch="$(render_refresh_batch "$set_name" "$timeout" "$elements" \
-    "$(nft list set inet "${TABLE}" "${set_name}" 2>/dev/null || true)")"
-  printf '%s' "$batch" | nft -f -
+  # A FAILED listing must never read as "the set holds nothing". That would
+  # emit no deletes at all and silently degrade this back to the add-only
+  # refresh whose timeouts never restart — the very bug above, returning with
+  # no signal, since the tick would still print "refreshed …" and exit 0. So
+  # the read is a hard failure (nft's own stderr deliberately not swallowed):
+  # `set -e` then fails the unit loudly, which the journal and the dead-man can
+  # both see. A missing TABLE already failed loudly at `nft -f`; this closes
+  # the same hole for a set that cannot be read.
+  if ! present="$(nft list set inet "${TABLE}" "${set_name}")"; then
+    echo "refresh: cannot read set ${set_name} — refusing an add-only refresh" >&2
+    return 1
+  fi
+  batch="$(render_refresh_batch "$set_name" "$timeout" "$elements" "$present")" || return 1
+  # nft tolerates a final line with no trailing newline, but the command
+  # substitution above has stripped the renderer's — restore it rather than
+  # depend on that.
+  printf '%s\n' "$batch" | nft -f -
 }
 
 # Test seam: `HH_EGRESS_LIB=1 source nftables.sh` loads the helpers above
-# WITHOUT dispatching a subcommand, so the batch renderer is unit-testable off
-# the host (tests/unit/egress-refresh.test.ts), where there is no nft and no
-# kernel to hold a set.
+# WITHOUT dispatching a subcommand, so they are unit-testable off the host
+# (tests/unit/egress-refresh.test.ts), where there is no nft and no kernel to
+# hold a set. The stderr note is the point of the echo: were this var ever to
+# leak into the refresh unit's environment, the timer would otherwise exit 0
+# having done nothing — a firewall refresh that silently never runs, which is
+# the failure mode this entry has twice been bitten by.
 if [[ -n "${HH_EGRESS_LIB:-}" ]]; then
+  echo "nftables.sh: HH_EGRESS_LIB set — helpers loaded, no subcommand dispatched" >&2
   return 0 2>/dev/null || exit 0
 fi
 

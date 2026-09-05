@@ -489,9 +489,23 @@ Fixed at all three layers, each with a failing test or on-host proof first:
   kernel transaction, so the element is never observably absent and the reset
   opens no drop window of its own. An empty resolve leaves the set untouched
   rather than rewriting it. The `renderBatch` cases in
-  `tests/unit/egress-refresh.test.ts` pin the shape, driving the script's
-  `HH_EGRESS_LIB` source-only seam so they need no nft and no kernel (verified
-  RED: disabling the delete fails 3 of its 6 cases).
+  `tests/unit/egress-refresh.test.ts` pin the batch shape and the `refreshSet`
+  cases pin what the function actually hands nft, both driving the script's
+  `HH_EGRESS_LIB` source-only seam so they need no nft and no kernel — 11 cases,
+  each guard verified RED by mutation on 2026-09-05 (disabling the delete fails
+  4; removing the empty-resolve guard, the unreadable-set failure, the element
+  validation, the trailing newline or the seam note each fail their own case).
+  **Hardened 2026-09-05 after review of this PR**, all three closing the same
+  class — a refresh that looks healthy while doing the wrong thing: (1) a
+  failed `nft list set` is now a **hard failure** instead of being swallowed
+  into an empty snapshot, which would have emitted no deletes and silently
+  degraded the tick back to the add-only refresh this entry is about, still
+  printing "refreshed …" and exiting 0; (2) every element is matched against an
+  anchored IPv4/CIDR pattern before it can enter a batch, since `nft -f` reads
+  a command language rather than an argv slot and the S3 ranges arrive as
+  remote JSON (not attacker-reachable today — this keeps it so); (3) the
+  `HH_EGRESS_LIB` seam announces itself on stderr, so the var leaking into the
+  refresh unit's environment cannot turn the timer into a silent exit-0 no-op.
   **Rolled to the host 2026-09-04 01:32 UTC** (hand-copied over
   `/home/hh/hh-assistant/infra/egress/nftables.sh`, which was byte-identical to
   `origin/main` first — no local drift overwritten; prior file kept as
@@ -507,7 +521,11 @@ Fixed at all three layers, each with a failing test or on-host proof first:
   failures, **0** `[deadman] ping failed` lines (they had been recurring), no
   `applied table` line before any `refreshed` line, and `held` still growing
   across ticks (299 → 315 → 320 → 323), so the accumulate behaviour survived
-  the change.
+  the change. ⚠️ That hand-copied host file is the **2026-09-04 revision** —
+  the delete-then-add fix as verified above, but *without* the 2026-09-05
+  hardening; the three hardening items change only failure paths the sawtooth
+  never exercised, so the host's behaviour is unchanged, and the release
+  carrying this PR (or another hand-copy) supersedes it.
   **Host roll:** all three files are copies under `/etc/systemd/system` /
   the host checkout, so the durable path is `sudo bash
   infra/host/reconcile-host-config.sh` on the host after the release lands
