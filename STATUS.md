@@ -414,11 +414,22 @@ resolved, 295 held) + allowed_nets4 (+23 nets)` with `Result=success` and
 `ExecMainStatus=0`, and **0** `hh-egress-drop` entries in the preceding 40 min.
 That success line is itself the assertion: since the hardening, an unreadable
 set, a malformed element, or a batch the kernel refused would each fail the
-unit loudly rather than pass silently. ⏳ **Still to do:** `sudo bash
-infra/host/reconcile-host-config.sh` on the host — expected to be a no-op as
-it was for v2.3.6 (this fix changes no systemd unit), and the `expires`-goes-UP
-reading below wants a root `nft list set` that has not been re-taken since the
-release · **first verified**
+unit loudly rather than pass silently. **The `expires`-goes-UP check finally
+has its root reading, 2026-09-05:** an element inserted ~18:05:12 UTC read
+`expires 59m12s` at 18:06:00 and **57m46s** at 18:10:31, either side of the
+18:08:18 tick — 60m minus the 2m13s since *that tick*, not the 5m19s since its
+insertion, which is what an unrefreshed element would have shown (54m41s). The
+timeout is being restarted. `reconcile-host-config.sh` was run the same day
+(18:05 UTC): all seven installed units were **byte-identical to the checkout
+beforehand** (md5), so every install/enable step was a no-op, and its one real
+effect was the `apply` it ends with — which, by design, deletes and reloads the
+table and so reset the accumulated set from 295 held to 47. That is the second
+finding's mechanism, deliberately triggered: the set re-accumulated on the next
+tick (63 held at 18:08:18) and the `policed` chain still ends in `log … drop`.
+**Prefer `systemctl start hh-egress-refresh.service` over the full reconcile**
+when only the allowlist needs a nudge — reconcile's apply throws away an hour
+of accumulation to install files that are already identical · **first
+verified**
 2026-09-03 on the host — reproduced (`/api/status` **10.496s** cold, 0.002s
 warm; every other Overview endpoint ≤0.7s), then the per-service JSON on the
 slow call named the culprit exactly as this entry predicted: **`Google
