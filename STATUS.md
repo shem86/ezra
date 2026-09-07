@@ -33,6 +33,11 @@ while adding the handover brief). Its fix is **built and green but not
 released**; nothing was verified on the host on this pass. Item 8 closed the
 same day.
 
+**Partial update 2026-09-07:** item 10's fix **released as `v2.3.8`** (PRs #56,
+#53 and #57 merged; deploy run green) and verified on the host — the wedge half
+is closed, the never-re-arms residual stays open. Nothing else re-verified on
+this pass.
+
 This is the **single source of truth for current state**. Everything else is
 history:
 
@@ -637,13 +642,15 @@ Also unbuilt for the same reason: the Status screen's uptime strip and probe
 latency trend need probe results persisted — `ServiceRow` carries latency and
 uptime as *strings*, and no history exists to chart.
 
-### 10. Socket can wedge in `connecting` forever — fix built, not yet released
-**Status:** open — **the fix is written and green locally, and has shipped
-nowhere.** Until it is released and deployed, prod still carries the bug.
-**Outage 2026-09-04T20:12:56Z → 2026-09-05T13:16:17Z, 17h 03m deaf**, ended by
-`docker restart hh-assistant-ezra-1` only. Filed as the second mechanism under
+### 10. Connecting-state socket wedge — ✅ fixed in `v2.3.8`; the never-re-arms residual is still open
+**Status:** the **wedge half is closed** — released as **`v2.3.8`** and verified
+on the host 2026-09-07 (below). The **residual is open**: budget exhaustion
+still ends in a permanent `closed` that nothing re-arms. **Outage
+2026-09-04T20:12:56Z → 2026-09-05T13:16:17Z, 17h 03m deaf**, ended by `docker
+restart hh-assistant-ezra-1` only. Filed as the second mechanism under
 `SOCKET-DEAD-001` in [`docs/known-issues.md`](docs/known-issues.md); the
-briefing that scoped this work is PR #53.
+briefing that scoped the work is [`docs/handover-socket-wedge.md`](docs/handover-socket-wedge.md)
+(PR #53), and the fix is PR #56.
 
 The container stayed `Up` with `RestartCount 0` and kept logging its scheduled
 version check, so the process was alive and only the socket was dead — the
@@ -692,21 +699,38 @@ rejection from door 2. `pnpm lint` · `pnpm build` · `pnpm test` (**631 passed 
 57 files**, 618 before this PR: 12 new adapter cases plus the
 policy-bound assertion) · `pnpm check:docs` clean.
 
-**Residual, unchanged by this PR:** budget exhaustion still ends in a permanent
-`closed` that nothing re-arms — the *first* half of `SOCKET-DEAD-001`. With the
+**Residual — open, and untouched by `v2.3.8`:** budget exhaustion still ends in
+a permanent `closed` that nothing re-arms — the *first* half of
+`SOCKET-DEAD-001`, the one the entry in `docs/known-issues.md` describes. With the
 default policy that is ~12 attempts over ~4 minutes, so a sustained wedge storm
 can still park ezra until a human restarts it. The watchdog converts silence
 into that bounded, alerting path; it does not make the transport self-healing
 without limit. Deliberate, and still open.
 
-**On the host after the release that carries it** — a wedge is `[socket]
-connecting` with no following `open` or `disconnected`. `retry #` must climb
-past 1, and a watchdog-driven attempt logs as `code=none connect-timeout #N`
-(a rejecting start logs `code=none connect-failed #N`), which is what
-distinguishes it from an ordinary WhatsApp drop carrying no status code. Note a
-restart sends **no** ✅ all-clear to Telegram — `downAlertSent` in
-`createHealthMonitor` (`src/ops/health.ts`) is in-process state a restart
-resets, so silence is not evidence of still-down.
+**Released and verified on the host, 2026-09-07.** `v2.3.8` cut off green main,
+CI image green before publishing, deploy run **success** in 37s. All three app
+containers on `ghcr.io/shem86/hh-assistant:2.3.8`; the spine logged `[socket]
+connecting` **17:33:20.603Z** → `[socket] open` **17:33:21.448Z** → `ezra up: …
+wa-version 2.3000.1043857760`, with `[wa-version] pin is current` after it.
+
+**Be precise about what that proves.** The connect was healthy — it opened in
+**845ms**, so the watchdog never fired. The host reading therefore proves two
+things only: the fix is genuinely *deployed* (`onConnectTimeout` is present in
+the running image's `dist/transport/baileys.js`, and `dist/transport/protocol.js`
+carries `connectWatchdogMs: 20_000`), and it does not interfere with a normal
+connect. It does **not** exercise the wedge path on prod — nothing can, short of
+a wedge recurring. That path's evidence is the unit suite, where every guard was
+verified RED by mutation. 845ms against a 20s bound is also the useful
+calibration: the bound is slack by more than an order of magnitude, not a hair
+trigger.
+
+**The tell, if it recurs** — a wedge is `[socket] connecting` with no following
+`open` or `disconnected`. `retry #` must now climb past 1, and a watchdog-driven
+attempt logs as `code=none connect-timeout #N` (a rejecting start logs
+`code=none connect-failed #N`), which is what distinguishes it from an ordinary
+WhatsApp drop carrying no status code. Note a restart sends **no** ✅ all-clear
+to Telegram — `downAlertSent` in `createHealthMonitor` (`src/ops/health.ts`) is
+in-process state a restart resets, so silence is not evidence of still-down.
 
 ---
 
