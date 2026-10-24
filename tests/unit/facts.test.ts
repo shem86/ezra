@@ -3,7 +3,7 @@
 // household's own lookup handle) stays as framing. Fake Queryable, no DB.
 
 import { describe, expect, it } from 'vitest';
-import { getFactTool } from '../../src/tools/facts.js';
+import { getFactTool, normalizeFactKey } from '../../src/tools/facts.js';
 import { fenceUntrusted, UNTRUSTED_OPEN } from '../../src/agent/untrusted.js';
 import type { Queryable } from '../../src/memory/store.js';
 
@@ -25,5 +25,22 @@ describe('get_fact (UC-5, ADR-0005)', () => {
     const result = await getFactTool.execute({ key: 'x' }, {} as never, ctxWith(fakeDb([])));
     expect(result).not.toContain(UNTRUSTED_OPEN);
     expect(result).toContain('no fact stored');
+  });
+});
+
+describe('normalizeFactKey', () => {
+  it('collapses case, spaces, underscores and stray dashes to one canonical slug', () => {
+    expect(normalizeFactKey('WiFi Password')).toBe('wifi-password');
+    expect(normalizeFactKey('wifi_password')).toBe('wifi-password');
+    expect(normalizeFactKey('  --wifi-password-- ')).toBe('wifi-password');
+    expect(normalizeFactKey('Gate: code!')).toBe('gate-code');
+  });
+
+  it('keeps Hebrew letters and digits', () => {
+    expect(normalizeFactKey('קוד שער 2')).toBe('קוד-שער-2');
+  });
+
+  it('never yields an empty key for punctuation-only input', () => {
+    expect(normalizeFactKey('!!!')).toBe('!!!');
   });
 });

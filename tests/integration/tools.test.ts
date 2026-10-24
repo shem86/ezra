@@ -121,6 +121,17 @@ describe('household-fact tools', () => {
     expect(rows.rows).toEqual([{ value: 'parked on Main' }]);
   });
 
+  it('normalizes keys, so a differently-cased spelling reads the same fact', async () => {
+    await runTool(db, call('set_fact', { key: `Gate Code ${runId}`, value: '4321' }), conv);
+
+    const rows = await db.query('SELECT value FROM household_facts WHERE key = $1', [
+      `gate-code-${runId}`,
+    ]);
+    expect(rows.rows).toEqual([{ value: '4321' }]);
+    const result = await runTool(db, call('get_fact', { key: `GATE_CODE_${runId}` }), conv);
+    expect(result.content).toContain('4321');
+  });
+
   it('get_fact on a missing key says so', async () => {
     const result = await runTool(db, call('get_fact', { key: `nope-${runId}` }), conv);
 

@@ -8,6 +8,19 @@ import type { HouseholdToolDeps } from './deps.js';
 import { getFact, upsertFact } from '../memory/store.js';
 import { fenceUntrusted } from '../agent/untrusted.js';
 
+/**
+ * One canonical spelling per key, so "WiFi Password" and "wifi_password" name
+ * the same row — the model invents keys and must not be trusted to reproduce
+ * its own spelling weeks later. Unicode-aware: Hebrew keys survive.
+ */
+export function normalizeFactKey(raw: string): string {
+  const slug = raw
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/g, '');
+  return slug.length > 0 ? slug : raw.trim().toLowerCase();
+}
+
 const setFactSchema = z.object({
   key: z.string().min(1).describe('Stable fact key, e.g. "wifi-network", "boiler-service-phone"'),
   value: z.string().min(1),
@@ -19,8 +32,9 @@ export const setFactTool = defineTool<HouseholdToolDeps, typeof setFactSchema>({
   schema: setFactSchema,
   riskTier: 'autonomous',
   execute: async (args, _deps, ctx) => {
-    await upsertFact(ctx.db, args);
-    return `recorded fact ${args.key}: ${args.value}`;
+    const key = normalizeFactKey(args.key);
+    await upsertFact(ctx.db, { key, value: args.value });
+    return `recorded fact ${key}: ${args.value}`;
   },
 });
 
@@ -34,13 +48,13 @@ export const getFactTool = defineTool<HouseholdToolDeps, typeof getFactSchema>({
   schema: getFactSchema,
   riskTier: 'autonomous',
   execute: async (args, _deps, ctx) => {
-    const fact = await getFact(ctx.db, args.key);
+    const fact = await getFact(ctx.db, normalizeFactKey(args.key));
     if (fact === null) {
       return `no fact stored for ${args.key}`;
     }
     // The value was written by a member but is replayed into a later turn — a
     // crafted value could carry an instruction (the memory-poisoning loop).
     // Fence the value as data; the key is the household's own lookup handle.
-    return `${args.key}: ${fenceUntrusted('stored-fact', fact.value)}`;
+    return `${fact.key}: ${fenceUntrusted('stored-fact', fact.value)}`;
   },
 });
