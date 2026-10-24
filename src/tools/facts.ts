@@ -11,6 +11,7 @@ import {
   searchFacts,
   upsertFact,
   type HouseholdFact,
+  type Queryable,
 } from '../memory/store.js';
 import { fenceUntrusted } from '../agent/untrusted.js';
 
@@ -50,18 +51,56 @@ function rankByTerms(facts: readonly HouseholdFact[], terms: readonly string[]):
     .map((r) => r.fact);
 }
 
+const isSubset = (a: readonly string[], b: readonly string[]): boolean =>
+  a.every((t) => b.includes(t));
+
+/**
+ * Stored keys whose words contain, or are contained in, the new key's words —
+ * "wifi" vs "wifi-password". Subset rather than any-shared-word, so keys that
+ * merely share a word ("plumber-phone" vs "boiler-phone") stay distinct.
+ */
+async function similarFactKeys(db: Queryable, key: string): Promise<string[]> {
+  const terms = factTerms(key);
+  const candidates = await searchFacts(db, { terms, keysOnly: true, limit: SEARCH_CANDIDATES });
+  return candidates
+    .map((f) => f.key)
+    .filter((k) => {
+      const kt = factTerms(k);
+      return isSubset(terms, kt) || isSubset(kt, terms);
+    });
+}
+
 const setFactSchema = z.object({
   key: z.string().min(1).describe('Stable fact key, e.g. "wifi-network", "boiler-service-phone"'),
   value: z.string().min(1),
+  distinct: z
+    .boolean()
+    .optional()
+    .describe('Set true only after a similar-key refusal, when this really is a separate fact'),
 });
 
 export const setFactTool = defineTool<HouseholdToolDeps, typeof setFactSchema>({
   name: 'set_fact',
-  description: 'Record or update a household fact.',
+  description:
+    'Record or update a household fact. A new key resembling an existing one is refused ' +
+    'with the similar keys named — update one of those by its exact key instead.',
   schema: setFactSchema,
   riskTier: 'autonomous',
   execute: async (args, _deps, ctx) => {
     const key = normalizeFactKey(args.key);
+    // There is no delete tool, so a near-duplicate written by mistake lives
+    // forever and splits later reads; refuse it and make the model choose.
+    if (args.distinct !== true && (await getFact(ctx.db, key)) === null) {
+      const similar = await similarFactKeys(ctx.db, key);
+      if (similar.length > 0) {
+        return (
+          `not recorded: similar fact keys already exist:\n` +
+          fenceUntrusted('stored-fact', similar.join('\n')) +
+          `\nTo update one, call set_fact again with that exact key; if ${key} really is a ` +
+          `separate fact, call set_fact again with distinct: true.`
+        );
+      }
+    }
     await upsertFact(ctx.db, { key, value: args.value });
     return `recorded fact ${key}: ${args.value}`;
   },

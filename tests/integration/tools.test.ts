@@ -163,6 +163,51 @@ describe('household-fact tools', () => {
     expect(result.content).toMatch(/no fact matched/i);
     expect(result.content).toContain(`gate-code-${runId}`);
   });
+
+  async function storedValue(key: string): Promise<unknown> {
+    const rows = await db.query('SELECT value FROM household_facts WHERE key = $1', [key]);
+    return rows.rows[0]?.value;
+  }
+
+  it('refuses a new key whose words are a subset of an existing key, naming it', async () => {
+    await runTool(db, call('set_fact', { key: `${tok}-router-password`, value: 'hunter2' }), conv);
+
+    const result = await runTool(db, call('set_fact', { key: `${tok}-router`, value: 'x' }), conv);
+
+    expect(result.content).toMatch(/not recorded/i);
+    expect(result.content).toContain(`${tok}-router-password`);
+    expect(await storedValue(`${tok}-router`)).toBeUndefined();
+  });
+
+  it('refuses a new key that extends an existing key', async () => {
+    await runTool(db, call('set_fact', { key: `${tok}-boiler`, value: 'Bosch' }), conv);
+
+    const result = await runTool(db, call('set_fact', { key: `${tok}-boiler-phone`, value: '555' }), conv);
+
+    expect(result.content).toContain(`${tok}-boiler`);
+    expect(await storedValue(`${tok}-boiler-phone`)).toBeUndefined();
+  });
+
+  it('writes a near-duplicate when the model marks it distinct', async () => {
+    await runTool(db, call('set_fact', { key: `${tok}-alarm-code`, value: '1111' }), conv);
+
+    await runTool(
+      db,
+      call('set_fact', { key: `${tok}-alarm`, value: 'ADT, contract 42', distinct: true }),
+      conv,
+    );
+
+    expect(await storedValue(`${tok}-alarm`)).toBe('ADT, contract 42');
+  });
+
+  it('never guards an update to an existing key', async () => {
+    await runTool(db, call('set_fact', { key: `${tok}-pool`, value: 'open' }), conv);
+    await runTool(db, call('set_fact', { key: `${tok}-pool-heater`, value: 'gas', distinct: true }), conv);
+
+    await runTool(db, call('set_fact', { key: `${tok}-pool`, value: 'closed' }), conv);
+
+    expect(await storedValue(`${tok}-pool`)).toBe('closed');
+  });
 });
 
 describe('reminder tools', () => {
