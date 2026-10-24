@@ -38,6 +38,11 @@ same day.
 is closed, the never-re-arms residual stays open. Nothing else re-verified on
 this pass.
 
+**Partial update 2026-10-24:** added item 11 — fact lookup no longer depends on
+the model recalling its own key spelling. Built and green on branch
+`worktree-fact-key-lookup`, **not released**. Nothing else re-verified on this
+pass.
+
 This is the **single source of truth for current state**. Everything else is
 history:
 
@@ -731,6 +736,36 @@ attempt logs as `code=none connect-timeout #N` (a rejecting start logs
 WhatsApp drop carrying no status code. Note a restart sends **no** ✅ all-clear
 to Telegram — `downAlertSent` in `createHealthMonitor` (`src/ops/health.ts`) is
 in-process state a restart resets, so silence is not evidence of still-down.
+
+### 11. Fact lookup — code owns key matching, not model recall
+**Status:** built, **not released** · **verified** 2026-10-24 by `pnpm lint`,
+`pnpm build` and the full `pnpm test` with the integration suite (809 tests)
+on branch `worktree-fact-key-lookup`. **Not** yet verified with the real model —
+`pnpm eval` was not run, and nothing is deployed.
+
+`get_fact` used to read `household_facts` by exact key, so a read hit only if
+the model reproduced, weeks later, the slug it invented at `set_fact` time
+(`wifi-network` vs `wifi-password`); a miss read as "no fact stored". Facts are
+open-ended, so a code-owned key enum doesn't fit — that pattern stays reserved
+for closed sets (the unbuilt member-preference design). Instead,
+`getFactTool` and `setFactTool` in `src/tools/facts.ts` gained:
+
+- **`normalizeFactKey`** — one canonical slug per key (case, spaces,
+  underscores, punctuation collapsed; Hebrew kept), on both write and read.
+- **`get_fact` fallback** — exact normalized key → term search over key *and*
+  value (`searchFacts` in `src/memory/store.ts`, ranked by `rankByTerms`, key
+  hits first) → the fenced stored-key catalog (`listFactKeys`) so the model
+  retries with a real key. Pre-normalization keys already in prod are reached
+  through the search.
+- **`set_fact` near-duplicate guard** (`similarFactKeys`) — a *new* key whose
+  words are a subset or superset of an existing key's is refused, naming the
+  similar keys; `distinct: true` overrides; updates are never guarded.
+
+No migration, no new dependency, tool names unchanged. Plan:
+[`docs/specs/archive/fact-lookup-plan.md`](docs/specs/archive/fact-lookup-plan.md).
+**Next:** merge, then `pnpm release`, then watch a real near-duplicate write in
+the spine log. Deferred: embeddings over facts, only if Hebrew↔English lexical
+misses show up (a migration — ask-first).
 
 ---
 
