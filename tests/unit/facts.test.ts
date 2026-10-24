@@ -28,6 +28,47 @@ describe('get_fact (UC-5, ADR-0005)', () => {
   });
 });
 
+// Answers by SQL shape: exact-key read, term search, key catalog.
+const routedDb = (routes: {
+  exact?: Record<string, unknown>[];
+  search?: Record<string, unknown>[];
+  keys?: Record<string, unknown>[];
+}): Queryable => ({
+  query: async (text: string) => {
+    if (text.includes('WHERE key = $1')) return { rows: routes.exact ?? [] };
+    if (text.includes('ILIKE')) return { rows: routes.search ?? [] };
+    return { rows: routes.keys ?? [] };
+  },
+});
+
+describe('get_fact fallback when the exact key misses', () => {
+  const at = new Date();
+
+  it('returns the closest term matches, each value fenced, best key match first', async () => {
+    const db = routedDb({
+      search: [
+        { key: 'router-model', value: 'the wifi router is a Netgear', updated_at: at },
+        { key: 'wifi-password', value: 'fios-guest', updated_at: at },
+      ],
+    });
+
+    const result = await getFactTool.execute({ key: 'wifi' }, {} as never, ctxWith(db));
+
+    expect(result).toContain(`wifi-password: ${fenceUntrusted('stored-fact', 'fios-guest')}`);
+    expect(result).toContain(fenceUntrusted('stored-fact', 'the wifi router is a Netgear'));
+    expect(result.indexOf('wifi-password')).toBeLessThan(result.indexOf('router-model'));
+  });
+
+  it('falls back to the fenced stored-key catalog when nothing matches', async () => {
+    const db = routedDb({ keys: [{ key: 'gate-code' }, { key: 'boiler-service-phone' }] });
+
+    const result = await getFactTool.execute({ key: 'zebra' }, {} as never, ctxWith(db));
+
+    expect(result).toMatch(/no fact matched/i);
+    expect(result).toContain(fenceUntrusted('stored-fact', 'gate-code\nboiler-service-phone'));
+  });
+});
+
 describe('normalizeFactKey', () => {
   it('collapses case, spaces, underscores and stray dashes to one canonical slug', () => {
     expect(normalizeFactKey('WiFi Password')).toBe('wifi-password');

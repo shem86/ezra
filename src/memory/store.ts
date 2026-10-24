@@ -208,6 +208,37 @@ export async function getFact(db: Queryable, key: string): Promise<HouseholdFact
   return res.rows[0] ? mapFact(res.rows[0]) : null;
 }
 
+/**
+ * Candidate rows whose key (or, unless keysOnly, value) contains any term —
+ * newest first. Callers rank; this only bounds the candidate set. LIKE
+ * metacharacters are escaped so every term matches literally.
+ */
+export async function searchFacts(
+  db: Queryable,
+  input: { terms: readonly string[]; keysOnly?: boolean; limit: number },
+): Promise<HouseholdFact[]> {
+  if (input.terms.length === 0) {
+    return [];
+  }
+  const patterns = input.terms.map((t) => `%${t.replace(/[\\%_]/g, '\\$&')}%`);
+  const where = input.keysOnly
+    ? 'key ILIKE ANY($1)'
+    : '(key ILIKE ANY($1) OR value ILIKE ANY($1))';
+  const res = await db.query(
+    `SELECT * FROM household_facts WHERE ${where} ORDER BY updated_at DESC LIMIT $2`,
+    [patterns, input.limit],
+  );
+  return res.rows.map(mapFact);
+}
+
+export async function listFactKeys(db: Queryable, limit: number): Promise<string[]> {
+  const res = await db.query(
+    'SELECT key FROM household_facts ORDER BY updated_at DESC LIMIT $1',
+    [limit],
+  );
+  return res.rows.map((row) => row.key as string);
+}
+
 function mapPendingAction(row: Record<string, unknown>): PendingAction {
   return {
     actionId: row.action_id as string,

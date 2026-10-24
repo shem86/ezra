@@ -13,7 +13,8 @@ import type { ToolCall } from '../../src/agent/context.ts';
 import { makeFakeEmbedder } from './helpers/fake-embedder.ts';
 
 const connectionString = process.env.DATABASE_URL ?? '';
-const runId = `run-${Date.now()}`;
+const tok = `${Date.now()}`;
+const runId = `run-${tok}`;
 const conv = `tools-${runId}`;
 let db: Client;
 
@@ -133,9 +134,34 @@ describe('household-fact tools', () => {
   });
 
   it('get_fact on a missing key says so', async () => {
-    const result = await runTool(db, call('get_fact', { key: `nope-${runId}` }), conv);
+    // One run-unique term: a multi-word key would term-match this run's rows.
+    const result = await runTool(db, call('get_fact', { key: `nope${tok}x` }), conv);
 
     expect(result.content).toMatch(/no fact/i);
+  });
+
+  it('finds a fact by a word of its key when the exact key misses', async () => {
+    await runTool(db, call('set_fact', { key: `${tok}-wifi-password`, value: 'fios-guest' }), conv);
+
+    const result = await runTool(db, call('get_fact', { key: `wifi ${tok}` }), conv);
+
+    expect(result.content).toContain(`${tok}-wifi-password`);
+    expect(result.content).toContain('fios-guest');
+  });
+
+  it('finds a fact by a word of its value', async () => {
+    await runTool(db, call('set_fact', { key: `plumber-${tok}`, value: `call zebra${tok} after 5` }), conv);
+
+    const result = await runTool(db, call('get_fact', { key: `zebra${tok}` }), conv);
+
+    expect(result.content).toContain(`plumber-${tok}`);
+  });
+
+  it('on a total miss lists the stored keys so the model picks a real one', async () => {
+    const result = await runTool(db, call('get_fact', { key: `absent${tok}q` }), conv);
+
+    expect(result.content).toMatch(/no fact matched/i);
+    expect(result.content).toContain(`gate-code-${runId}`);
   });
 });
 
