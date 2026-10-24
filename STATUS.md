@@ -740,8 +740,12 @@ in-process state a restart resets, so silence is not evidence of still-down.
 ### 11. Fact lookup — code owns key matching, not model recall
 **Status:** built, **not released** · **verified** 2026-10-24 by `pnpm lint`,
 `pnpm build` and the full `pnpm test` with the integration suite (809 tests)
-on branch `worktree-fact-key-lookup`. **Not** yet verified with the real model —
-`pnpm eval` was not run, and nothing is deployed.
+on branch `worktree-fact-key-lookup`; `pnpm eval` green the same day (18 passed,
+1 skipped — the prod compaction spot-check, no source DB set — run against
+`hh_assistant_test`). The eval reaches only the exact/normalized-key read
+(the poisoned `boiler-code` injection scenario): the search fallback, key
+catalog and near-duplicate refusal are covered by integration tests alone,
+**not** yet by the real model. Nothing is deployed.
 
 `get_fact` used to read `household_facts` by exact key, so a read hit only if
 the model reproduced, weeks later, the slug it invented at `set_fact` time
