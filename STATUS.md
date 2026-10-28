@@ -777,6 +777,48 @@ misses show up (a migration — ask-first).
 
 ---
 
+### 12. Spine log: non-household message previews logged; tool calls invisible
+**Status:** fix built, **not released** · **verified** 2026-10-28 by `pnpm lint`,
+`pnpm build` and the full `pnpm test` with the integration suite (822 tests) on
+branch `logs-tool-calls-and-redact-inbound`. The problem was found the same day
+by reading `docker logs hh-assistant-ezra-1` on the prod host.
+
+- **Privacy:** the `[inbound]` line ran for **every** message the socket saw —
+  before ingestion's allowlist — and on the personal-number deployment that
+  meant previews (sender, name, first 80 chars) of the owner's private DMs and
+  unrelated groups sat in the prod container log. Those chats never reached
+  the model. Fix: `formatInboundLog` in `src/transport/inbound-log.ts` logs
+  only the chat id for non-household chats; household lines are unchanged
+  (raw sender id kept for `WA_JID_*` setup). The drill runner's own
+  `[inbound]` line (`loadTransportOpsConfig` in `src/transport/runner-cli.ts`)
+  is deliberately unchanged: that config has no allowlist, and discovering chat
+  ids is the runner's job.
+- **Debuggability:** tool calls were not logged at all. Tracing spans carry
+  metadata only, so reconstructing a turn needed a prod DB read of
+  `conversation_context`. Fix: `withToolCallLog` in `src/ops/tool-log.ts`
+  wraps the composed `runTool` in `src/main.ts` and logs one `[tool]` line per
+  execution: chat, tool name, args (≤200 chars), outcome, and the result's first line
+  (≤120 chars).
+
+**Not fixed by this:** the previews already written stay in the current
+container's log until the container is recreated (the next deploy does that).
+
+### 13. "List all facts" answers incompletely and claims completeness
+**Status:** open · **verified** 2026-10-28 by reading the household
+`conversation_context` and `household_facts` on prod (`v2.3.9`).
+
+Asked "List all of the facts you have saved", the model called `get_fact`
+once for each of the three keys it already knew from the transcript and replied "Here
+are all the facts I have saved". Prod held four; `building-entrance-code`
+(2026-06-21) was omitted. Asked where keys come from, it said it has no way to
+list stored keys. There is no list path: item 11's key catalog only appears
+after a total search miss, and the model never searched. Proposed fix (not
+built): a capped `list_facts` tool (keys plus fenced values, "showing N of M"),
+and dropping short/common terms (`all`, `כל`, …) from `factTerms`, whose
+substring search otherwise matches nearly everything.
+
+---
+
 ## Newly unblocked by going public (2026-07-14)
 
 - **Branch protection is now available.** GitHub provides it free on *public*

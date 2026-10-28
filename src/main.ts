@@ -67,6 +67,8 @@ import { makeVoyageEmbedder } from './memory/embedder.js';
 import { makeV1ToolRegistry } from './tools/index.js';
 import { makeGoogleCalendarClient } from './tools/calendar-client.js';
 import { makeRunTool, toToolSet } from './tools/registry.js';
+import { withToolCallLog } from './ops/tool-log.js';
+import { formatInboundLog } from './transport/inbound-log.js';
 import { createBaileysTransport, fetchUpstreamWaVersion } from './transport/baileys.js';
 import { createWaVersionSource, formatWaVersion } from './transport/wa-version.js';
 import { createWaVersionWatch } from './ops/wa-version-watch.js';
@@ -155,10 +157,13 @@ async function main(): Promise<void> {
     dataSource,
     'runTool',
     tracer.traceRunTool(
-      makeRunTool(registry, {
-        toolDeps: { embedder, calendarClient },
-        park: makePark({ ttlHours: config.approvalTtlHours }),
-      }),
+      withToolCallLog(
+        makeRunTool(registry, {
+          toolDeps: { embedder, calendarClient },
+          park: makePark({ ttlHours: config.approvalTtlHours }),
+        }),
+        (line) => console.log(line),
+      ),
       registry,
     ),
   );
@@ -464,16 +469,9 @@ async function main(): Promise<void> {
     isHouseholdConversation: (conversationId) => householdConversations.has(conversationId),
   });
   transport.onMessage((message, ack) => {
-    // senderId shown raw on purpose: it is the exact value WA_JID_* in .env
-    // must contain for member attribution (prompts.ts) — names hide it, and
-    // the group can deliver a JID form (@lid vs @s.whatsapp.net) that differs
-    // from what's configured. Mirrors the manual runner's [inbound] line.
-    const sender =
-      message.senderName === null
-        ? message.senderId
-        : `${message.senderId} (${message.senderName})`;
-    const preview = message.text.length > 80 ? `${message.text.slice(0, 80)}…` : message.text;
-    console.log(`[inbound] chat=${message.conversationId} sender=${sender}: ${preview}`);
+    console.log(
+      formatInboundLog(message, householdConversations.has(message.conversationId)),
+    );
     void ingest(message, ack).then((outcome) => {
       if (outcome.outcome === 'enqueue-failed') {
         console.error(`ingest enqueue failed for ${message.id}:`, outcome.error);
