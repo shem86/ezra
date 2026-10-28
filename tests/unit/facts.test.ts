@@ -3,7 +3,7 @@
 // household's own lookup handle) stays as framing. Fake Queryable, no DB.
 
 import { describe, expect, it } from 'vitest';
-import { getFactTool, normalizeFactKey } from '../../src/tools/facts.js';
+import { getFactTool, listFactsTool, normalizeFactKey } from '../../src/tools/facts.js';
 import { fenceUntrusted, UNTRUSTED_OPEN } from '../../src/agent/untrusted.js';
 import type { Queryable } from '../../src/memory/store.js';
 
@@ -84,6 +84,42 @@ describe('get_fact always carries the stored key catalog', () => {
     const result = await getFactTool.execute({ key: 'zebra' }, {} as never, ctxWith(db));
 
     expect(result).toContain('showing 2 of 140');
+  });
+});
+
+describe('list_facts (item 13)', () => {
+  const at = new Date();
+  const fakeRows = (rows: Record<string, unknown>[]): Queryable => ({
+    query: async () => ({ rows }),
+  });
+
+  it('lists every fact with its value fenced, and states the total', async () => {
+    const db = fakeRows([
+      { key: 'husband-birthday', value: '10 ביולי 1986', updated_at: at, total: 2 },
+      { key: 'building-entrance-code', value: '1234#', updated_at: at, total: 2 },
+    ]);
+
+    const result = await listFactsTool.execute({}, {} as never, ctxWith(db));
+
+    expect(result).toContain('2 facts stored');
+    expect(result).toContain(`husband-birthday: ${fenceUntrusted('stored-fact', '10 ביולי 1986')}`);
+    expect(result).toContain(`building-entrance-code: ${fenceUntrusted('stored-fact', '1234#')}`);
+    expect(result).not.toContain('showing');
+  });
+
+  it('says when the list is capped, so it is never presented as everything', async () => {
+    const db = fakeRows([{ key: 'a', value: 'x', updated_at: at, total: 140 }]);
+
+    const result = await listFactsTool.execute({}, {} as never, ctxWith(db));
+
+    expect(result).toContain('showing 1 of 140');
+  });
+
+  it('reports an empty store plainly, with no fence', async () => {
+    const result = await listFactsTool.execute({}, {} as never, ctxWith(fakeRows([])));
+
+    expect(result).toContain('no facts are stored yet');
+    expect(result).not.toContain(UNTRUSTED_OPEN);
   });
 });
 

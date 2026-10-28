@@ -8,6 +8,7 @@ import type { HouseholdToolDeps } from './deps.js';
 import {
   getFact,
   listFactKeys,
+  listFacts,
   searchFacts,
   upsertFact,
   type HouseholdFact,
@@ -149,6 +150,34 @@ export const getFactTool = defineTool<HouseholdToolDeps, typeof getFactSchema>({
       return `no fact stored under ${args.key}; closest matches:\n${lines.join('\n')}\n${catalog}`;
     }
     return `no fact matched ${args.key} (retry get_fact with one of the keys below exactly).\n${catalog}`;
+  },
+});
+
+const LIST_FACTS = 50;
+
+const listFactsSchema = z.object({});
+
+export const listFactsTool = defineTool<HouseholdToolDeps, typeof listFactsSchema>({
+  name: 'list_facts',
+  description:
+    'List the stored household facts with their values, newest first. Use it whenever ' +
+    'asked what facts are stored or what you know — never list facts from memory of the chat.',
+  schema: listFactsSchema,
+  riskTier: 'autonomous',
+  execute: async (_args, _deps, ctx) => {
+    // The count is what keeps a capped list from being presented as all of
+    // it (item 13: prod presented 3 of 4 as everything). Values fenced as in
+    // get_fact — the bulk replay of member-written text.
+    const { facts, total } = await listFacts(ctx.db, LIST_FACTS);
+    if (total === 0) {
+      return 'no facts are stored yet';
+    }
+    const heading =
+      facts.length < total
+        ? `${total} facts stored (showing ${facts.length} of ${total}, newest first; get_fact searches the rest):`
+        : `${total} facts stored:`;
+    const lines = facts.map((f) => `${f.key}: ${fenceUntrusted('stored-fact', f.value)}`);
+    return `${heading}\n${lines.join('\n')}`;
   },
 });
 

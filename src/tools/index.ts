@@ -5,7 +5,7 @@
 import { makeToolRegistry, type ToolRegistry } from './registry.js';
 import type { HouseholdToolDeps } from './deps.js';
 import { addListItemTool, getListTool, markItemDoneTool } from './lists.js';
-import { getFactTool, setFactTool } from './facts.js';
+import { getFactTool, listFactsTool, setFactTool } from './facts.js';
 import { cancelReminderTool, createReminderTool, listRemindersTool } from './reminders.js';
 import { recallHistoryTool } from './recall.js';
 import {
@@ -21,6 +21,7 @@ export function makeHouseholdToolRegistry(): ToolRegistry<HouseholdToolDeps> {
     markItemDoneTool,
     setFactTool,
     getFactTool,
+    listFactsTool,
     createReminderTool,
     listRemindersTool,
     cancelReminderTool,

@@ -175,6 +175,16 @@ describe('household-fact tools', () => {
     expect(result.content).toContain(`${tok}-entrance-code`);
   });
 
+  it('list_facts returns stored facts with values and the store total', async () => {
+    await runTool(db, call('set_fact', { key: `${tok}-spare-key`, value: 'under the mat' }), conv);
+
+    const result = await runTool(db, call('list_facts', {}), conv);
+
+    expect(result.content).toMatch(/\d+ facts stored/);
+    expect(result.content).toContain(`${tok}-spare-key`);
+    expect(result.content).toContain('under the mat');
+  });
+
   async function storedValue(key: string): Promise<unknown> {
     const rows = await db.query('SELECT value FROM household_facts WHERE key = $1', [key]);
     return rows.rows[0]?.value;

@@ -54,8 +54,9 @@ export const scriptedDay: readonly ScriptedConversation[] = [
     messages: [
       { senderId: WIFE, text: 'תשמור שהקוד לשער של החניה הוא 4321' },
       { senderId: BUILDER, text: 'what is the parking gate code?' },
+      { senderId: WIFE, text: 'מה כל העובדות ששמרת?' },
     ],
-    covers: ['set_fact', 'get_fact'],
+    covers: ['set_fact', 'get_fact', 'list_facts'],
   },
   {
     name: 'recall — pull-only semantic memory',
