@@ -164,6 +164,17 @@ describe('household-fact tools', () => {
     expect(result.content).toContain(`gate-code-${runId}`);
   });
 
+  it('an exact hit also lists the other stored keys (item 13)', async () => {
+    await runTool(db, call('set_fact', { key: `${tok}-entrance-code`, value: '1234#' }), conv);
+    await runTool(db, call('set_fact', { key: `${tok}-anniversary`, value: 'June 3' }), conv);
+
+    const result = await runTool(db, call('get_fact', { key: `${tok}-anniversary` }), conv);
+
+    expect(result.content).toContain('June 3');
+    expect(result.content).toMatch(/All stored fact keys \(/);
+    expect(result.content).toContain(`${tok}-entrance-code`);
+  });
+
   async function storedValue(key: string): Promise<unknown> {
     const rows = await db.query('SELECT value FROM household_facts WHERE key = $1', [key]);
     return rows.rows[0]?.value;

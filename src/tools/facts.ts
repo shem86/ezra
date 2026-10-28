@@ -35,7 +35,7 @@ export function factTerms(raw: string): string[] {
 
 const SEARCH_CANDIDATES = 50;
 const SEARCH_RESULTS = 5;
-const CATALOG_KEYS = 50;
+const CATALOG_KEYS = 100;
 
 /** Key hits outweigh value hits; ties keep the store's newest-first order. */
 function rankByTerms(facts: readonly HouseholdFact[], terms: readonly string[]): HouseholdFact[] {
@@ -117,7 +117,8 @@ export const getFactTool = defineTool<HouseholdToolDeps, typeof getFactSchema>({
   name: 'get_fact',
   description:
     'Read a household fact. Tries the exact key, then the closest matches by key and value ' +
-    'words; if nothing matches, returns the stored keys so you can retry with a real one.',
+    'words. Every answer ends with the list of all stored fact keys — the only reliable ' +
+    'source of keys; use list_facts to show every fact with its value.',
   schema: getFactSchema,
   riskTier: 'autonomous',
   execute: async (args, _deps, ctx) => {
@@ -126,24 +127,32 @@ export const getFactTool = defineTool<HouseholdToolDeps, typeof getFactSchema>({
     // loop). Every value is fenced as data. A single key is the household's
     // own lookup handle and stays as framing; the bulk catalog, which replays
     // many stored strings at once, is fenced too.
+    //
+    // The catalog rides on EVERY non-empty answer (item 13): keys the model
+    // remembers from the chat or a compaction summary go stale, and a prod
+    // "list all facts" turn presented the three it remembered as all four.
+    const { keys, total } = await listFactKeys(ctx.db, CATALOG_KEYS);
+    if (total === 0) {
+      return `no fact stored for ${args.key} (no facts are stored yet)`;
+    }
+    const catalog = renderKeyCatalog(keys, total);
+
     const fact = await getFact(ctx.db, normalizeFactKey(args.key));
     if (fact !== null) {
-      return `${fact.key}: ${fenceUntrusted('stored-fact', fact.value)}`;
+      return `${fact.key}: ${fenceUntrusted('stored-fact', fact.value)}\n${catalog}`;
     }
     const terms = factTerms(args.key);
     const candidates = await searchFacts(ctx.db, { terms, limit: SEARCH_CANDIDATES });
     const matches = rankByTerms(candidates, terms).slice(0, SEARCH_RESULTS);
     if (matches.length > 0) {
       const lines = matches.map((f) => `${f.key}: ${fenceUntrusted('stored-fact', f.value)}`);
-      return `no fact stored under ${args.key}; closest matches:\n${lines.join('\n')}`;
+      return `no fact stored under ${args.key}; closest matches:\n${lines.join('\n')}\n${catalog}`;
     }
-    const keys = await listFactKeys(ctx.db, CATALOG_KEYS);
-    if (keys.length === 0) {
-      return `no fact stored for ${args.key} (no facts are stored yet)`;
-    }
-    return (
-      `no fact matched ${args.key}. Stored fact keys (retry get_fact with one exactly):\n` +
-      fenceUntrusted('stored-fact', keys.join('\n'))
-    );
+    return `no fact matched ${args.key} (retry get_fact with one of the keys below exactly).\n${catalog}`;
   },
 });
+
+function renderKeyCatalog(keys: readonly string[], total: number): string {
+  const count = keys.length < total ? `showing ${keys.length} of ${total}` : `${total}`;
+  return `All stored fact keys (${count}):\n${fenceUntrusted('stored-fact', keys.join('\n'))}`;
+}
