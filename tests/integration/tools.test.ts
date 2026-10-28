@@ -13,7 +13,8 @@ import type { ToolCall } from '../../src/agent/context.ts';
 import { makeFakeEmbedder } from './helpers/fake-embedder.ts';
 
 const connectionString = process.env.DATABASE_URL ?? '';
-const runId = `run-${Date.now()}`;
+const tok = `${Date.now()}`;
+const runId = `run-${tok}`;
 const conv = `tools-${runId}`;
 let db: Client;
 
@@ -121,10 +122,91 @@ describe('household-fact tools', () => {
     expect(rows.rows).toEqual([{ value: 'parked on Main' }]);
   });
 
+  it('normalizes keys, so a differently-cased spelling reads the same fact', async () => {
+    await runTool(db, call('set_fact', { key: `Gate Code ${runId}`, value: '4321' }), conv);
+
+    const rows = await db.query('SELECT value FROM household_facts WHERE key = $1', [
+      `gate-code-${runId}`,
+    ]);
+    expect(rows.rows).toEqual([{ value: '4321' }]);
+    const result = await runTool(db, call('get_fact', { key: `GATE_CODE_${runId}` }), conv);
+    expect(result.content).toContain('4321');
+  });
+
   it('get_fact on a missing key says so', async () => {
-    const result = await runTool(db, call('get_fact', { key: `nope-${runId}` }), conv);
+    // One run-unique term: a multi-word key would term-match this run's rows.
+    const result = await runTool(db, call('get_fact', { key: `nope${tok}x` }), conv);
 
     expect(result.content).toMatch(/no fact/i);
+  });
+
+  it('finds a fact by a word of its key when the exact key misses', async () => {
+    await runTool(db, call('set_fact', { key: `${tok}-wifi-password`, value: 'fios-guest' }), conv);
+
+    const result = await runTool(db, call('get_fact', { key: `wifi ${tok}` }), conv);
+
+    expect(result.content).toContain(`${tok}-wifi-password`);
+    expect(result.content).toContain('fios-guest');
+  });
+
+  it('finds a fact by a word of its value', async () => {
+    await runTool(db, call('set_fact', { key: `plumber-${tok}`, value: `call zebra${tok} after 5` }), conv);
+
+    const result = await runTool(db, call('get_fact', { key: `zebra${tok}` }), conv);
+
+    expect(result.content).toContain(`plumber-${tok}`);
+  });
+
+  it('on a total miss lists the stored keys so the model picks a real one', async () => {
+    const result = await runTool(db, call('get_fact', { key: `absent${tok}q` }), conv);
+
+    expect(result.content).toMatch(/no fact matched/i);
+    expect(result.content).toContain(`gate-code-${runId}`);
+  });
+
+  async function storedValue(key: string): Promise<unknown> {
+    const rows = await db.query('SELECT value FROM household_facts WHERE key = $1', [key]);
+    return rows.rows[0]?.value;
+  }
+
+  it('refuses a new key whose words are a subset of an existing key, naming it', async () => {
+    await runTool(db, call('set_fact', { key: `${tok}-router-password`, value: 'hunter2' }), conv);
+
+    const result = await runTool(db, call('set_fact', { key: `${tok}-router`, value: 'x' }), conv);
+
+    expect(result.content).toMatch(/not recorded/i);
+    expect(result.content).toContain(`${tok}-router-password`);
+    expect(await storedValue(`${tok}-router`)).toBeUndefined();
+  });
+
+  it('refuses a new key that extends an existing key', async () => {
+    await runTool(db, call('set_fact', { key: `${tok}-boiler`, value: 'Bosch' }), conv);
+
+    const result = await runTool(db, call('set_fact', { key: `${tok}-boiler-phone`, value: '555' }), conv);
+
+    expect(result.content).toContain(`${tok}-boiler`);
+    expect(await storedValue(`${tok}-boiler-phone`)).toBeUndefined();
+  });
+
+  it('writes a near-duplicate when the model marks it distinct', async () => {
+    await runTool(db, call('set_fact', { key: `${tok}-alarm-code`, value: '1111' }), conv);
+
+    await runTool(
+      db,
+      call('set_fact', { key: `${tok}-alarm`, value: 'ADT, contract 42', distinct: true }),
+      conv,
+    );
+
+    expect(await storedValue(`${tok}-alarm`)).toBe('ADT, contract 42');
+  });
+
+  it('never guards an update to an existing key', async () => {
+    await runTool(db, call('set_fact', { key: `${tok}-pool`, value: 'open' }), conv);
+    await runTool(db, call('set_fact', { key: `${tok}-pool-heater`, value: 'gas', distinct: true }), conv);
+
+    await runTool(db, call('set_fact', { key: `${tok}-pool`, value: 'closed' }), conv);
+
+    expect(await storedValue(`${tok}-pool`)).toBe('closed');
   });
 });
 
