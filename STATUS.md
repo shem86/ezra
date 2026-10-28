@@ -742,10 +742,14 @@ in-process state a restart resets, so silence is not evidence of still-down.
 `pnpm build` and the full `pnpm test` with the integration suite (809 tests)
 on branch `worktree-fact-key-lookup`; `pnpm eval` green the same day (18 passed,
 1 skipped — the prod compaction spot-check, no source DB set — run against
-`hh_assistant_test`). The eval reaches only the exact/normalized-key read
-(the poisoned `boiler-code` injection scenario): the search fallback, key
-catalog and near-duplicate refusal are covered by integration tests alone,
-**not** yet by the real model. Nothing is deployed.
+`hh_assistant_test`). That run reached only the exact/normalized-key read
+(the poisoned `boiler-code` injection scenario). **2026-10-28:** added
+`evals/facts.eval.ts` for the other two paths, green against real Sonnet, with
+the transcripts read to confirm the path rather than inferring it from state:
+the near-duplicate save was refused, and the model re-called `set_fact` with the
+named existing key (no `distinct: true`); the read missed on its guessed key and
+answered correctly from the search fallback. The key-catalog fallback is still
+integration-only. Nothing is deployed.
 
 `get_fact` used to read `household_facts` by exact key, so a read hit only if
 the model reproduced, weeks later, the slug it invented at `set_fact` time
