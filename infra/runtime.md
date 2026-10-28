@@ -180,9 +180,15 @@ token. To rotate (proactively, or after a red deploy blamed on auth):
 
 1. GitHub → Settings → Developer settings → **Tokens (classic)** → regenerate
    (or new) with scope **`read:packages`** only.
-2. Overwrite the SSM parameter (keep the token out of shell history):
+2. Overwrite the SSM parameter (keep the token out of shell history). Run this
+   in a **real interactive terminal**: `read -rs` waits for you to paste the
+   token and shows nothing. Run non-interactively (e.g. through an agent's `!`
+   shell) it reads no token, and junk gets stored. That happened 2026-10-28: a
+   4-character value, then a red deploy at `docker login`. Check the length before
+   storing; a classic PAT is 40 characters:
    ```
-   read -rs T   # if your shell is interactive; else paste inline once
+   read -rs T   # paste the ghp_… token, press Enter
+   printf '%s' "$T" | wc -c   # must print 40 — else re-run read
    aws ssm put-parameter --region us-east-1 --name /hh-assistant/ghcr-pat \
      --type SecureString --value "$T" --overwrite
    unset T
