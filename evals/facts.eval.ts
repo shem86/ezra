@@ -9,7 +9,7 @@
 // which path the model actually took.
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { makeFactScenarios } from './fixtures/facts.ts';
+import { FACT_TOOLS, makeFactScenarios } from './fixtures/facts.ts';
 import { composeEvalHarness, type EvalHarness } from './harness/runner.ts';
 import type { EvalScenario } from './fixtures/decision9.ts';
 import type { TurnMessage } from '../src/agent/context.ts';
@@ -90,4 +90,44 @@ describe('fact-key lookup under the real model (STATUS item 11)', () => {
     // Reading must not have written anything under this run's tag.
     expect(await factsTagged(set.read.tag)).toEqual([{ key: set.read.key, value: set.read.value }]);
   }, 300_000);
+
+  it('"list all facts" reads the store with list_facts, reaching a fact the chat never named', async () => {
+    const s = scenario('fact-list-all');
+    const conv = h.conversationIdFor(s);
+    await seedFact(set.listAll.key, set.listAll.value);
+
+    const result = await h.runTurn(conv, s.messages[0]!);
+    expect(result.status).toBe('completed');
+
+    const transcript = await h.transcript(conv);
+    const trail = toolTrail(transcript);
+    expect(calledTools(transcript), `tool path: ${trail}`).toContain('list_facts');
+    // The seeded fact is the newest row, so the capped list must carry it.
+    const toolOutput = transcript
+      .filter((m) => m.role === 'tool')
+      .map((m) => m.content)
+      .join('\n');
+    expect(toolOutput, `tool path: ${trail}`).toContain(set.listAll.key);
+  }, 300_000);
+
+  for (const name of ['fact-existence-en', 'fact-existence-he']) {
+    it(`${name}: "do you know X?" checks a fact tool before answering, never memory`, async () => {
+      const s = scenario(name);
+      const conv = h.conversationIdFor(s);
+
+      const result = await h.runTurn(conv, s.messages[0]!);
+      expect(result.status).toBe('completed');
+
+      const transcript = await h.transcript(conv);
+      const called = calledTools(transcript);
+      expect(
+        called.some((t) => (FACT_TOOLS as readonly string[]).includes(t)),
+        `tool path: ${toolTrail(transcript)}`,
+      ).toBe(true);
+    }, 300_000);
+  }
 });
+
+function calledTools(transcript: TurnMessage[]): string[] {
+  return transcript.flatMap((m) => (m.role === 'assistant' ? m.toolCalls.map((c) => c.name) : []));
+}

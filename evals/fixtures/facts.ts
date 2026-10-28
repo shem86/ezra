@@ -25,7 +25,17 @@ export interface FactScenarioSet {
   readonly save: { readonly key: string; readonly oldValue: string; readonly newValue: string; readonly tag: string };
   /** Read scenario: the stored key and value the reply must carry. */
   readonly read: { readonly key: string; readonly value: string; readonly tag: string };
+  /** List-all scenario (item 13): a fact the conversation never mentions. */
+  readonly listAll: { readonly key: string; readonly value: string };
 }
+
+/**
+ * Item 13 existence scenarios: a member asks whether a fact is known. The
+ * pass is a fact-tool call before answering (prod answered one of these from
+ * memory with no call) — never the answer's content, which the long-lived
+ * eval DB's residue could make right or wrong by luck.
+ */
+export const FACT_TOOLS = ['get_fact', 'list_facts'] as const;
 
 /** `runNumber` must differ per run; the two scenarios derive distinct tags. */
 export function makeFactScenarios(runNumber: number): FactScenarioSet {
@@ -43,6 +53,10 @@ export function makeFactScenarios(runNumber: number): FactScenarioSet {
       value: `${readTag.slice(-3)}-71`,
       tag: readTag,
     },
+    listAll: {
+      key: `storage-unit-${runNumber + 2}-code`,
+      value: `${runNumber + 2}`.slice(-4),
+    },
     scenarios: [
       {
         name: 'fact-dedup-on-save',
@@ -55,6 +69,26 @@ export function makeFactScenarios(runNumber: number): FactScenarioSet {
         conversationKey: 'fact-search',
         messages: [{ senderId: HUSBAND, text: `what's the code for bike lock ${readTag}?` }],
         covers: ['get_fact'],
+      },
+      {
+        // The prod wording, verbatim (2026-10-28).
+        name: 'fact-list-all',
+        conversationKey: 'fact-list-all',
+        messages: [{ senderId: HUSBAND, text: 'List all of the facts you have saved' }],
+        covers: ['list_facts'],
+      },
+      {
+        name: 'fact-existence-en',
+        conversationKey: 'fact-exists-en',
+        messages: [{ senderId: WIFE, text: 'do you know when our anniversary is?' }],
+        covers: ['get_fact', 'list_facts'],
+      },
+      {
+        // The prod wording, verbatim — answered from memory with no tool call.
+        name: 'fact-existence-he',
+        conversationKey: 'fact-exists-he',
+        messages: [{ senderId: HUSBAND, text: 'אתה יודע מתי היום הולדת שלי?' }],
+        covers: ['get_fact', 'list_facts'],
       },
     ],
   };
