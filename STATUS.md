@@ -43,6 +43,11 @@ the model recalling its own key spelling. Built and green on branch
 `worktree-fact-key-lookup`, **not released**. Nothing else re-verified on this
 pass.
 
+**Partial update 2026-10-28:** item 11 **released as `v2.3.9`** (PR #59) and
+deployed — the deploy run's on-host log reached the healthy launch markers.
+The first two deploy attempts failed at `docker login ghcr.io` (an expired, then a
+mis-stored GHCR PAT) with no swap. Nothing else re-verified on this pass.
+
 This is the **single source of truth for current state**. Everything else is
 history:
 
@@ -738,7 +743,15 @@ to Telegram — `downAlertSent` in `createHealthMonitor` (`src/ops/health.ts`) i
 in-process state a restart resets, so silence is not evidence of still-down.
 
 ### 11. Fact lookup — code owns key matching, not model recall
-**Status:** built, **not released** · **verified** 2026-10-24 by `pnpm lint`,
+**Status:** ✅ **released as `v2.3.9`, deployed 2026-10-28** · verified by the
+deploy run (`workflow_dispatch`, run 40703941416): it pulled 2.3.9, the migrate-gate
+passed, the swap went through, and both launch markers were seen. Outgoing state was
+`2.3.8`, socket open. The two earlier attempts (runs 40701644682, 40702575346) died
+at `docker login ghcr.io` with `denied`, before any swap: the GHCR PAT had expired,
+and the first rotation stored a 4-character value (the runbook's `read -rs` recipe
+needs an interactive terminal); the third run used a 40-character classic token.
+**Not** verified on the host itself: no post-deploy `docker ps` or spine-log
+read. Pre-release checks: built and green 2026-10-24 by `pnpm lint`,
 `pnpm build` and the full `pnpm test` with the integration suite (809 tests)
 on branch `worktree-fact-key-lookup`; `pnpm eval` green the same day (18 passed,
 1 skipped — the prod compaction spot-check, no source DB set — run against
@@ -771,8 +784,8 @@ for closed sets (the unbuilt member-preference design). Instead,
 
 No migration, no new dependency, tool names unchanged. Plan:
 [`docs/specs/archive/fact-lookup-plan.md`](docs/specs/archive/fact-lookup-plan.md).
-**Next:** merge, then `pnpm release`, then watch a real near-duplicate write in
-the spine log. Deferred: embeddings over facts, only if Hebrew↔English lexical
+**Next:** watch for a real near-duplicate refusal (`not recorded: similar fact
+keys`) in the spine log. Deferred: embeddings over facts, only if Hebrew↔English lexical
 misses show up (a migration — ask-first).
 
 ---
