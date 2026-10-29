@@ -70,6 +70,14 @@ against (`pnpm eval` 8/8):
 | `weighs_options` | Noul | Does `latest_messages` ask the assistant to compare options, plan around constraints, or recommend something? |
 | `schedule_reasoning` | Noul | Does `latest_messages` ask to find a time, check availability, or resolve a clash between schedules? |
 
+One more question rides along in the same request: speculative, with no extra
+round trip, and **not** read by `decideTier`. It exists only for monitoring
+(§5b):
+
+| id | type | question |
+|---|---|---|
+| `corrects_previous` | Noul | Does `latest_messages` say the assistant's last reply in `recent_conversation` was wrong or misunderstood? |
+
 Criteria name the confusing case concretely. For example, for `weighs_options`:
 *"Asking what time an event is, is not weighing options."* Every `false`
 criterion is written as a situation, not as "not X".
@@ -161,11 +169,55 @@ deterministic.
   made the refresh accumulate rotating answers, but a host that isn't in the set
   yet still gets its SYN **dropped**, not rejected, and our 1.5s timeout fires
   long before the ~10.5s egress fingerprint shows up. Mitigations:
-  - **Startup probe.** One tiny Jev request at boot, logged `[jev] ok` or
-    `[jev] unreachable: <kind>`.
-  - **Fallback-rate alert.** Edge-triggered on `fallback-error` share over a
-    window, using the existing alert channel. A dead router otherwise degrades
-    to today's behavior and nobody would ever notice.
+  - A startup probe and fallback-rate alerting, both in §5b. A dead router
+    otherwise degrades to today's behavior and nobody would ever notice.
+
+### 5a. Debugging: where content lives (the existing split, unchanged)
+
+Message text never goes to Langfuse. It's the T31 boundary, locked by the
+credential sweep in `tests/unit/tracing.test.ts`. A turn is debugged by joining
+three places on the **DBOS workflow id**, which is also the Langfuse trace id:
+
+| Where | What | How you read it |
+|---|---|---|
+| Langfuse | timing, tokens, cost, tool names, errors per step | Langfuse UI / backoffice Costs+Logs screens |
+| Postgres | the content: `conversation_context` (transcript), `conversation_inbox`, `sent_log`, DBOS step outputs; now `turn_route_log` | backoffice Database screen (`src/backoffice/queries.ts`), `psql` |
+| container log | lifecycle lines: `[spine]`, `[socket]`, `[wa-version]`, now `[route]` | `docker logs` on the host |
+
+Content stays out of Langfuse on purpose. It's a third-party cloud, and the
+household's messages would then sit in a second vendor's retention for no
+debugging gain that a join can't give. The gap is ergonomic: the join is manual
+today. Phase 4 adds a backoffice **turn view**: a workflow id shows its Langfuse
+spans, its `turn_route_log` row (payload, probabilities, tier) and the
+transcript slice side by side.
+
+### 5b. Knowing when it goes wrong (alerting)
+
+The fallback makes a broken router *harmless*; this section makes it *visible*.
+A `route-health` watch follows the `wa-version-watch` pattern: in-process, on an
+interval, sending to the Telegram alert channel. It reads `turn_route_log`
+through a registered read step, so the evidence is our own Postgres, not
+Langfuse.
+
+**Every alert is edge-triggered and sends a ✅ all-clear when it clears.** That
+avoids the `HEALTH-GRACE-001` latch problem, where silence after an alert is
+ambiguous.
+
+| Signal | Trigger (starting values, tuned in shadow) | Kind |
+|---|---|---|
+| Jev unreachable at boot | startup probe fails | page |
+| Router failing | ≥ 3 consecutive `fallback-error`, or > 20% of the last 20 routed turns | page |
+| Router slow | p95 Jev latency over the last 20 turns > 1s (the timeout is 1.5s) | page |
+| Router silent | turns ran in 24h but `turn_route_log` got **no rows** (wiring broke, or the mode was silently off) | page |
+| Unevaluated config | the runtime eval fingerprint ≠ the stamped one (§8a) → also **forced to `shadow`** | page |
+| Tier mix off | `deep` > 40% of a day's turns (cost / injection), or unsettled answers > 50% | page |
+| Quality drift | `corrects_previous` > 0.7 after a turn, counted **per tier** | weekly digest, not a page |
+
+The weekly digest is one Telegram message: tier counts, fallback %, p95 latency,
+and corrections per tier. A `fast` tier whose correction rate climbs above
+`standard`'s is the clearest signal it's misrouting. Each flagged correction's
+`turn_route_log` row is a ready-made eval candidate for the builder to label
+(§8a), so production mistakes feed the eval set.
 
 **Don't bundle a model upgrade.** The current defaults are `claude-haiku-4-5` and
 `claude-sonnet-4-6`. Moving tier ids to newer models is a separate change.
@@ -271,9 +323,8 @@ stages.
 - (d) Opus tier: ✅ approved.
 - (e) `TYPESAFE_API_KEY` and probe budget: builder obtaining it (≈ $1 covers tens
   of thousands of probe requests at $0.042/M input tokens).
-- Still to decide:
-  - (f) The `turn_route_log` migration (an ask-first schema change; §5).
-  - (g) The staged rollout in §7b.
+- (f) The `turn_route_log` migration (an ask-first schema change; §5): ✅ approved.
+- (g) The staged rollout in §7b (`standard`/`deep` first, `fast` later): ✅ approved.
 
 ### 8a. Evals — Jev is a model; it gets its own eval suite
 
@@ -303,8 +354,39 @@ are structure-checked in CI, and accuracy is report-only and on-demand.
 - **CI:** coverage only. Every tier × language has holdout cases, and every
   `decideTier` row is exercised. **No live Jev calls in CI**, the same rule as
   for model calls.
-- **When it re-runs:** any change to `turn-route.ts` (wording, criteria,
-  thresholds), any Jev pin bump, and any tier model id change.
+- **Re-runs are enforced, not remembered.** This uses the `check:docs` pattern:
+  CI checks mechanically, without making live calls.
+  1. **Fingerprint.** `routeEvalFingerprint()` hashes everything that can change
+     routing behavior:
+     - `turnRouteQuestions` and the thresholds;
+     - the `decideTier` source;
+     - the Jev model pin;
+     - the tier model ids;
+     - the fixtures file;
+     - the routing system-prompt inputs.
+
+     It lives next to the code it hashes, so a new input is added there.
+  2. **Stamp.** `pnpm eval:route` runs the live suite: the §8a router accuracy
+     and the per-tier end-to-end scenarios. It writes
+     `evals/results/turn-route.stamp.json`
+     `{ fingerprint, date, per-split scores, gate: pass }` **only when the gate
+     passes**. The stamp is committed, so the scores show up in the PR diff.
+  3. **CI gate** (`pnpm check:route-eval`, in `ci.yml` beside `check:docs`).
+     It recomputes the fingerprint and fails if it doesn't match the stamp:
+     *"routing inputs changed — run `pnpm eval:route` and commit the stamp"*. No
+     Jev or Claude calls happen in CI, so the "never real model calls in CI" rule
+     holds. Any PR that touches routing can't merge stale, whoever wrote it.
+  4. **Runtime gate.** The image carries the stamp. At boot the app computes the
+     fingerprint from the *live* Config, so a host env override of
+     `FAST_MODEL_ID`, which CI never sees, is caught. On a mismatch with
+     `TURN_ROUTING=on` it runs as `shadow` and pages (§5b). Prod never routes on
+     an unevaluated combination.
+  5. **Agents.** Add a line to `.claude/rules/testing.md` and to CLAUDE.md's
+     Commands section: changing routing means running `pnpm eval:route` and
+     committing the stamp. The CI gate is the backstop when that's forgotten.
+  - Out of reach of all of this: upstream behavior drift *under* a pinned Jev
+    version, and a shift in what the household asks. Those are caught in
+    production by §5b's correction-rate and tier-mix signals, not by the eval.
 
 **Phase 1 — live probe, synthetic data only.**
 - About 40 hand-written cases, a third each English, Hebrew, and code-switched,
@@ -329,9 +411,19 @@ journaled tier with exactly one Jev call. That joins `pnpm test:recovery`.
 Separately: the absent-dep path keeps today's step sequence exactly, and the
 pre-rules skip Jev entirely (assert zero client calls).
 
-**Phase 4 — ops.** Config plus `.env.example`, the egress allowlist and nftables
-mirror plus the drift test, tracing tags, and `TURN_ROUTING=shadow` in
-`pnpm dev`. Update STATUS.md in the same PR.
+**Phase 4 — ops.**
+- Config plus `.env.example`.
+- The egress allowlist and nftables mirror, plus the drift test.
+- Tracing tags.
+- `TURN_ROUTING=shadow` in `pnpm dev`.
+- The `route-health` watch, startup probe and weekly digest (§5b). Their
+  triggers are unit-tested against fake `turn_route_log` rows, including the
+  all-clear re-arm.
+- `eval:route`, the stamp, and the `check:route-eval` CI gate, plus the runtime
+  fingerprint downgrade (§8a).
+- The backoffice turn view (§5a).
+- The agent rule lines.
+- Update STATUS.md in the same PR.
 
 **Phase 5 — shadow on prod (~2 weeks), then evaluate.**
 - Pull the tier distribution and `fallback-error` rate from Langfuse.
