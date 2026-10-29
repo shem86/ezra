@@ -297,3 +297,33 @@ It validates + installs `/etc/sudoers.d/hh-ops`, installs the egress + backup
 systemd units, `daemon-reload`s, enables the timers, and applies
 `hh-egress.service`. It mirrors the host-config block in
 `infra/pulumi/cloud-init/user-data.yaml.tmpl` (keep the two in sync).
+
+## Turn routing (Jev) — enable, shadow, disable
+
+Routing is **off by default**: an `.env` without the vars below runs today's
+Sonnet-only spine, with no Jev call and no `routeTurn` step. The plan is in
+`docs/specs/jev-turn-routing-plan.md` and the state is in STATUS.md item 14.
+
+To go to shadow, which logs Jev's choice while every turn still runs standard:
+
+1. Add these two lines to the app `.env` and re-seed `/hh-assistant/env` (the
+   `put-parameter` command in the table above):
+   `TURN_ROUTING=shadow` and `TYPESAFE_API_KEY=<key>`. Enter the key in your
+   own terminal, not via `!` or a chat, with a length check.
+2. Cut a release (or redeploy the current tag) so the container re-reads `.env`.
+3. Confirm in `docker logs`: `[route] mode shadow · tiers standard,deep · jev-1.14.0`,
+   then `[route] jev ok: …`. A `[route] jev unreachable: timeout` right after a
+   deploy usually means the egress set hasn't picked up `api.typesafe.ai`
+   yet. The refresh timer runs every 3 min; check
+   `journalctl -k | grep hh-egress-drop` before suspecting the key.
+4. Read the backoffice **Status → Turn router** panel. Router health is
+   deliberately not a Telegram alert, because a dead router degrades to
+   standard rather than taking the service down.
+
+`TURN_ROUTING=on` honors the routed tier, clamped to `TURN_ROUTING_TIERS`
+(default `standard,deep`). To disable, set `TURN_ROUTING=off` (or delete the
+line) and redeploy. `turn_route_log` keeps its history.
+
+Any change to `JEV_MODEL`, `FAST_MODEL_ID`, `DEEP_MODEL_ID` or
+`TURN_ROUTING_TIERS` in this file requires running `pnpm eval:route` first
+(`.claude/rules/testing.md`, "Routing evals"). CI never sees host env overrides.

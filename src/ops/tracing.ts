@@ -8,6 +8,7 @@
 // credential-boundary sweep in tests/unit/tracing.test.ts locks.
 
 import type { ModelUsage } from '../agent/call-model.js';
+import type { RouteDecision } from '../agent/route-turn.js';
 import type { ToolCall, ToolResult } from '../agent/context.js';
 import type { Queryable } from '../memory/store.js';
 import { deriveActionId, type ToolRegistry } from '../tools/registry.js';
@@ -37,8 +38,14 @@ export interface TracerDeps {
 type RunToolFn = (db: Queryable, call: ToolCall, conversationId: string) => Promise<ToolResult>;
 
 export interface Tracer {
-  /** Drop-in for CallModelDeps['onUsage'] — per-call cost (single-tier, ADR-0003). */
+  /** Drop-in for CallModelDeps['onUsage'] — per-call cost, tier-tagged on routed turns. */
   onModelUsage(usage: ModelUsage): void;
+  /**
+   * The routeTurn span (docs/specs/jev-turn-routing-plan.md §5): decision +
+   * probabilities only. The decision's request carries household text and is
+   * deliberately NOT emitted — it lives in turn_route_log.
+   */
+  onRouteDecision(decision: RouteDecision): void;
   /** Wraps the composed runTool body; span carries tool name, risk tier, actionId. */
   traceRunTool<TDeps>(runTool: RunToolFn, registry: ToolRegistry<TDeps>): RunToolFn;
   /** Wraps a plain async step dep (compaction summarize/embed) in a timed span. */
@@ -93,6 +100,34 @@ export function makeTracer(deps: TracerDeps): Tracer {
         ...(usage.cacheWriteTokens === undefined
           ? {}
           : { cacheWriteTokens: usage.cacheWriteTokens }),
+        ...(usage.tier === undefined ? {} : { tier: usage.tier }),
+      });
+    },
+
+    onRouteDecision(decision) {
+      const optional = <T extends AttributeValue>(key: string, value: T | undefined) =>
+        value === undefined ? {} : { [key]: value };
+      const a = decision.answers;
+      emit('routeTurn', new Date(), {
+        tier: decision.tier,
+        proposed: decision.proposed,
+        source: decision.source,
+        mode: decision.mode,
+        questionsVersion: decision.questionsVersion,
+        ...optional('jevModel', decision.jevModel),
+        ...optional('latencyMs', decision.latencyMs),
+        ...optional('jevInputTokens', decision.inputTokens),
+        ...(a === undefined
+          ? {}
+          : {
+              intent: a.intent,
+              pAsksAnything: a.asksAnything,
+              pSeveralRequests: a.severalRequests,
+              pRefersBack: a.refersBack,
+              pWeighsOptions: a.weighsOptions,
+              pScheduleReasoning: a.scheduleReasoning,
+              pCorrectsPrevious: a.correctsPrevious,
+            }),
       });
     },
 

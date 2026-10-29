@@ -587,6 +587,11 @@ describe('turn routing — the routeTurn step', () => {
     return step!.output as Record<string, unknown>;
   }
 
+  async function routeRows(workflowId: string): Promise<Array<Record<string, unknown>>> {
+    const res = await db.query('SELECT * FROM turn_route_log WHERE workflow_id = $1', [workflowId]);
+    return res.rows as Array<Record<string, unknown>>;
+  }
+
   function tiersFor(script: string) {
     return tierLog.filter((e) => e.script === script).map((e) => e.tier);
   }
@@ -628,6 +633,10 @@ describe('turn routing — the routeTurn step', () => {
     expect(parentTiers.length).toBeGreaterThan(0);
     expect(new Set(parentTiers)).toEqual(new Set(['deep']));
     expect(await routeStepOutput(wfid)).toMatchObject({ tier: 'deep', source: 'jev' });
+    // Exactly one turn_route_log row survives the kill + replay.
+    const rows = await routeRows(wfid);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ conversation_id: conversationId, tier: 'deep', source: 'jev' });
   }, 90_000);
 
   it('runs routeTurn once, before the first model call, and every round on its tier', async () => {
@@ -645,6 +654,22 @@ describe('turn routing — the routeTurn step', () => {
     expect(names.filter((n) => n === 'routeTurn')).toHaveLength(1);
     expect(names.indexOf('routeTurn')).toBeLessThan(names.indexOf('callModel'));
     expect(tiersFor(text)).toEqual(['deep', 'deep']);
+
+    // The log row carries the exact request (text included) and the answers —
+    // re-runnable, and the content stays in our Postgres, not in traces.
+    const [row] = await routeRows(wfid);
+    expect(row).toMatchObject({
+      mode: 'on',
+      tier: 'deep',
+      proposed: 'deep',
+      source: 'jev',
+      jev_model: 'jev-scripted',
+    });
+    expect(row!.request).toMatchObject({
+      state: { latest_messages: [{ from: 'wife', text }] },
+    });
+    expect((row!.answers as { weighsOptions: number }).weighsOptions).toBe(0.95);
+    expect(row!.response).toHaveProperty('weighs_options');
   });
 
   it('the cap-hit forced final runs on the turn tier too', async () => {
@@ -696,5 +721,8 @@ describe('turn routing — the routeTurn step', () => {
       source: 'pre-rule:pending-actions',
     });
     expect(jevCallsFor(chatText)).toBe(0);
+    const [row] = await routeRows(wfid);
+    expect(row).toMatchObject({ tier: 'standard', source: 'pre-rule:pending-actions' });
+    expect(row!.request).toBeNull(); // Jev not asked ⇒ nothing sent, nothing stored
   });
 });

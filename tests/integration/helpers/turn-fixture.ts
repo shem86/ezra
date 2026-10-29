@@ -33,6 +33,7 @@ import type { PendingActionDigestEntry } from '../../../src/agent/prompts.ts';
 import type { ClassifyInput, RelatednessVerdict } from '../../../src/agent/relatedness.ts';
 import { appendFileSync } from 'node:fs';
 import { makeRouteTurn } from '../../../src/agent/route-turn.ts';
+import { writeTurnRouteLog, type TurnRouteLogInput } from '../../../src/memory/turn-route-log.ts';
 import type { Tier } from '../../../src/agent/turn-route.ts';
 import type { JevAnswer, JevClient } from '../../../src/agent/jev-client.ts';
 
@@ -336,8 +337,15 @@ const scriptedJev: JevClient = {
   },
 };
 
+const logRouteStep = registerTransactionalStep(
+  dataSource,
+  'logTurnRoute',
+  async (db, input: TurnRouteLogInput): Promise<boolean> => writeTurnRouteLog(db, input),
+);
+
 const routedDeps = {
   ...baseDeps,
+  logRoute: logRouteStep,
   routeTurn: makeRouteTurn({
     jev: scriptedJev,
     mode: 'on',

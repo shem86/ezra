@@ -903,15 +903,41 @@ Postgres (936 green), by `pnpm test:recovery` (62 green), and by `pnpm build` an
 - A deliberate mutation (calling `routeTurn` outside `DBOS.runStep`) turned that drill red (Jev
   asked twice), so the test catches the regression it exists for.
 
-Still **not composed** in `src/main.ts`: prod behavior is unchanged.
+**Phase 4 verified** 2026-10-29 by `pnpm build`, `pnpm lint`, the full `pnpm test` with
+integration (976 green), `pnpm test:recovery` (62 green), and the backoffice SPA's own test, build
+and lint (59 green). Routing is now **composed but off by default** (`TURN_ROUTING=off`), so a
+deploy without new env vars behaves exactly as before.
+- **Config:** `TurnRoutingConfig` in `src/ops/config.ts` adds the mode, key, Jev pin, tier models,
+  and the stage-1 tier set (`standard,deep`).
+- **Composition:** `makeTurnRouting` in `src/main.ts`; the same `makeTurnRouting` call in
+  `src/dev/main.ts` mirrors it.
+- **Route log:** migration 0009 adds `turn_route_log`, written by `writeTurnRouteLog` as an
+  idempotent transaction. The kill drill proves exactly one row survives replay.
+- **Tracing:** `onRouteDecision` emits a metadata-only `routeTurn` span, and `callModel` spans are
+  tagged with the tier.
+- **Log lines:** `probeJev` / `createRouteStreakLog` in `src/ops/route-health.ts`.
+- **Backoffice:** `/api/router`, served by `getRouterHealth`, feeds a Router panel on the Status
+  screen. The turn view is the expandable recent-turns list. The full Langfuse + transcript join
+  sketched in plan §5a was not built.
+- **Evals and rule:** `pnpm eval:route` plus the "Routing evals" rule in `.claude/rules/testing.md`.
 
-**Next:** Phase 4 (ops):
-- `TURN_ROUTING` / `TYPESAFE_API_KEY` / tier model ids in config, plus the composition;
-- the `turn_route_log` migration and its write;
-- the startup probe and `[route]` lines;
-- tracing tags;
-- the backoffice Router panel and turn view;
-- `pnpm eval:route` and the agent rule. The `TYPESAFE_API_KEY` is not yet in `.env` or SSM.
+Live evidence the same day:
+- **`pnpm dev` with `TURN_ROUTING=shadow`:** the probe logged `jev ok` in 211 ms, and all 10
+  scripted turns were routed and logged. The run surfaced a missing intent: recall questions were
+  proposed for `fast` via `list_edit`. Fixed with a `conversation_recall` option and 9 new cases.
+- **`pnpm eval:route`, router suite:** 54/54 tiers exact, holdout 6/6 per language, 0 sent to
+  `fast` wrongly, p95 153 ms, $0.003.
+- **`pnpm eval:route`, per-tier suite:** 6/6 list, reminder and fact effects correct on both Haiku
+  (`fast`) and `claude-opus-5-5` (`deep`). A bogus `DEEP_MODEL_ID` turned the deep run red,
+  proving the deep tier really calls the configured model.
+
+**Next: Phase 5, the prod shadow run** (builder steps):
+1. Rotate the TypeSafe key.
+2. Add `TURN_ROUTING=shadow` and the new `TYPESAFE_API_KEY` to the `/hh-assistant/env` SSM
+   parameter (`infra/runtime.md`).
+3. Merge and cut a release.
+4. Confirm `[route] jev ok` in the container log.
+5. Read the backoffice Router panel daily for about 2 weeks. The `TYPESAFE_API_KEY` is not yet in `.env` or SSM.
 **Rotate it before prod:** it was pasted into a Claude session on 2026-10-29.
 
 ---

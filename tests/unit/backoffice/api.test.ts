@@ -16,6 +16,19 @@ function fakeDb(rows: Record<string, unknown>[]): Queryable & { calls: string[] 
 const url = (p: string): URL => new URL(p, 'http://localhost');
 
 describe('createApiRouter', () => {
+  it('GET /api/router returns the Router panel, read from turn_route_log and the journal', async () => {
+    const db: Queryable = {
+      query: async (sql: string) =>
+        sql.includes('dbos.workflow_status') ? { rows: [{ n: 0 }] } : { rows: [] },
+    };
+    const api = createApiRouter({ db });
+    const res = await api.handle('GET', url('/api/router'));
+    expect(res?.status).toBe(200);
+    const body = res!.body as { mode: string | null; rows: { name: string }[] };
+    expect(body.mode).toBeNull();
+    expect(body.rows.map((r) => r.name)).toContain('Fallback rate');
+  });
+
   it('GET /api/db returns the table catalogue', async () => {
     const api = createApiRouter({ db: fakeDb([]) });
     const res = await api.handle('GET', url('/api/db'));

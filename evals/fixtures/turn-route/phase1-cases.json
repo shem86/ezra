@@ -92,6 +92,25 @@
     { "id": "mx-14", "lang": "mixed", "tier": "deep", "recent": [], "latest": [{ "from": "husband", "text": "תעזור לי להחליט between the two daycare options, אחת קרובה יותר and the other cheaper" }],
       "expect": { "asks_anything": true, "intent": "planning_or_advice", "several_requests": false, "refers_back": false, "weighs_options": true, "schedule_reasoning": false, "corrects_previous": false } },
     { "id": "mx-15", "lang": "mixed", "tier": "standard", "recent": [{ "from": "husband", "text": "put dinner with the Levys on wife's calendar saturday 8pm" }, { "from": "assistant", "text": "I've proposed adding \"Dinner with the Levys\" to husband's calendar on Saturday at 8:00 PM." }], "latest": [{ "from": "husband", "text": "no no, זה צריך להיות ב-wife's calendar" }],
-      "expect": { "asks_anything": true, "intent": "calendar", "several_requests": false, "refers_back": true, "weighs_options": false, "schedule_reasoning": false, "corrects_previous": true } }
+      "expect": { "asks_anything": true, "intent": "calendar", "several_requests": false, "refers_back": true, "weighs_options": false, "schedule_reasoning": false, "corrects_previous": true } },
+
+    { "id": "en-16", "lang": "en", "tier": "standard", "recent": [], "latest": [{ "from": "husband", "text": "what did we decide about the plumber last week?" }],
+      "expect": { "asks_anything": true, "intent": "conversation_recall", "several_requests": false, "refers_back": false, "weighs_options": false, "schedule_reasoning": false, "corrects_previous": false } },
+    { "id": "en-17", "lang": "en", "tier": "standard", "recent": [], "latest": [{ "from": "wife", "text": "did I mention the name of the new babysitter before?" }],
+      "expect": { "asks_anything": true, "intent": "conversation_recall", "several_requests": false, "refers_back": false, "weighs_options": false, "schedule_reasoning": false, "corrects_previous": false } },
+    { "id": "en-18", "lang": "en", "tier": "standard", "recent": [], "latest": [{ "from": "husband", "text": "what did my wife say about the dentist yesterday?" }],
+      "expect": { "asks_anything": true, "intent": "conversation_recall", "several_requests": false, "refers_back": false, "weighs_options": false, "schedule_reasoning": false, "corrects_previous": false } },
+    { "id": "he-16", "lang": "he", "tier": "standard", "recent": [], "latest": [{ "from": "wife", "text": "מה דיברנו על קניות בשיחות קודמות?" }],
+      "expect": { "asks_anything": true, "intent": "conversation_recall", "several_requests": false, "refers_back": false, "weighs_options": false, "schedule_reasoning": false, "corrects_previous": false } },
+    { "id": "he-17", "lang": "he", "tier": "standard", "recent": [], "latest": [{ "from": "wife", "text": "הזכרתי פעם מה השם של הבייביסיטר החדשה?" }],
+      "expect": { "asks_anything": true, "intent": "conversation_recall", "several_requests": false, "refers_back": false, "weighs_options": false, "schedule_reasoning": false, "corrects_previous": false } },
+    { "id": "he-18", "lang": "he", "tier": "standard", "recent": [], "latest": [{ "from": "husband", "text": "מה אשתי אמרה אתמול על הרופא שיניים?" }],
+      "expect": { "asks_anything": true, "intent": "conversation_recall", "several_requests": false, "refers_back": false, "weighs_options": false, "schedule_reasoning": false, "corrects_previous": false } },
+    { "id": "mx-16", "lang": "mixed", "tier": "standard", "recent": [], "latest": [{ "from": "wife", "text": "מה אמרנו last time על ה-birthday party?" }],
+      "expect": { "asks_anything": true, "intent": "conversation_recall", "several_requests": false, "refers_back": false, "weighs_options": false, "schedule_reasoning": false, "corrects_previous": false } },
+    { "id": "mx-17", "lang": "mixed", "tier": "standard", "recent": [], "latest": [{ "from": "husband", "text": "did we talk about הגננת לפני כמה ימים?" }],
+      "expect": { "asks_anything": true, "intent": "conversation_recall", "several_requests": false, "refers_back": false, "weighs_options": false, "schedule_reasoning": false, "corrects_previous": false } },
+    { "id": "mx-18", "lang": "mixed", "tier": "standard", "recent": [], "latest": [{ "from": "wife", "text": "remind me מה סיכמנו על החופשה?" }],
+      "expect": { "asks_anything": true, "intent": "conversation_recall", "several_requests": false, "refers_back": false, "weighs_options": false, "schedule_reasoning": false, "corrects_previous": false } }
   ]
 }

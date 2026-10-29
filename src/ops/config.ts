@@ -1,5 +1,9 @@
 import { z } from 'zod';
 import { parseWaVersion, type WaVersion } from '../transport/wa-version.js';
+import { DEFAULT_JEV_MODEL } from '../agent/jev-client.js';
+import type { Tier } from '../agent/turn-route.js';
+
+const routeTiers: readonly Tier[] = ['fast', 'standard', 'deep'];
 
 // The ONLY module allowed to read environment/secrets (SPEC src/ops contract).
 // Everything else receives a Config through its deps object — never process.env.
@@ -19,6 +23,34 @@ const envSchema = z.object({
   // (compaction summarize, T36 relatedness). Overridable for T33 retuning.
   CHEAP_MODEL_ID: z.string().min(1).default('claude-haiku-4-5-20251001'),
   REASONING_MODEL_ID: z.string().min(1).default('claude-sonnet-4-6'),
+  // Turn routing (docs/specs/jev-turn-routing-plan.md). Off by default, so a
+  // deploy without these vars runs exactly as before. REASONING_MODEL_ID stays
+  // the standard tier; any change to the tier ids or the Jev pin — host env
+  // overrides included — means re-running `pnpm eval:route` (testing.md).
+  TURN_ROUTING: z.enum(['off', 'shadow', 'on']).default('off'),
+  TYPESAFE_API_KEY: z.string().min(1).optional(),
+  JEV_MODEL: z.string().min(1).default(DEFAULT_JEV_MODEL),
+  FAST_MODEL_ID: z.string().min(1).default('claude-haiku-4-5-20251001'),
+  DEEP_MODEL_ID: z.string().min(1).default('claude-opus-5-5'),
+  // §7b staged rollout: standard+deep first, fast only after its own gate.
+  TURN_ROUTING_TIERS: z
+    .string()
+    .default('standard,deep')
+    .transform((value, ctx) => {
+      const tiers = value
+        .split(',')
+        .map((t) => t.trim())
+        .filter((t) => t.length > 0);
+      const unknown = tiers.filter((t) => !routeTiers.includes(t as Tier));
+      if (unknown.length > 0 || !tiers.includes('standard')) {
+        ctx.addIssue({
+          code: 'custom',
+          message: `comma-separated subset of ${routeTiers.join('/')} that includes standard (the fallback tier)`,
+        });
+        return z.NEVER;
+      }
+      return new Set(tiers as Tier[]) as ReadonlySet<Tier>;
+    }),
   LANGFUSE_PUBLIC_KEY: z.string().min(1, 'required — Langfuse project public key'),
   LANGFUSE_SECRET_KEY: z.string().min(1, 'required — Langfuse project secret key'),
   LANGFUSE_BASE_URL: z.url('must be a URL').default('https://cloud.langfuse.com'),
@@ -116,6 +148,18 @@ export interface Config {
   readonly approvalTtlHours: number;
   readonly googleServiceAccount: { readonly clientEmail: string; readonly privateKey: string };
   readonly calendarIds: { readonly husband: string; readonly wife: string };
+  readonly turnRouting: TurnRoutingConfig;
+}
+
+export interface TurnRoutingConfig {
+  /** `off` ⇒ the composer wires no router: no Jev call, no routeTurn step. */
+  readonly mode: 'off' | 'shadow' | 'on';
+  /** Present whenever mode is not off (enforced at load). */
+  readonly typesafeApiKey: string | undefined;
+  readonly jevModel: string;
+  readonly fastModelId: string;
+  readonly deepModelId: string;
+  readonly enabledTiers: ReadonlySet<Tier>;
 }
 
 function formatIssues(issues: Array<{ path: PropertyKey[]; message: string }>): string {
@@ -295,6 +339,13 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   if (!parsed.success) {
     throw new Error(`Invalid environment configuration:\n${formatIssues(parsed.error.issues)}`);
   }
+  // Cross-field rule kept out of the schema: zod's pick()/extend() — which
+  // the narrow loaders use — refuse object schemas that carry refinements.
+  if (parsed.data.TURN_ROUTING !== 'off' && parsed.data.TYPESAFE_API_KEY === undefined) {
+    throw new Error(
+      'Invalid environment configuration:\n  TYPESAFE_API_KEY: required when TURN_ROUTING is shadow or on',
+    );
+  }
   return {
     databaseUrl: parsed.data.DATABASE_URL,
     anthropicApiKey: parsed.data.ANTHROPIC_API_KEY,
@@ -314,6 +365,14 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     calendarIds: {
       husband: parsed.data.CALENDAR_ID_HUSBAND,
       wife: parsed.data.CALENDAR_ID_WIFE,
+    },
+    turnRouting: {
+      mode: parsed.data.TURN_ROUTING,
+      typesafeApiKey: parsed.data.TYPESAFE_API_KEY,
+      jevModel: parsed.data.JEV_MODEL,
+      fastModelId: parsed.data.FAST_MODEL_ID,
+      deepModelId: parsed.data.DEEP_MODEL_ID,
+      enabledTiers: parsed.data.TURN_ROUTING_TIERS,
     },
   };
 }

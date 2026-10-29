@@ -83,3 +83,28 @@ export interface StatusResponse {
   turnsToday: number;
   avgLatency: string;
 }
+
+// --- Router (turn_route_log — docs/specs/jev-turn-routing-plan.md §5b) -------
+export interface RouterHealthRow {
+  name: string;
+  value: string;
+  status: 'ok' | 'amber';
+  detail: string;
+}
+export interface RouteLogRow {
+  workflowId: string;
+  conversationId: string;
+  createdAt: string;
+  mode: string;
+  tier: string;
+  proposed: string;
+  source: string;
+  latencyMs: number | null;
+  answers: Record<string, number | string> | null;
+  latestText: string | null;
+}
+export interface RouterResponse {
+  mode: string | null;
+  rows: RouterHealthRow[];
+  recent: RouteLogRow[];
+}

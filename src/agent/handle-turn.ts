@@ -118,6 +118,16 @@ export interface HandleTurnDeps {
    * step and no tier: the step sequence is exactly the pre-routing one.
    */
   readonly routeTurn?: (input: RouteTurnInput) => Promise<RouteDecision>;
+  /**
+   * Must already be a registered datasource transaction, idempotent on
+   * workflowId (a replay re-calls it). Persists the journaled decision to
+   * turn_route_log. Absent ⇒ the decision lives only in the journal.
+   */
+  readonly logRoute?: (input: {
+    readonly workflowId: string;
+    readonly conversationId: string;
+    readonly decision: RouteDecision;
+  }) => Promise<boolean>;
 }
 
 export interface RelatednessDeps {
@@ -330,6 +340,13 @@ export function makeHandleTurnWorkflow(
       };
       const decision = await DBOS.runStep(() => routeTurn(routeInput), { name: 'routeTurn' });
       tier = decision.tier;
+      if (deps.logRoute !== undefined) {
+        const workflowId = DBOS.workflowID;
+        if (workflowId === undefined) {
+          throw new Error('handleTurn: no workflowID — the route log needs it for the idempotency key');
+        }
+        await deps.logRoute({ workflowId, conversationId, decision });
+      }
     }
     const tierOption = tier === undefined ? {} : { tier };
 

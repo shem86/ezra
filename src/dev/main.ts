@@ -17,6 +17,9 @@ import { makeLangfuseSink } from '../ops/langfuse-sink.js';
 import { registerTransactionalStep } from '../orchestration/steps.js';
 import { makeHandleTurnWorkflow } from '../agent/handle-turn.js';
 import { makeCallModel } from '../agent/call-model.js';
+import { makeMemberLabeler, makeTurnRouting } from '../agent/route-turn.js';
+import { createRouteStreakLog, probeJev } from '../ops/route-health.js';
+import { writeTurnRouteLog, type TurnRouteLogInput } from '../memory/turn-route-log.js';
 import { stableSystemPrompt, type PendingActionDigestEntry } from '../agent/prompts.js';
 import { makePark } from '../hitl/park.js';
 import { summarizeToolCall, toDigestEntries } from '../hitl/digest.js';
@@ -65,11 +68,34 @@ async function main(): Promise<void> {
     calendarIds: config.calendarIds,
   });
   const embedder = makeVoyageEmbedder({ apiKey: config.voyageApiKey });
+  // Turn routing — same wiring as src/main.ts; the scripted day's senders are
+  // the dev ids below. TURN_ROUTING=shadow in .env exercises it end to end.
+  const routing = config.turnRouting;
+  const routeStreak = createRouteStreakLog((line) => console.warn(line));
+  const turnRouting = makeTurnRouting({
+    mode: routing.mode,
+    typesafeApiKey: routing.typesafeApiKey,
+    jevModel: routing.jevModel,
+    enabledTiers: routing.enabledTiers,
+    labelFor: makeMemberLabeler({ husband: ['husband@wa'], wife: ['wife@wa'] }),
+    onDecision: (decision) => {
+      tracer.onRouteDecision(decision);
+      routeStreak.observe(decision);
+    },
+  });
   const callModel = makeCallModel({
     // Stable prefix only — the pending-actions digest rides per call as the
     // post-prefix system block (T34).
     systemPrompt: stableSystemPrompt,
     model: anthropic(config.reasoningModelId),
+    ...(turnRouting === undefined
+      ? {}
+      : {
+          models: {
+            fast: anthropic(routing.fastModelId),
+            deep: anthropic(routing.deepModelId),
+          },
+        }),
     tools: toToolSet(registry),
     onUsage: tracer.onModelUsage,
   });
@@ -139,6 +165,11 @@ async function main(): Promise<void> {
     'writeCompactionLog',
     async (db, input: CompactionLogInput): Promise<boolean> => writeCompactionLog(db, input),
   );
+  const logTurnRouteStep = registerTransactionalStep(
+    dataSource,
+    'logTurnRoute',
+    async (db, input: TurnRouteLogInput): Promise<boolean> => writeTurnRouteLog(db, input),
+  );
 
   // --- The turn workflow (T22 seam, registered before launch) ---------------
   const handleTurn = DBOS.registerWorkflow(
@@ -158,6 +189,9 @@ async function main(): Promise<void> {
         refine: refineActionStep,
       },
       callModel,
+      ...(turnRouting === undefined
+        ? {}
+        : { routeTurn: turnRouting.routeTurn, logRoute: logTurnRouteStep }),
       // One renderer (summarizeToolCall) for the closing prompt, the digest
       // step above, and sendApprovalPrompts below — byte-identical text in
       // the transcript and on the wire (T34 invariant, T40 human rendering).
@@ -185,6 +219,8 @@ async function main(): Promise<void> {
   });
   DBOS.setConfig({ name: 'hh-assistant-dev', systemDatabaseUrl: config.databaseUrl });
   await DBOS.launch();
+  console.log(`[route] mode ${routing.mode}`);
+  if (turnRouting !== undefined) await probeJev(turnRouting.jev, (line) => console.log(line));
 
   // --- Drive the scripted day, replies out through the stub transport -------
   const transport = createStubTransport();

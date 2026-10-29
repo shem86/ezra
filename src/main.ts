@@ -34,6 +34,9 @@ import { makeExpirySweepWorkflow, toOverdueActions } from './hitl/expiry.js';
 import { markExpired } from './hitl/pending-actions.js';
 import { makeHandleTurnWorkflow } from './agent/handle-turn.js';
 import { makeCallModel } from './agent/call-model.js';
+import { makeMemberLabeler, makeTurnRouting } from './agent/route-turn.js';
+import { createRouteStreakLog, probeJev } from './ops/route-health.js';
+import { writeTurnRouteLog, type TurnRouteLogInput } from './memory/turn-route-log.js';
 import { makeProductionSystemPrompt, type PendingActionDigestEntry } from './agent/prompts.js';
 import { makePark } from './hitl/park.js';
 import { summarizeToolCall, toDigestEntries } from './hitl/digest.js';
@@ -128,11 +131,34 @@ async function main(): Promise<void> {
     calendarIds: config.calendarIds,
   });
   const embedder = makeVoyageEmbedder({ apiKey: config.voyageApiKey });
+  // Turn routing (docs/specs/jev-turn-routing-plan.md). `off` ⇒ undefined:
+  // no Jev client, no routeTurn step, no tier models — today's spine exactly.
+  const routing = config.turnRouting;
+  const routeStreak = createRouteStreakLog((line) => console.warn(line));
+  const turnRouting = makeTurnRouting({
+    mode: routing.mode,
+    typesafeApiKey: routing.typesafeApiKey,
+    jevModel: routing.jevModel,
+    enabledTiers: routing.enabledTiers,
+    labelFor: makeMemberLabeler(config.memberJids),
+    onDecision: (decision) => {
+      tracer.onRouteDecision(decision);
+      routeStreak.observe(decision);
+    },
+  });
   const callModel = makeCallModel({
     // Built once from start-time config — byte-stable for the process, which
     // is what the prompt cache needs (prompts.ts header note).
     systemPrompt: makeProductionSystemPrompt({ memberJids: config.memberJids }),
     model: anthropic(config.reasoningModelId),
+    ...(turnRouting === undefined
+      ? {}
+      : {
+          models: {
+            fast: anthropic(routing.fastModelId),
+            deep: anthropic(routing.deepModelId),
+          },
+        }),
     tools: toToolSet(registry),
     onUsage: tracer.onModelUsage,
   });
@@ -198,6 +224,11 @@ async function main(): Promise<void> {
     'writeCompactionLog',
     async (db, input: CompactionLogInput): Promise<boolean> => writeCompactionLog(db, input),
   );
+  const logTurnRouteStep = registerTransactionalStep(
+    dataSource,
+    'logTurnRoute',
+    async (db, input: TurnRouteLogInput): Promise<boolean> => writeTurnRouteLog(db, input),
+  );
 
   // --- The turn workflow (T22 seam) ------------------------------------------
   const handleTurn = DBOS.registerWorkflow(
@@ -213,6 +244,9 @@ async function main(): Promise<void> {
         refine: refineActionStep,
       },
       callModel,
+      ...(turnRouting === undefined
+        ? {}
+        : { routeTurn: turnRouting.routeTurn, logRoute: logTurnRouteStep }),
       summarizeProposal: (call) => summarizeToolCall(registry, call.name, call.args),
       compaction: {
         ...defaultCompactionConfig,
@@ -511,6 +545,14 @@ async function main(): Promise<void> {
   console.log(
     `ezra up: serving ${config.householdConversations.length} conversation(s), sweeps scheduled, dead-man pinging, wa-version ${formatWaVersion(waVersionSource.current())}`,
   );
+  // After `ezra up`, never before: like the version probe, a Jev check must
+  // not sit between start and the socket. Its result is a log line, not a
+  // readiness gate — a dead router falls back to standard (plan §5b).
+  console.log(
+    `[route] mode ${routing.mode}` +
+      (turnRouting === undefined ? '' : ` · tiers ${[...routing.enabledTiers].join(',')} · ${routing.jevModel}`),
+  );
+  if (turnRouting !== undefined) void probeJev(turnRouting.jev, (line) => console.log(line));
 
   // --- Graceful shutdown ------------------------------------------------------
   let shuttingDown = false;

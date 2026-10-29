@@ -8,7 +8,14 @@
 // the failure kind recorded in `source` — rather than retry or fail a turn.
 
 import type { TurnMessage } from './context.js';
-import { JevError, type JevClient, type JevErrorKind } from './jev-client.js';
+import {
+  JevError,
+  makeJevClient,
+  type JevAnswer,
+  type JevClient,
+  type JevErrorKind,
+  type JevQuestions,
+} from './jev-client.js';
 import {
   applyRollout,
   decideTier,
@@ -43,6 +50,10 @@ export interface RouteDecision {
   readonly latencyMs?: number;
   readonly inputTokens?: number;
   readonly answers?: RouteAnswers;
+  /** The exact { state, questions } sent — for turn_route_log re-runs (§5). */
+  readonly request?: { readonly state: unknown; readonly questions: JevQuestions };
+  /** Jev's validated answers, wire format. */
+  readonly response?: Readonly<Record<string, JevAnswer>>;
 }
 
 export interface RouteTurnInput {
@@ -81,11 +92,13 @@ export function makeRouteTurn(deps: RouteTurnDeps): (input: RouteTurnInput) => P
     }
 
     const started = now();
+    let request: RouteDecision['request'];
     try {
       const state = renderRouteState({
         recent: toRouteMessages(input.prior, deps.labelFor),
         latest: input.latest.map((m) => ({ from: deps.labelFor(m.senderId), text: m.text })),
       });
+      request = { state, questions: turnRouteQuestions };
       const response = await deps.jev.ask(state, turnRouteQuestions);
       const answers = toRouteAnswers(response.answers);
       const proposed = decideTier(answers);
@@ -98,6 +111,8 @@ export function makeRouteTurn(deps: RouteTurnDeps): (input: RouteTurnInput) => P
         latencyMs: Math.round(now() - started),
         inputTokens: response.inputTokens,
         answers,
+        request,
+        response: response.answers,
       };
     } catch (error) {
       const kind = error instanceof JevError ? error.kind : 'internal';
@@ -107,8 +122,69 @@ export function makeRouteTurn(deps: RouteTurnDeps): (input: RouteTurnInput) => P
         proposed: 'standard',
         source: `fallback-error:${kind}`,
         latencyMs: Math.round(now() - started),
+        ...(request === undefined ? {} : { request }),
       };
     }
+  };
+}
+
+/**
+ * Sender JID → member label. A member may have several JID forms
+ * (phone-shaped and @lid — docs/pairing.md). An unknown sender becomes
+ * 'member', never its JID: Jev is a third party and must not see one (§4).
+ */
+export function makeMemberLabeler(memberJids: {
+  readonly husband: readonly string[];
+  readonly wife: readonly string[];
+}): (senderId: string) => string {
+  const husband = new Set(memberJids.husband);
+  const wife = new Set(memberJids.wife);
+  return (senderId) => (husband.has(senderId) ? 'husband' : wife.has(senderId) ? 'wife' : 'member');
+}
+
+export interface TurnRoutingOptions {
+  readonly mode: 'off' | RouteMode;
+  readonly typesafeApiKey: string | undefined;
+  readonly jevModel: string;
+  readonly enabledTiers: ReadonlySet<Tier>;
+  readonly labelFor: (senderId: string) => string;
+  /** Tracing + streak-log tap. Runs inside the step; a throw is swallowed. */
+  readonly onDecision: (decision: RouteDecision) => void;
+  /** Injectable for tests; defaults to a real client from the key + pin. */
+  readonly jev?: JevClient;
+}
+
+/**
+ * The composers' one call (src/main.ts, src/dev/main.ts): undefined when
+ * routing is off — nothing is wired, no routeTurn step exists — otherwise
+ * the Jev client (for the startup probe) and the routeTurn dep.
+ */
+export function makeTurnRouting(
+  options: TurnRoutingOptions,
+): { readonly jev: JevClient; readonly routeTurn: (input: RouteTurnInput) => Promise<RouteDecision> } | undefined {
+  if (options.mode === 'off') return undefined;
+  if (options.jev === undefined && options.typesafeApiKey === undefined) {
+    throw new Error('turn routing: TYPESAFE_API_KEY is required when routing is not off');
+  }
+  const jev =
+    options.jev ?? makeJevClient({ apiKey: options.typesafeApiKey!, model: options.jevModel });
+  const inner = makeRouteTurn({
+    jev,
+    mode: options.mode,
+    enabledTiers: options.enabledTiers,
+    labelFor: options.labelFor,
+  });
+  return {
+    jev,
+    async routeTurn(input) {
+      const decision = await inner(input);
+      try {
+        options.onDecision(decision);
+      } catch {
+        // Observability must never fail or retry the routing step.
+      }
+      return decision;
+    },
   };
 }
 

@@ -1,7 +1,8 @@
 # Plan — Jev-routed turn model selection (Haiku / Sonnet / Opus)
 
-**Date:** 2026-10-29 · **Status:** PROPOSED, not started. Phase 0 decisions mostly
-taken (§8). · **Reverses in part:** [ADR-0003](../adr-0003-remove-turn-router.md)
+**Date:** 2026-10-29 · **Status:** lives in [STATUS.md](../../STATUS.md) item 14
+(house rule 1, which keeps no status here). · **Reverses in part:**
+[ADR-0003](../adr-0003-remove-turn-router.md)
 
 ## 1. Goal, and an honest motivation
 

@@ -51,6 +51,8 @@ import type { CalendarToolDeps } from '../../src/tools/calendar.ts';
 import { createStubTransport } from '../../src/transport/stub.ts';
 import { makeFakeCalendar, type FakeCalendarClient } from './fake-calendar.ts';
 import type { EvalScenario, EvalScenarioMessage } from '../fixtures/decision9.ts';
+import type { RouteDecision } from '../../src/agent/route-turn.ts';
+import type { Tier } from '../../src/agent/turn-route.ts';
 
 /** A pending_actions row as the assertions consume it — any status. */
 export interface EvalActionRow {
@@ -77,7 +79,17 @@ export interface EvalHarness {
   shutdown(): Promise<void>;
 }
 
-export async function composeEvalHarness(): Promise<EvalHarness> {
+export interface EvalHarnessOptions {
+  /**
+   * Turn routing per-tier scenarios (`pnpm eval:route`): every turn runs on
+   * the tier this returns, through the real routeTurn seam and the real
+   * tier models from config — proving the Sonnet-tuned production prompt
+   * holds on Haiku and Opus. Absent ⇒ unrouted, today's standard-only turns.
+   */
+  readonly forceTier?: () => Tier;
+}
+
+export async function composeEvalHarness(options: EvalHarnessOptions = {}): Promise<EvalHarness> {
   const config = loadConfig();
   await runMigrations({ databaseUrl: config.databaseUrl });
 
@@ -92,11 +104,33 @@ export async function composeEvalHarness(): Promise<EvalHarness> {
   const systemPrompt = makeProductionSystemPrompt({
     memberJids: { husband: ['husband@wa'], wife: ['wife@wa'] },
   });
+  const { forceTier } = options;
   const callModel = makeCallModel({
     systemPrompt,
     model: anthropic(config.reasoningModelId),
+    ...(forceTier === undefined
+      ? {}
+      : {
+          models: {
+            fast: anthropic(config.turnRouting.fastModelId),
+            deep: anthropic(config.turnRouting.deepModelId),
+          },
+        }),
     tools: toToolSet(registry),
   });
+  const routeTurn =
+    forceTier === undefined
+      ? undefined
+      : async (): Promise<RouteDecision> => {
+          const tier = forceTier();
+          return {
+            tier,
+            proposed: tier,
+            source: 'jev',
+            mode: 'on',
+            questionsVersion: 'eval-forced',
+          };
+        };
 
   const dataSource = new NodePostgresDataSource('eval-db', {
     connectionString: config.databaseUrl,
@@ -156,6 +190,7 @@ export async function composeEvalHarness(): Promise<EvalHarness> {
         refine: refineActionStep,
       },
       callModel,
+      ...(routeTurn === undefined ? {} : { routeTurn }),
       // One renderer for the closing prompt, the digest, and the sent prompt —
       // keeps them byte-identical (T40), same as dev/main.ts and production.
       summarizeProposal: (call) => summarizeToolCall(registry, call.name, call.args),

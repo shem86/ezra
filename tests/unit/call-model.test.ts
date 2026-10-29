@@ -349,6 +349,22 @@ describe('makeCallModel tier selection', () => {
     expect(seen).toEqual(['deep', 'deep', 'fast', 'standard']);
   });
 
+  it('reports the turn tier with usage so traces can split cost per tier', async () => {
+    const usages: ModelUsage[] = [];
+    const callModel = makeCallModel({
+      model: mockModel([{ type: 'text', text: 'ok' }]),
+      models: { deep: mockModel([{ type: 'text', text: 'ok' }]) },
+      systemPrompt: SYSTEM,
+      onUsage: (u) => usages.push(u),
+    });
+
+    await callModel(userMsg, { forceFinal: false, tier: 'deep' });
+    await callModel(userMsg, { forceFinal: false });
+
+    expect(usages[0]!.tier).toBe('deep');
+    expect(usages[1]).not.toHaveProperty('tier');
+  });
+
   it('falls back to the base model for an unrouted call or a tier without a model', async () => {
     const seen: string[] = [];
     const callModel = makeCallModel({

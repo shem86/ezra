@@ -9,6 +9,7 @@ import type { CostClient } from './cost.js';
 import { getLogs, type TurnEnricher } from './journal.js';
 import type { StatusResponse } from './probes.js';
 import type { CalendarReader } from './calendar.js';
+import { getRouterHealth } from './router-health.js';
 
 // The calendar is a virtual, read-only "table" sourced live from Google
 // Calendar (no DB table) — listed in the catalogue alongside the real ones.
@@ -66,6 +67,13 @@ export function createApiRouter(deps: ApiDeps): ApiRouter {
         const limit = clampLimit(url.searchParams.get('limit'));
         const logs = await getLogs(deps.db, deps.enricher, limit === undefined ? {} : { limit });
         return { status: 200, body: logs };
+      }
+
+      // GET /api/router → the turn-router health panel + recent routed turns
+      // (turn_route_log, docs/specs/jev-turn-routing-plan.md §5b). Pulled,
+      // never paged: a dead router degrades to standard, not an outage.
+      if (path === '/api/router') {
+        return { status: 200, body: await getRouterHealth(deps.db) };
       }
 
       // GET /api/status → live health probes.

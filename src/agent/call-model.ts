@@ -16,6 +16,8 @@ export interface ModelUsage {
   readonly outputTokens: number | undefined;
   readonly cacheReadTokens: number | undefined;
   readonly cacheWriteTokens: number | undefined;
+  /** The routed turn's tier — absent on an unrouted call. */
+  readonly tier?: Tier;
 }
 
 export interface CallModelDeps {
@@ -67,6 +69,7 @@ export function makeCallModel(deps: CallModelDeps): HandleTurnDeps['callModel'] 
       outputTokens: result.usage.outputTokens,
       cacheReadTokens: result.usage.inputTokenDetails.cacheReadTokens,
       cacheWriteTokens: result.usage.inputTokenDetails.cacheWriteTokens,
+      ...(options.tier === undefined ? {} : { tier: options.tier }),
     });
 
     return {

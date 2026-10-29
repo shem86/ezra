@@ -10,6 +10,7 @@ import { defineTool } from '../../src/tools/define-tool.js';
 import { makeRunTool, makeToolRegistry } from '../../src/tools/registry.js';
 import type { ToolCall, TurnMessage } from '../../src/agent/context.js';
 import type { Queryable } from '../../src/memory/store.js';
+import type { RouteDecision } from '../../src/agent/route-turn.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -331,5 +332,103 @@ describe('makeTracer — traceStep', () => {
     await expect(embed()).rejects.toThrow('voyage 500');
     expect(spans[0]!.name).toBe('embedSummary');
     expect(spans[0]!.error).toContain('voyage 500');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Turn routing (docs/specs/jev-turn-routing-plan.md §5): the route span and
+// the per-tier cost tag ADR-0003 removed. Spans stay metadata-only — the
+// decision's request carries household text, which lives in turn_route_log.
+// ---------------------------------------------------------------------------
+
+describe('makeTracer — turn routing', () => {
+  const decision: RouteDecision = {
+    tier: 'standard',
+    proposed: 'deep',
+    source: 'jev',
+    mode: 'shadow',
+    questionsVersion: 'abc123def456',
+    jevModel: 'jev-1.14.0',
+    latencyMs: 142,
+    inputTokens: 1220,
+    answers: {
+      asksAnything: 0.97,
+      intent: 'planning_or_advice',
+      severalRequests: 0.04,
+      refersBack: 0.1,
+      weighsOptions: 0.93,
+      scheduleReasoning: 0.88,
+      correctsPrevious: 0.02,
+    },
+    request: {
+      state: { latest_messages: [{ from: 'wife', text: 'נלך לסבתא בשישי או בשבת?' }] },
+      questions: {},
+    },
+    response: { weighs_options: { type: 'noul', noul: 0.93 } },
+  };
+
+  it('emits a routeTurn span with the decision and every probability', () => {
+    const { spans, sink } = capturedSink();
+    makeTracer({ sink, getTraceId: () => 'wf-r' }).onRouteDecision(decision);
+
+    expect(spans).toHaveLength(1);
+    expect(spans[0]!.name).toBe('routeTurn');
+    expect(spans[0]!.traceId).toBe('wf-r');
+    expect(spans[0]!.attributes).toEqual({
+      tier: 'standard',
+      proposed: 'deep',
+      source: 'jev',
+      mode: 'shadow',
+      questionsVersion: 'abc123def456',
+      jevModel: 'jev-1.14.0',
+      latencyMs: 142,
+      jevInputTokens: 1220,
+      intent: 'planning_or_advice',
+      pAsksAnything: 0.97,
+      pSeveralRequests: 0.04,
+      pRefersBack: 0.1,
+      pWeighsOptions: 0.93,
+      pScheduleReasoning: 0.88,
+      pCorrectsPrevious: 0.02,
+    });
+  });
+
+  it('never puts the request text into the span', () => {
+    const { spans, sink } = capturedSink();
+    makeTracer({ sink }).onRouteDecision(decision);
+    expect(JSON.stringify(spans)).not.toContain('סבתא');
+  });
+
+  it('a fallback span carries the failure source and no probabilities', () => {
+    const { spans, sink } = capturedSink();
+    makeTracer({ sink }).onRouteDecision({
+      tier: 'standard',
+      proposed: 'standard',
+      source: 'fallback-error:timeout',
+      mode: 'on',
+      questionsVersion: 'abc123def456',
+      latencyMs: 1501,
+    });
+    expect(spans[0]!.attributes).toEqual({
+      tier: 'standard',
+      proposed: 'standard',
+      source: 'fallback-error:timeout',
+      mode: 'on',
+      questionsVersion: 'abc123def456',
+      latencyMs: 1501,
+    });
+  });
+
+  it('tags a callModel span with the turn tier when there is one', () => {
+    const { spans, sink } = capturedSink();
+    const tracer = makeTracer({ sink });
+    tracer.onModelUsage({
+      inputTokens: 10,
+      outputTokens: 2,
+      cacheReadTokens: undefined,
+      cacheWriteTokens: undefined,
+      tier: 'deep',
+    });
+    expect(spans[0]!.attributes).toEqual({ inputTokens: 10, outputTokens: 2, tier: 'deep' });
   });
 });

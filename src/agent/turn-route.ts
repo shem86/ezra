@@ -7,10 +7,9 @@
 // threshold lives here and nowhere else. CHANGING ANY OF IT — or the Jev pin,
 // a tier model id (env overrides included), or evals/fixtures/turn-route —
 // means running `pnpm eval:route` and putting the result in the PR
-// (.claude/rules/testing.md, "Routing evals" — both land in plan Phase 4;
-// until then, spikes/jev-turn-route-probe.ts is the live check). The wording below is the one
-// Phase 1 measured (docs/spike-results.md); unit tests replay its recorded
-// answers through decideTier.
+// (.claude/rules/testing.md, "Routing evals"). Phase 1 measured the wording
+// (docs/spike-results.md); unit tests replay its recorded answers through
+// decideTier.
 
 import { createHash } from 'node:crypto';
 import type { JevAnswer, JevQuestions } from './jev-client.js';
@@ -37,6 +36,11 @@ export const turnRouteQuestions = {
       household_fact:
         'Looking up or storing a household fact, such as a password, a code, or a phone number.',
       planning_or_advice: 'Planning something, or recommending a choice between options.',
+      // Added after the first shadow run (pnpm dev, 2026-10-29): with no
+      // recall option, "what did we say about shopping before?" landed on
+      // list_edit — a fast-eligible intent.
+      conversation_recall:
+        'Asking what was said, decided, or mentioned in earlier conversations.',
       social: 'Thanks, greetings, acknowledgements, or emoji reactions.',
     },
   },
