@@ -1,7 +1,7 @@
 # Plan — Jev-routed turn model selection (Haiku / Sonnet / Opus)
 
-**Date:** 2026-10-29 · **Status:** PROPOSED, not started. Phase 0 asks the builder
-for decisions before any code lands. · **Reverses in part:** [ADR-0003](../adr-0003-remove-turn-router.md)
+**Date:** 2026-10-29 · **Status:** PROPOSED, not started. Phase 0 decisions mostly
+taken (§8). · **Reverses in part:** [ADR-0003](../adr-0003-remove-turn-router.md)
 
 ## 1. Goal, and an honest motivation
 
@@ -139,14 +139,33 @@ deterministic.
 - **`src/ops/config.ts`** adds `TYPESAFE_API_KEY` (secret class),
   `TURN_ROUTING=off|shadow|on` (default `off`), and `FAST_MODEL_ID` /
   `DEEP_MODEL_ID`. `standard` keeps `REASONING_MODEL_ID`.
-- **Tracing:** `onUsage` gets the tier back (ADR-0003 removed it), and the
-  `routeTurn` span carries `tier`, `source`, and every probability. That is
-  metadata only, with no message text, keeping the T31 boundary.
+- **Tracing and payload capture.** These are split by where content is allowed to
+  live. This follows the precedent set by the compaction-eval capture
+  ([compaction-eval-spec](../compaction-eval-spec.md)).
+  - **Langfuse** (a third-party cloud; T31 keeps it metadata-only) gets the
+    `routeTurn` span: `tier`, `source` (`jev` | `pre-rule:<name>` |
+    `fallback-error:<kind>`), every probability, Jev's latency and
+    `input_tokens`, the answering model id from the response, and
+    `questionsVersion`, a hash of the `turn-route.ts` question set, so wording
+    changes are attributable. `onUsage` gets the tier back (ADR-0003 removed it).
+  - **Postgres `turn_route_log`** (a new forward-only migration, *ask-first
+    schema change*) stores the **exact request payload as sent**, the raw
+    response, the tier, and `questionsVersion`. It's keyed by workflow id and
+    written by an idempotent datasource transaction, like `writeCompactionLog`.
+    This is what makes any routing decision re-runnable, and it's the source for
+    the real-traffic eval set (§8a). Message text stays inside our own Postgres
+    and never enters a trace. TypeSafe already sees it; Langfuse doesn't need to.
 - **Egress:** add `api.typesafe.ai` to `src/ops/egress-allowlist.ts` under a new
   `routing` category, mirrored in the nftables set, with the drift test updated.
-  Check whether it's a single-record rotator (see the 2026-09 `oauth2.googleapis.com`
-  lesson in STATUS item 8) **before** shipping, or the first prod call times out
-  at the egress at ~10.5s and silently routes everything to `fallback-error`.
+  Check its DNS behavior first (`dig` it repeatedly: TTL, record count). PR #50
+  made the refresh accumulate rotating answers, but a host that isn't in the set
+  yet still gets its SYN **dropped**, not rejected, and our 1.5s timeout fires
+  long before the ~10.5s egress fingerprint shows up. Mitigations:
+  - **Startup probe.** One tiny Jev request at boot, logged `[jev] ok` or
+    `[jev] unreachable: <kind>`.
+  - **Fallback-rate alert.** Edge-triggered on `fallback-error` share over a
+    window, using the existing alert channel. A dead router otherwise degrades
+    to today's behavior and nobody would ever notice.
 
 **Don't bundle a model upgrade.** The current defaults are `claude-haiku-4-5` and
 `claude-sonnet-4-6`. Moving tier ids to newer models is a separate change.
@@ -179,17 +198,113 @@ Bundling it would confound the Phase 5 comparison.
    Check each tier model's minimum cacheable prefix against the production
    prompt's size: if a tier is below its minimum, its prefix silently never
    caches.
-6. **Haiku on tool use.** `fast` turns still carry the full tool set. A wrong
-   `fast` costs a worse answer, not a wrong effect, because confirm-before tools
-   still park.
+6. **Haiku on tool use.** `fast` turns still carry the full tool set. Only
+   confirm-before tools (the calendar write) park. **Autonomous tools — lists,
+   reminders, facts — execute directly**, so a misrouted `fast` turn can produce a
+   *wrong effect*: a reminder at the wrong time, the wrong list item. That is why
+   `fast` is gated hardest and rolls out last (§7b).
+
+### 7b. Per-turn tier: trade-offs, failure modes, alternatives
+
+**Trade-offs of choosing the tier once per turn:**
+- **It commits before the turn shows what it needs.** The router sees only text.
+  A calendar clash the model discovers in round 2 doesn't upgrade the tier.
+  That's the price of keeping one cache and making no mid-turn switches.
+- **Errors are asymmetric.** `deep` on an easy turn costs money and latency. `fast`
+  on a hard turn costs quality and can cause wrong autonomous effects (risk 6).
+  Thresholds and rollout order reflect that.
+- **Consistency across turns.** One conversation will be answered by different
+  models turn to turn: tone, verbosity, Hebrew register. The household may notice
+  the voice change.
+- **The prompt is tuned on Sonnet.** The production prompt and `pnpm eval` 8/8
+  were proven on Sonnet only. Each tier needs its own eval pass (§8a).
+- **Added serial latency.** The Jev round trip sits before the first token on
+  every non-pre-ruled turn.
+- **Cache split.** There are three prefix caches, and each has a minimum
+  cacheable length.
+
+**Failure modes and what catches each:**
+
+| Failure | Effect | Caught by |
+|---|---|---|
+| Jev down, slow, or blocked at egress | every turn on `standard` = today's behavior | startup probe + fallback-rate alert (§5) |
+| Short context-dependent message ("כן, את השני", "do that") routed `fast` | wrong item / wrong effect | `refers_back` Noul + eval hard cases |
+| Hebrew judged worse than English | biased routing by language | per-language eval slices; Phase 1 stop rule |
+| Jev model swap upstream | routing shifts silently | pinned `jev-1.14.0`; eval re-run is the bump gate |
+| Wording edit regresses routing | same | `questionsVersion` in traces + eval gate on edits |
+| Injection forces `deep` | cost only | provider-side spend limit |
+| Opus latency on a WhatsApp reply | slow answer to a "big" ask | measured in Phase 5; acceptable or `deep` dropped |
+| Crash between `routeTurn` and `callModel` | — | journaled tier; recovery test (Phase 3) |
+
+**Alternatives considered:**
+- **Sonnet-only (status quo).** It's the honest baseline, and Phase 6 may land
+  back here.
+- **Haiku as the router (an LLM classifier).** No new vendor, and Hebrew is
+  certain to work. But it gives uncalibrated JSON verdicts, it's slower and
+  pricier per call, and it teaches less. It's the fallback design if Jev fails
+  Phase 1 on Hebrew.
+- **Effort routing on one model.** Keep the model fixed and vary
+  thinking/effort per turn. That gives one persona and one prompt surface. Open
+  question: whether a per-turn thinking change invalidates the message cache
+  (verify against current docs before choosing). It's a strong
+  "deep without Opus" variant.
+- **Model self-escalation.** Sonnet gets an `escalate` tool, and the turn re-runs
+  on Opus. This has real signal, but it wastes a round and is a mid-turn switch
+  in disguise.
+- **Explicit user override.** A keyword such as "תחשוב טוב" or "think hard"
+  forces `deep`. It's code-only and zero-risk, and it can be added alongside the
+  router as a pre-rule.
+- **Sticky tier with hysteresis.** Keep the tier for N minutes of a conversation.
+  It reduces voice changes but misroutes topic switches. Not now.
+
+**Recommendation:** keep the once-per-turn upfront router and stage it.
+Upgrade-only (`standard` → `deep`) ships first, because its errors only cost
+money. `fast` follows only if Phase 5 shows a real latency win *and* the eval
+shows no wrong autonomous effects. Add the explicit-override pre-rule in both
+stages.
 
 ## 8. Phases and tasks
 
-**Phase 0 — decisions (builder).** Approve or decline: (a) household text to
-TypeSafe; (b) a new egress host; (c) a superseding ADR-0007 for ADR-0003; (d) an
-Opus tier at all, or `fast`/`standard` only; (e) a TypeSafe account,
-`TYPESAFE_API_KEY`, and a probe budget (≈ $1 covers tens of thousands of probe
-requests at $0.042/M input tokens).
+**Phase 0 — decisions (builder), 2026-10-29:**
+- (a) Household text to TypeSafe: ✅ approved.
+- (b) New egress host and (c) superseding ADR-0007: ✅ approved.
+- (d) Opus tier: ✅ approved.
+- (e) `TYPESAFE_API_KEY` and probe budget: builder obtaining it (≈ $1 covers tens
+  of thousands of probe requests at $0.042/M input tokens).
+- Still to decide:
+  - (f) The `turn_route_log` migration (an ask-first schema change; §5).
+  - (g) The staged rollout in §7b.
+
+### 8a. Evals — Jev is a model; it gets its own eval suite
+
+The router follows the same pattern as the T36 relatedness classifier: fixtures
+are structure-checked in CI, and accuracy is report-only and on-demand.
+
+- **Fixtures:** `evals/fixtures/turn-route.ts`, with each case
+  `{ state, expected tier, expected per-question answers, language, split }`.
+  Seeded from Phase 1's synthetic set. Later it's extended from real
+  `turn_route_log` rows the builder labels, copied into fixtures only after
+  review, never automatically.
+- **Two splits.** `tune` is for wording work. `holdout` is never looked at while
+  tuning and is the only split the gate reads. This is the guard against
+  fitting criteria to failing cases.
+- **Two levels of scoring.**
+  - **Per question:** agreement with the labels at the 0.7/0.3 bands, plus the
+    unsettled rate.
+  - **Per tier:** a confusion matrix through `decideTier`. The gate is
+    asymmetric: **zero `fast`-on-should-be-`standard`/`deep`** in holdout, and a
+    tolerance for `standard`-on-`deep` misses.
+  - Every slice is reported by language (English / Hebrew / code-switched).
+- **End-to-end:** `pnpm eval` decision-9 scenarios run with `TURN_ROUTING=on` and
+  must stay 8/8. Plus a small per-tier scenario set (the same household asks
+  forced onto each tier) that checks the *effects*, such as reminder time and
+  list item, not just the text. This is what proves the Sonnet-tuned prompt
+  works on Haiku and Opus.
+- **CI:** coverage only. Every tier × language has holdout cases, and every
+  `decideTier` row is exercised. **No live Jev calls in CI**, the same rule as
+  for model calls.
+- **When it re-runs:** any change to `turn-route.ts` (wording, criteria,
+  thresholds), any Jev pin bump, and any tier model id change.
 
 **Phase 1 — live probe, synthetic data only.**
 - About 40 hand-written cases, a third each English, Hebrew, and code-switched,
@@ -225,9 +340,13 @@ mirror plus the drift test, tracing tags, and `TURN_ROUTING=shadow` in
 - Run `pnpm eval` with `TURN_ROUTING=on`. It must stay 8/8, which the §3a
   pre-rules should guarantee.
 
-**Phase 6 — enable, or decide not to.** Flip to `on`, or record that the deep tier
-didn't earn its place and keep `fast`/`standard`, or `off`. Either way the
-outcome is written into ADR-0007 with the numbers.
+**Phase 6 — enable, staged, or decide not to.** If §7b is accepted:
+- **6a.** `on` with tiers `standard`/`deep` only.
+- **6b.** Enable `fast` only after a second shadow window plus a clean §8a
+  holdout.
+
+At any point the outcome can instead be "deep didn't earn its place" or `off`.
+Either way, the outcome and its numbers go into ADR-0007.
 
 ## 9. Out of scope
 
