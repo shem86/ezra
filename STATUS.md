@@ -57,8 +57,8 @@ It merged as PR #66 and was **released as `v2.3.13`**: deploy run
 Nothing else re-verified on this pass.
 
 **Partial update 2026-10-29 (later):** added item 15 — reply language after a
-run of turns in the other language, fixed in code on branch
-`eval-reply-language`, not released. Nothing else re-verified on this pass.
+run of turns in the other language, fixed in code (PR #68) and **released as
+`v2.3.14`**. Nothing else re-verified on this pass.
 
 This is the **single source of truth for current state**. Everything else is
 history:
@@ -934,7 +934,7 @@ ordering (fix = persist reasoning parts, a schema change, ask-first);
 `**` instead of `*bold*` in replies; reply quality at `low` (fallback:
 `REASONING_EFFORT=medium` in SSM, then redeploy).
 
-### 15. Reply language after a run in the other language — fixed in code, not released
+### 15. ✅ Reply language after a run in the other language — released as `v2.3.14`
 
 2026-10-29. In prod, Sonnet 5.5 answered "List all of the facts you have
 saved" in Hebrew after three Hebrew turns. New `evals/language.eval.ts`
@@ -956,6 +956,12 @@ script, system senders skipped) and passes it to `toSdkMessages`, which adds a
 per-turn `## Reply language` system block (`renderReplyLanguagePrompt`). It is
 the last system block, after the clock and digest; the cached prefix is
 unchanged. With the fix: **6/6** over 3 runs at `low`.
+
+**Released 2026-10-29 as `v2.3.14`** (PR #68), after a full `pnpm eval` of
+25/25. Deploy run `40905601753` succeeded (migrate-gate applied, healthcheck
+saw spine + backoffice up on 2.3.14, no rollback), and the container log shows
+a clean `ezra up` on image `2.3.14`. Not yet observed on a real code-switched
+prod turn.
 
 ---
 
