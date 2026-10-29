@@ -50,8 +50,9 @@ mis-stored GHCR PAT) with no swap. Nothing else re-verified on this pass.
 
 **Partial update 2026-10-29:** added item 14 — turn model moved to Sonnet 5.5.
 Built and green (unit suite, build, lint, doc check) on branch
-`ccr-a9004ef7-r7zk3v`, **not released, not run against the real model**.
-Nothing else re-verified on this pass.
+`ccr-a9004ef7-r7zk3v`, **not released**. Same day, `pnpm eval` ran against
+the real model: Sonnet 5.5 at `low` passed 23/23 twice, with no 400s (details
+under item 14). Nothing else re-verified on this pass.
 
 This is the **single source of truth for current state**. Everything else is
 history:
@@ -872,7 +873,7 @@ built): a capped `list_facts` tool (keys plus fenced values, "showing N of M"),
 and dropping short/common terms (`all`, `כל`, …) from `factTerms`, whose
 substring search otherwise matches nearly everything.
 
-### 14. Turn model → Sonnet 5.5 — built, not released, not yet evaluated
+### 14. Turn model → Sonnet 5.5 — built and eval-passed, not released
 
 2026-10-29. `REASONING_MODEL_ID` now defaults to `claude-sonnet-5-5` (was
 `claude-sonnet-4-6`); the cheap tier (Haiku 4.5) is unchanged. Three things in
@@ -890,14 +891,33 @@ carries them:
   fallen back to a forced-tool JSON shim; `makeCompactionJudge` now forces
   native `outputFormat`.
 
-**Open before release:** (a) run `pnpm eval` against the real model (spends
-money — ask first) and compare latency/quality to 4.6; (b) the transcript
-does not replay thinking blocks — `toSdkMessages` rebuilds assistant turns
-from text + tool calls only, which the migration guide warns can draw
-ordering/signature 400s within a tool round. The eval run is what proves or
-disproves it; persisting reasoning parts would be a schema change (ask-first);
-(c) check the prod `.env` / SSM for a `REASONING_MODEL_ID` pin that would
-override the new default.
+**Eval, 2026-10-29** (local dev Postgres, run from the worktree with a
+dedicated `hh_assistant_eval` database; `compaction-prod` skipped as designed).
+New defaults (Sonnet 5.5, `REASONING_EFFORT` unset, so `low`) were run twice,
+with a 4.6 baseline (`REASONING_MODEL_ID=claude-sonnet-4-6
+REASONING_EFFORT=default`) between the two runs:
+
+| | Sonnet 5.5 `low` | Sonnet 4.6 baseline |
+|---|---|---|
+| Pass | **23/23** (both runs) | 22/23 |
+| decision-9 (M5 gate) | 7/7 | 6/7: sender-attribution created no reminder |
+| Summed test time | 136s | 160s |
+| 400s / truncation | none | none |
+
+- **Thinking replay:** no `thinking` / `signature` / block-ordering 400s.
+  The facts and injection scenarios each make a tool call and then a second
+  model round, so the path that strips thinking blocks ran. Caveat: at `low`
+  effort the model may skip thinking on simple turns. This shows no 400s in
+  practice; it does not prove thinking blocks were present and stripped.
+  Watch prod logs for these 400s after release.
+- **Latency:** at `low`, 5.5 is no slower than 4.6 without thinking.
+  Per-test times include DB setup, so the comparison is approximate.
+- **Not checked by the eval:** WhatsApp formatting (`*bold*`, never `**`).
+  No scenario asserts it. Spot-check the first prod replies.
+
+**Open before release:** check the prod `.env` (SSM `/hh-assistant/env`) for
+a `REASONING_MODEL_ID` or `REASONING_EFFORT` pin that would override the new
+defaults. This was not done: the eval session had no prod read access.
 
 ---
 
