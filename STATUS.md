@@ -829,7 +829,11 @@ The previews written before the fix went away with the old container: the
 `v2.3.10` deploy recreated ezra, and with it the container's log.
 
 ### 13. "List all facts" answers incompletely and claims completeness
-**Status:** fix built, **not released** · problem **verified** 2026-10-28 by
+**Status:** ✅ **released as `v2.3.11`, deployed 2026-10-29** (PR #63) · verified
+on the host the same day: `docker ps` shows ezra, backoffice and backup on `2.3.11`,
+the socket is open, and the `ezra up:` marker printed. **Not yet observed:** a real
+`list_facts` or `get_fact` call in prod (`[tool]` lines) — no fact question
+since the restart. History: problem **verified** 2026-10-28 by
 reading the household `conversation_context` and `household_facts` on prod
 (`v2.3.9`); fix verified the same day by `pnpm lint`, `pnpm build`, the full
 `pnpm test` with integration (831 tests), and the item 13 scenarios in
