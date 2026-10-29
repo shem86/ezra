@@ -16,6 +16,7 @@
 export const egressCategories = [
   'model',
   'embeddings',
+  'routing',
   'calendar',
   'tracing',
   'alerts',
@@ -49,6 +50,16 @@ export const egressAllowlist: readonly EgressDestination[] = [
     host: 'api.voyageai.com',
     category: 'embeddings',
     reason: 'Voyage embeddings for semantic recall + compaction (src/memory/embedder.ts)',
+  },
+  // --- Turn routing (docs/specs/jev-turn-routing-plan.md) -------------------
+  // Checked 2026-10-29: two stable Cloudflare A records, TTL 300 — not a
+  // single-record rotator, so the timer-refreshed nft set covers it. A drop
+  // here would NOT be loud: the client's 1.5s deadline fires first and the
+  // router falls back to standard, so the [route] startup probe is the tell.
+  {
+    host: 'api.typesafe.ai',
+    category: 'routing',
+    reason: 'Jev turn-complexity judgments for model-tier routing (src/agent/jev-client.ts)',
   },
   // --- Google Calendar (M5.5) -----------------------------------------------
   {

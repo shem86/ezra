@@ -879,8 +879,19 @@ health in the backoffice rather than Telegram.
 parity with English, 0 harder turns sent to `fast`, p95 ≤ 369 ms. The record is in
 [`docs/spike-results.md`](docs/spike-results.md).
 
-**Next:** Phase 2 (pure core: questions module, `decideTier`, zero-dep Jev client), then Phase 3
-(the `routeTurn` step plus a recovery test). The `TYPESAFE_API_KEY` is not yet in `.env` or SSM.
+**Phase 2 verified** 2026-10-29 by `pnpm build`, `pnpm lint`, and the unit suite (742 green; no
+DB, and nothing DB-touching changed). It adds the pure core:
+`decideTier`, `preRouteTier`, `applyRollout`, and `renderRouteState` in `src/agent/turn-route.ts`,
+with the measured question set. It also adds the zero-dependency `makeJevClient` in
+`src/agent/jev-client.ts`. That client turns every failure
+into a `JevError` and never into an answer, and scrubs the key from errors. The unit tests replay
+all 45 recorded Phase 1 Jev answers through `decideTier`, and an exhaustive combination test proves
+an unsettled answer can never buy `fast` or `deep`. `api.typesafe.ai` joined the egress allowlist
+(category `routing`; two stable Cloudflare A records, TTL 300). It is inert until the code is
+wired and released. Nothing calls the router yet.
+
+**Next:** Phase 3 (the `routeTurn` step in `handleTurn`, a multi-model `makeCallModel`, and a
+kill-after-route recovery test). The `TYPESAFE_API_KEY` is not yet in `.env` or SSM.
 **Rotate it before prod:** it was pasted into a Claude session on 2026-10-29.
 
 ---
