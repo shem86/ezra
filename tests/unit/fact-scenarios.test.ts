@@ -10,12 +10,35 @@ import { factTerms, normalizeFactKey } from '../../src/tools/facts.ts';
 const set = makeFactScenarios(424242);
 
 describe('fact-lookup eval fixtures (STATUS item 11)', () => {
-  it('defines the save and read scenarios over the two fact tools', () => {
+  it('defines the save, read, list-all and existence scenarios over the fact tools', () => {
     expect(set.scenarios.map((s) => s.name).sort()).toEqual([
       'fact-dedup-on-save',
+      'fact-existence-en',
+      'fact-existence-he',
+      'fact-list-all',
       'fact-search-on-read',
     ]);
-    expect(new Set(set.scenarios.flatMap((s) => s.covers))).toEqual(new Set(['set_fact', 'get_fact']));
+    expect(new Set(set.scenarios.flatMap((s) => s.covers))).toEqual(
+      new Set(['set_fact', 'get_fact', 'list_facts']),
+    );
+  });
+
+  it('item 13 scenarios never name a key, so only the store can supply one', () => {
+    const item13 = set.scenarios.filter((s) =>
+      ['fact-list-all', 'fact-existence-en', 'fact-existence-he'].includes(s.name),
+    );
+    for (const message of item13.flatMap((s) => s.messages)) {
+      expect(message.text).not.toContain(set.listAll.key);
+      expect(message.text).not.toMatch(/\d{4,}/);
+    }
+  });
+
+  it('the existence scenarios are code-switched: one English, one Hebrew', () => {
+    const texts = set.scenarios
+      .filter((s) => s.name.startsWith('fact-existence-'))
+      .map((s) => s.messages[0]!.text);
+    expect(texts.some((t) => /[a-z]/i.test(t))).toBe(true);
+    expect(texts.some((t) => /[֐-׿]/.test(t))).toBe(true);
   });
 
   it('member messages use only household ids and name their run tag', () => {

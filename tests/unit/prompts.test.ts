@@ -32,6 +32,20 @@ describe('stableSystemPrompt', () => {
     expect(stableSystemPrompt).toMatch(/system:compaction/);
   });
 
+  // Item 13: prod answered "do you know my birthday?" from memory with no tool
+  // call, and listed facts from remembered keys. Both prompts (shared section)
+  // must route fact existence through the fact tools.
+  it('routes fact existence and fact keys through the fact tools, never the chat', () => {
+    const production = makeProductionSystemPrompt({
+      memberJids: { husband: ['h@s.whatsapp.net'], wife: ['w@s.whatsapp.net'] },
+    });
+    for (const prompt of [stableSystemPrompt, production]) {
+      expect(prompt).toMatch(/get_fact/);
+      expect(prompt).toMatch(/list_facts/);
+      expect(prompt).toMatch(/never .*memory|from memory/i);
+    }
+  });
+
   it('is a constant — byte-identical across reads (the cache prefix)', () => {
     expect(stableSystemPrompt).toBe(stableSystemPrompt);
     expect(stableSystemPrompt.length).toBeGreaterThan(200);

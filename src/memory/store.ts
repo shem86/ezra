@@ -231,12 +231,36 @@ export async function searchFacts(
   return res.rows.map(mapFact);
 }
 
-export async function listFactKeys(db: Queryable, limit: number): Promise<string[]> {
+/**
+ * The newest `limit` keys plus the store's total, in one round trip — the
+ * total is what lets a caller say "showing N of M" instead of presenting a
+ * capped list as everything.
+ */
+export async function listFactKeys(
+  db: Queryable,
+  limit: number,
+): Promise<{ keys: string[]; total: number }> {
   const res = await db.query(
-    'SELECT key FROM household_facts ORDER BY updated_at DESC LIMIT $1',
+    'SELECT key, count(*) OVER () AS total FROM household_facts ORDER BY updated_at DESC LIMIT $1',
     [limit],
   );
-  return res.rows.map((row) => row.key as string);
+  const keys = res.rows.map((row) => row.key as string);
+  const total = Number(res.rows[0]?.total ?? keys.length);
+  return { keys, total: Number.isFinite(total) ? total : keys.length };
+}
+
+/** The newest `limit` facts, keys and values, plus the store's total. */
+export async function listFacts(
+  db: Queryable,
+  limit: number,
+): Promise<{ facts: HouseholdFact[]; total: number }> {
+  const res = await db.query(
+    'SELECT *, count(*) OVER () AS total FROM household_facts ORDER BY updated_at DESC LIMIT $1',
+    [limit],
+  );
+  const facts = res.rows.map(mapFact);
+  const total = Number(res.rows[0]?.total ?? facts.length);
+  return { facts, total: Number.isFinite(total) ? total : facts.length };
 }
 
 function mapPendingAction(row: Record<string, unknown>): PendingAction {

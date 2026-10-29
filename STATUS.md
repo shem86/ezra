@@ -764,6 +764,15 @@ named existing key (no `distinct: true`); the read missed on its guessed key and
 answered correctly from the search fallback. The key-catalog fallback is still
 integration-only. Nothing is deployed.
 
+**Correction 2026-10-28 (later):** that single green run over-stated the
+near-duplicate path. Re-run 7 more times the same day, the guard **always
+refused** (no duplicate was ever written), but the model updated the named key
+only 1 time in 7; otherwise it **asked the member** whether to update or keep
+separately (2/8 including the first run; 0/3 on the prompt without item 13's
+line, so that line is not the cause). Asking is safe — nothing wrong is
+stored. Resolved 2026-10-29: asking is accepted as correct and the eval
+asserts "no duplicate" instead (see item 13).
+
 `get_fact` used to read `household_facts` by exact key, so a read hit only if
 the model reproduced, weeks later, the slug it invented at `set_fact` time
 (`wifi-network` vs `wifi-password`); a miss read as "no fact stored". Facts are
@@ -820,8 +829,33 @@ The previews written before the fix went away with the old container: the
 `v2.3.10` deploy recreated ezra, and with it the container's log.
 
 ### 13. "List all facts" answers incompletely and claims completeness
-**Status:** open · **verified** 2026-10-28 by reading the household
-`conversation_context` and `household_facts` on prod (`v2.3.9`).
+**Status:** fix built, **not released** · problem **verified** 2026-10-28 by
+reading the household `conversation_context` and `household_facts` on prod
+(`v2.3.9`); fix verified the same day by `pnpm lint`, `pnpm build`, the full
+`pnpm test` with integration (831 tests), and the item 13 scenarios in
+`evals/facts.eval.ts` green against real Sonnet, with transcripts read:
+"List all of the facts you have saved" called `list_facts` and reported the
+store's true total; "do you know when our anniversary is?" and the prod Hebrew
+birthday question each called `get_fact` before answering.
+
+Built (on branch `fact-list-and-key-catalog`): `getFactTool` ends every
+non-empty answer with the fenced stored-key catalog (`renderKeyCatalog`,
+"showing N of M" past 100); `listFactsTool` returns the newest 50 facts with
+fenced values under the store total; the shared prompt section says never to
+decide from memory whether a fact is stored. The search-term cleanup proposed
+below was **dropped**: a length cutoff hides real short keys (`tv-pin`,
+`גז`), a bilingual stoplist fights Hebrew prefix letters, and substring noise
+is low-harm once every answer carries the real keys. If `[tool]` log lines
+show junk matches, rank whole-term hits first instead.
+
+**Decided 2026-10-29 — a near-duplicate save may ask** (item 11's correction):
+after the guard's refusal, either updating the named key or asking the member
+which they meant is correct ("locker N" may not be the stored "gym locker N").
+The eval now asserts the invariant instead: exactly one fact under the run's
+tag, holding the old or the new value, and no unprompted `distinct: true`.
+Green 3/3 in isolation plus one full-file run (5/5) the same day.
+
+The original finding:
 
 Asked "List all of the facts you have saved", the model called `get_fact`
 once for each of the three keys it already knew from the transcript and replied "Here

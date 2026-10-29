@@ -9,7 +9,7 @@
 // which path the model actually took.
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { makeFactScenarios } from './fixtures/facts.ts';
+import { FACT_TOOLS, makeFactScenarios } from './fixtures/facts.ts';
 import { composeEvalHarness, type EvalHarness } from './harness/runner.ts';
 import type { EvalScenario } from './fixtures/decision9.ts';
 import type { TurnMessage } from '../src/agent/context.ts';
@@ -61,7 +61,12 @@ function toolTrail(transcript: TurnMessage[]): string {
 }
 
 describe('fact-key lookup under the real model (STATUS item 11)', () => {
-  it('a near-duplicate save updates the existing fact instead of adding a second', async () => {
+  // The invariant is "never a second fact". After the guard's refusal the
+  // model may update the named key OR ask the member which they meant —
+  // both are correct (decided 2026-10-29: "locker N" may not be the stored
+  // "gym locker N", so asking is reasonable). What it must not do is force
+  // the duplicate through with distinct: true unprompted.
+  it('a near-duplicate save never adds a second fact — it updates or asks', async () => {
     const s = scenario('fact-dedup-on-save');
     const conv = h.conversationIdFor(s);
     await seedFact(set.save.key, set.save.oldValue);
@@ -69,10 +74,22 @@ describe('fact-key lookup under the real model (STATUS item 11)', () => {
     const result = await h.runTurn(conv, s.messages[0]!);
     expect(result.status).toBe('completed');
 
-    const trail = toolTrail(await h.transcript(conv));
+    const transcript = await h.transcript(conv);
+    const trail = toolTrail(transcript);
     expect(await factsTagged(set.save.tag), `tool path: ${trail}`).toEqual([
-      { key: set.save.key, value: expect.stringContaining(set.save.newValue) },
+      {
+        key: set.save.key,
+        value: expect.stringMatching(new RegExp(`${set.save.oldValue}|${set.save.newValue}`)),
+      },
     ]);
+    const forcedDistinct = transcript.some(
+      (m) =>
+        m.role === 'assistant' &&
+        m.toolCalls.some(
+          (c) => c.name === 'set_fact' && (c.args as { distinct?: unknown }).distinct === true,
+        ),
+    );
+    expect(forcedDistinct, `tool path: ${trail}`).toBe(false);
   }, 300_000);
 
   it('a question whose natural key misses is answered from the search fallback', async () => {
@@ -90,4 +107,44 @@ describe('fact-key lookup under the real model (STATUS item 11)', () => {
     // Reading must not have written anything under this run's tag.
     expect(await factsTagged(set.read.tag)).toEqual([{ key: set.read.key, value: set.read.value }]);
   }, 300_000);
+
+  it('"list all facts" reads the store with list_facts, reaching a fact the chat never named', async () => {
+    const s = scenario('fact-list-all');
+    const conv = h.conversationIdFor(s);
+    await seedFact(set.listAll.key, set.listAll.value);
+
+    const result = await h.runTurn(conv, s.messages[0]!);
+    expect(result.status).toBe('completed');
+
+    const transcript = await h.transcript(conv);
+    const trail = toolTrail(transcript);
+    expect(calledTools(transcript), `tool path: ${trail}`).toContain('list_facts');
+    // The seeded fact is the newest row, so the capped list must carry it.
+    const toolOutput = transcript
+      .filter((m) => m.role === 'tool')
+      .map((m) => m.content)
+      .join('\n');
+    expect(toolOutput, `tool path: ${trail}`).toContain(set.listAll.key);
+  }, 300_000);
+
+  for (const name of ['fact-existence-en', 'fact-existence-he']) {
+    it(`${name}: "do you know X?" checks a fact tool before answering, never memory`, async () => {
+      const s = scenario(name);
+      const conv = h.conversationIdFor(s);
+
+      const result = await h.runTurn(conv, s.messages[0]!);
+      expect(result.status).toBe('completed');
+
+      const transcript = await h.transcript(conv);
+      const called = calledTools(transcript);
+      expect(
+        called.some((t) => (FACT_TOOLS as readonly string[]).includes(t)),
+        `tool path: ${toolTrail(transcript)}`,
+      ).toBe(true);
+    }, 300_000);
+  }
 });
+
+function calledTools(transcript: TurnMessage[]): string[] {
+  return transcript.flatMap((m) => (m.role === 'assistant' ? m.toolCalls.map((c) => c.name) : []));
+}

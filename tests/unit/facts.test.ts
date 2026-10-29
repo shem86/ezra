@@ -3,7 +3,7 @@
 // household's own lookup handle) stays as framing. Fake Queryable, no DB.
 
 import { describe, expect, it } from 'vitest';
-import { getFactTool, normalizeFactKey } from '../../src/tools/facts.js';
+import { getFactTool, listFactsTool, normalizeFactKey } from '../../src/tools/facts.js';
 import { fenceUntrusted, UNTRUSTED_OPEN } from '../../src/agent/untrusted.js';
 import type { Queryable } from '../../src/memory/store.js';
 
@@ -41,6 +41,88 @@ const routedDb = (routes: {
   },
 });
 
+// Item 13: keys the model remembers from the chat go stale (missing, renamed,
+// or a partial set it then presents as complete). Every fact read that finds
+// anything carries the store's real key list, so the model never has to.
+describe('get_fact always carries the stored key catalog', () => {
+  const at = new Date();
+  const catalog = [
+    { key: 'plant-care-gan-eden', total: 4 },
+    { key: 'husband-birthday', total: 4 },
+    { key: 'building-entrance-code', total: 4 },
+    { key: 'plant-care-ficus-kinori', total: 4 },
+  ];
+
+  it('an exact hit lists every stored key, including ones the chat never mentioned', async () => {
+    const db = routedDb({
+      exact: [{ key: 'husband-birthday', value: '10 ביולי 1986', updated_at: at }],
+      keys: catalog,
+    });
+
+    const result = await getFactTool.execute({ key: 'husband-birthday' }, {} as never, ctxWith(db));
+
+    expect(result).toContain(`husband-birthday: ${fenceUntrusted('stored-fact', '10 ביולי 1986')}`);
+    expect(result).toContain('All stored fact keys (4)');
+    expect(result).toContain(fenceUntrusted('stored-fact', catalog.map((c) => c.key).join('\n')));
+  });
+
+  it('a search hit carries the catalog too', async () => {
+    const db = routedDb({
+      search: [{ key: 'building-entrance-code', value: '1234#', updated_at: at }],
+      keys: catalog,
+    });
+
+    const result = await getFactTool.execute({ key: 'entrance' }, {} as never, ctxWith(db));
+
+    expect(result).toContain('closest matches');
+    expect(result).toContain('All stored fact keys (4)');
+  });
+
+  it('says when the catalog is capped, so a partial list is never mistaken for all of it', async () => {
+    const db = routedDb({ keys: [{ key: 'a', total: 140 }, { key: 'b', total: 140 }] });
+
+    const result = await getFactTool.execute({ key: 'zebra' }, {} as never, ctxWith(db));
+
+    expect(result).toContain('showing 2 of 140');
+  });
+});
+
+describe('list_facts (item 13)', () => {
+  const at = new Date();
+  const fakeRows = (rows: Record<string, unknown>[]): Queryable => ({
+    query: async () => ({ rows }),
+  });
+
+  it('lists every fact with its value fenced, and states the total', async () => {
+    const db = fakeRows([
+      { key: 'husband-birthday', value: '10 ביולי 1986', updated_at: at, total: 2 },
+      { key: 'building-entrance-code', value: '1234#', updated_at: at, total: 2 },
+    ]);
+
+    const result = await listFactsTool.execute({}, {} as never, ctxWith(db));
+
+    expect(result).toContain('2 facts stored');
+    expect(result).toContain(`husband-birthday: ${fenceUntrusted('stored-fact', '10 ביולי 1986')}`);
+    expect(result).toContain(`building-entrance-code: ${fenceUntrusted('stored-fact', '1234#')}`);
+    expect(result).not.toContain('showing');
+  });
+
+  it('says when the list is capped, so it is never presented as everything', async () => {
+    const db = fakeRows([{ key: 'a', value: 'x', updated_at: at, total: 140 }]);
+
+    const result = await listFactsTool.execute({}, {} as never, ctxWith(db));
+
+    expect(result).toContain('showing 1 of 140');
+  });
+
+  it('reports an empty store plainly, with no fence', async () => {
+    const result = await listFactsTool.execute({}, {} as never, ctxWith(fakeRows([])));
+
+    expect(result).toContain('no facts are stored yet');
+    expect(result).not.toContain(UNTRUSTED_OPEN);
+  });
+});
+
 describe('get_fact fallback when the exact key misses', () => {
   const at = new Date();
 
@@ -49,6 +131,11 @@ describe('get_fact fallback when the exact key misses', () => {
       search: [
         { key: 'router-model', value: 'the wifi router is a Netgear', updated_at: at },
         { key: 'wifi-password', value: 'fios-guest', updated_at: at },
+      ],
+      // A store with search hits is non-empty: the catalog lists those rows.
+      keys: [
+        { key: 'router-model', total: 2 },
+        { key: 'wifi-password', total: 2 },
       ],
     });
 
