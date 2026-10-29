@@ -46,6 +46,19 @@ describe('stableSystemPrompt', () => {
     }
   });
 
+  // Prod 2026-10-29: replies used Markdown **bold**, which WhatsApp renders
+  // with stray asterisks (its bold is *single*). Both prompts (shared Style
+  // section) must say which syntax the channel actually renders.
+  it('states WhatsApp formatting, not Markdown: single-asterisk bold, no **', () => {
+    const production = makeProductionSystemPrompt({
+      memberJids: { husband: ['h@s.whatsapp.net'], wife: ['w@s.whatsapp.net'] },
+    });
+    for (const prompt of [stableSystemPrompt, production]) {
+      expect(prompt).toMatch(/\*bold\*/);
+      expect(prompt).toMatch(/never .*\*\*/i);
+    }
+  });
+
   it('is a constant — byte-identical across reads (the cache prefix)', () => {
     expect(stableSystemPrompt).toBe(stableSystemPrompt);
     expect(stableSystemPrompt.length).toBeGreaterThan(200);
