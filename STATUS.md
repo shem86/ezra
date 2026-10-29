@@ -48,6 +48,11 @@ deployed — the deploy run's on-host log reached the healthy launch markers.
 The first two deploy attempts failed at `docker login ghcr.io` (an expired, then a
 mis-stored GHCR PAT) with no swap. Nothing else re-verified on this pass.
 
+**Partial update 2026-10-29:** added item 14 — turn model moved to Sonnet 5.5.
+Built and green (unit suite, build, lint, doc check) on branch
+`ccr-a9004ef7-r7zk3v`, **not released, not run against the real model**.
+Nothing else re-verified on this pass.
+
 This is the **single source of truth for current state**. Everything else is
 history:
 
@@ -866,6 +871,33 @@ after a total search miss, and the model never searched. Proposed fix (not
 built): a capped `list_facts` tool (keys plus fenced values, "showing N of M"),
 and dropping short/common terms (`all`, `כל`, …) from `factTerms`, whose
 substring search otherwise matches nearly everything.
+
+### 14. Turn model → Sonnet 5.5 — built, not released, not yet evaluated
+
+2026-10-29. `REASONING_MODEL_ID` now defaults to `claude-sonnet-5-5` (was
+`claude-sonnet-4-6`); the cheap tier (Haiku 4.5) is unchanged. Three things in
+the pinned `@ai-sdk/anthropic` 3.0.82 made a bare id swap unsafe, so the change
+carries them:
+
+- **Output cap.** The provider doesn't know the id and falls back to
+  `max_tokens` 4096, while Sonnet 5.5 always thinks and thinking counts against
+  the cap. `makeCallModel` now sends an explicit 16k.
+- **Thinking can't be off.** Sonnet 4.6 ran these turns with no thinking;
+  on 5.5 `disabled` is a 400. New `REASONING_EFFORT` config (default `low`,
+  `default` sends none) is passed as provider `effort` — the closest match to
+  the old latency.
+- **Forced tool choice 400s.** The eval judge's `Output.object` would have
+  fallen back to a forced-tool JSON shim; `makeCompactionJudge` now forces
+  native `outputFormat`.
+
+**Open before release:** (a) run `pnpm eval` against the real model (spends
+money — ask first) and compare latency/quality to 4.6; (b) the transcript
+does not replay thinking blocks — `toSdkMessages` rebuilds assistant turns
+from text + tool calls only, which the migration guide warns can draw
+ordering/signature 400s within a tool round. The eval run is what proves or
+disproves it; persisting reasoning parts would be a schema change (ask-first);
+(c) check the prod `.env` / SSM for a `REASONING_MODEL_ID` pin that would
+override the new default.
 
 ---
 

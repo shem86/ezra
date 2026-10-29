@@ -71,6 +71,7 @@ async function main(): Promise<void> {
     systemPrompt: stableSystemPrompt,
     model: anthropic(config.reasoningModelId),
     tools: toToolSet(registry),
+    ...(config.reasoningEffort === undefined ? {} : { effort: config.reasoningEffort }),
     onUsage: tracer.onModelUsage,
   });
 

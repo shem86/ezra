@@ -96,6 +96,7 @@ export async function composeEvalHarness(): Promise<EvalHarness> {
     systemPrompt,
     model: anthropic(config.reasoningModelId),
     tools: toToolSet(registry),
+    ...(config.reasoningEffort === undefined ? {} : { effort: config.reasoningEffort }),
   });
 
   const dataSource = new NodePostgresDataSource('eval-db', {

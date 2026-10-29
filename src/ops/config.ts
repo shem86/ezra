@@ -18,7 +18,11 @@ const envSchema = z.object({
   // Reasoning = every turn call (ADR-0003); cheap = classification only
   // (compaction summarize, T36 relatedness). Overridable for T33 retuning.
   CHEAP_MODEL_ID: z.string().min(1).default('claude-haiku-4-5-20251001'),
-  REASONING_MODEL_ID: z.string().min(1).default('claude-sonnet-4-6'),
+  REASONING_MODEL_ID: z.string().min(1).default('claude-sonnet-5-5'),
+  // Sonnet 5.5 always thinks (`disabled` 400s); `low` is the closest stand-in
+  // for the no-thinking turns Sonnet 4.6 ran. `default` sends no effort at
+  // all — for a REASONING_MODEL_ID that rejects the parameter (Haiku 4.5).
+  REASONING_EFFORT: z.enum(['low', 'medium', 'high', 'xhigh', 'max', 'default']).default('low'),
   LANGFUSE_PUBLIC_KEY: z.string().min(1, 'required — Langfuse project public key'),
   LANGFUSE_SECRET_KEY: z.string().min(1, 'required — Langfuse project secret key'),
   LANGFUSE_BASE_URL: z.url('must be a URL').default('https://cloud.langfuse.com'),
@@ -98,12 +102,15 @@ const productionEnvSchema = envSchema.extend({
   ),
 });
 
+export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
 export interface Config {
   readonly databaseUrl: string;
   readonly anthropicApiKey: string;
   readonly voyageApiKey: string;
   readonly cheapModelId: string;
   readonly reasoningModelId: string;
+  readonly reasoningEffort: ReasoningEffort | undefined;
   readonly langfusePublicKey: string;
   readonly langfuseSecretKey: string;
   readonly langfuseBaseUrl: string;
@@ -301,6 +308,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     voyageApiKey: parsed.data.VOYAGE_API_KEY,
     cheapModelId: parsed.data.CHEAP_MODEL_ID,
     reasoningModelId: parsed.data.REASONING_MODEL_ID,
+    reasoningEffort:
+      parsed.data.REASONING_EFFORT === 'default' ? undefined : parsed.data.REASONING_EFFORT,
     langfusePublicKey: parsed.data.LANGFUSE_PUBLIC_KEY,
     langfuseSecretKey: parsed.data.LANGFUSE_SECRET_KEY,
     langfuseBaseUrl: parsed.data.LANGFUSE_BASE_URL,
