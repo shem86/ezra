@@ -106,6 +106,12 @@ async function main(): Promise<void> {
     // socket-drop bound; a real outage holds the socket not-open far longer
     // (the retry loop gives up at ~4.3min, then stays 'closed').
     downGraceMs: 180_000,
+    // The module default swallows silently, which made a failed down-alert
+    // indistinguishable from "no incident" in prod logs. alerts.ts builds
+    // every error message without the token-bearing URL, so .message is safe.
+    onAlertError: (error) => {
+      console.warn(`[alerts] send failed: ${error instanceof Error ? error.message : String(error)}`);
+    },
   });
   const deadman = createDeadmanPinger({
     pingUrl: config.deadmanPingUrl,
