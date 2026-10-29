@@ -915,9 +915,10 @@ REASONING_EFFORT=default`) between the two runs:
 - **Not checked by the eval:** WhatsApp formatting (`*bold*`, never `**`).
   No scenario asserts it. Spot-check the first prod replies.
 
-**Open before release:** check the prod `.env` (SSM `/hh-assistant/env`) for
-a `REASONING_MODEL_ID` or `REASONING_EFFORT` pin that would override the new
-defaults. This was not done: the eval session had no prod read access.
+**Prod env checked, 2026-10-29:** SSM `/hh-assistant/env` (19 vars) sets no
+`REASONING_*` variable, and nothing under `infra/` pins one, so prod takes the
+new defaults (Sonnet 5.5 at `low`). Verified by reading the parameter's
+variable names only.
 
 ---
 
