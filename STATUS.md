@@ -48,6 +48,12 @@ deployed — the deploy run's on-host log reached the healthy launch markers.
 The first two deploy attempts failed at `docker login ghcr.io` (an expired, then a
 mis-stored GHCR PAT) with no swap. Nothing else re-verified on this pass.
 
+**Partial update 2026-10-29:** added item 14 — turn model moved to Sonnet 5.5.
+Built and green (unit suite, build, lint, doc check) on branch
+`ccr-a9004ef7-r7zk3v`, **not released**. Same day, `pnpm eval` ran against
+the real model: Sonnet 5.5 at `low` passed 23/23 twice, with no 400s (details
+under item 14). Nothing else re-verified on this pass.
+
 This is the **single source of truth for current state**. Everything else is
 history:
 
@@ -866,6 +872,53 @@ after a total search miss, and the model never searched. Proposed fix (not
 built): a capped `list_facts` tool (keys plus fenced values, "showing N of M"),
 and dropping short/common terms (`all`, `כל`, …) from `factTerms`, whose
 substring search otherwise matches nearly everything.
+
+### 14. Turn model → Sonnet 5.5 — built and eval-passed, not released
+
+2026-10-29. `REASONING_MODEL_ID` now defaults to `claude-sonnet-5-5` (was
+`claude-sonnet-4-6`); the cheap tier (Haiku 4.5) is unchanged. Three things in
+the pinned `@ai-sdk/anthropic` 3.0.82 made a bare id swap unsafe, so the change
+carries them:
+
+- **Output cap.** The provider doesn't know the id and falls back to
+  `max_tokens` 4096, while Sonnet 5.5 always thinks and thinking counts against
+  the cap. `makeCallModel` now sends an explicit 16k.
+- **Thinking can't be off.** Sonnet 4.6 ran these turns with no thinking;
+  on 5.5 `disabled` is a 400. New `REASONING_EFFORT` config (default `low`,
+  `default` sends none) is passed as provider `effort` — the closest match to
+  the old latency.
+- **Forced tool choice 400s.** The eval judge's `Output.object` would have
+  fallen back to a forced-tool JSON shim; `makeCompactionJudge` now forces
+  native `outputFormat`.
+
+**Eval, 2026-10-29** (local dev Postgres, run from the worktree with a
+dedicated `hh_assistant_eval` database; `compaction-prod` skipped as designed).
+New defaults (Sonnet 5.5, `REASONING_EFFORT` unset, so `low`) were run twice,
+with a 4.6 baseline (`REASONING_MODEL_ID=claude-sonnet-4-6
+REASONING_EFFORT=default`) between the two runs:
+
+| | Sonnet 5.5 `low` | Sonnet 4.6 baseline |
+|---|---|---|
+| Pass | **23/23** (both runs) | 22/23 |
+| decision-9 (M5 gate) | 7/7 | 6/7: sender-attribution created no reminder |
+| Summed test time | 136s | 160s |
+| 400s / truncation | none | none |
+
+- **Thinking replay:** no `thinking` / `signature` / block-ordering 400s.
+  The facts and injection scenarios each make a tool call and then a second
+  model round, so the path that strips thinking blocks ran. Caveat: at `low`
+  effort the model may skip thinking on simple turns. This shows no 400s in
+  practice; it does not prove thinking blocks were present and stripped.
+  Watch prod logs for these 400s after release.
+- **Latency:** at `low`, 5.5 is no slower than 4.6 without thinking.
+  Per-test times include DB setup, so the comparison is approximate.
+- **Not checked by the eval:** WhatsApp formatting (`*bold*`, never `**`).
+  No scenario asserts it. Spot-check the first prod replies.
+
+**Prod env checked, 2026-10-29:** SSM `/hh-assistant/env` (19 vars) sets no
+`REASONING_*` variable, and nothing under `infra/` pins one, so prod takes the
+new defaults (Sonnet 5.5 at `low`). Verified by reading the parameter's
+variable names only.
 
 ---
 

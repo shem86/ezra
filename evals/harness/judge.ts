@@ -91,6 +91,10 @@ export function makeCompactionJudge(deps: {
       system: judgeSystemPrompt,
       prompt: sections.join('\n'),
       output: Output.object({ schema: verdictSchema }),
+      // The pinned provider only uses native structured output for model ids it
+      // knows; otherwise it falls back to a forced-tool_choice JSON shim, which
+      // Sonnet 5.5 rejects with a 400.
+      providerOptions: { anthropic: { structuredOutputMode: 'outputFormat' } },
     });
     return result.output;
   };

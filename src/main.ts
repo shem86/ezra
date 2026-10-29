@@ -134,6 +134,7 @@ async function main(): Promise<void> {
     systemPrompt: makeProductionSystemPrompt({ memberJids: config.memberJids }),
     model: anthropic(config.reasoningModelId),
     tools: toToolSet(registry),
+    ...(config.reasoningEffort === undefined ? {} : { effort: config.reasoningEffort }),
     onUsage: tracer.onModelUsage,
   });
 

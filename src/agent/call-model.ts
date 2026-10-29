@@ -8,6 +8,12 @@ import { generateText, type LanguageModel, type ModelMessage, type ToolSet } fro
 import type { HandleTurnDeps } from './handle-turn.js';
 import type { TurnMessage } from './context.js';
 import { renderCurrentTimePrompt } from './prompts.js';
+import type { ReasoningEffort } from '../ops/config.js';
+
+// The pinned @ai-sdk/anthropic sizes max_tokens from a table of model ids it
+// knows and falls back to 4096 for any other (claude-sonnet-5-5 included).
+// Thinking counts against max_tokens, so leave room for it and the reply.
+const MAX_OUTPUT_TOKENS = 16_000;
 
 /** Per-call token accounting — feeds T31 traces and the T33 cost gate. */
 export interface ModelUsage {
@@ -26,6 +32,8 @@ export interface CallModelDeps {
   readonly tools?: ToolSet;
   /** Observability tap; must not throw (a throw fails and retries the step). */
   readonly onUsage?: (usage: ModelUsage) => void;
+  /** Anthropic `output_config.effort`; undefined sends none (model default). */
+  readonly effort?: ReasoningEffort;
   /**
    * Clock seam (defaults to the real clock). Read inside this step, NOT in the
    * workflow body — a completed step replays its journaled output, so the
@@ -53,6 +61,8 @@ export function makeCallModel(deps: CallModelDeps): HandleTurnDeps['callModel'] 
       messages: toSdkMessages(deps.systemPrompt, messages, options.digest, (deps.now ?? defaultNow)()),
       ...(deps.tools === undefined ? {} : { tools: deps.tools }),
       toolChoice: options.forceFinal ? 'none' : 'auto',
+      maxOutputTokens: MAX_OUTPUT_TOKENS,
+      ...(deps.effort === undefined ? {} : { providerOptions: { anthropic: { effort: deps.effort } } }),
     });
 
     deps.onUsage?.({

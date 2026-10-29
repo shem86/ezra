@@ -91,6 +91,24 @@ describe('loadConfig', () => {
     expect(config.langfuseBaseUrl).toBe('https://cloud.langfuse.com');
   });
 
+  it('defaults the turn model to Sonnet 5.5 at low effort, both overridable', () => {
+    const config = loadConfig(validEnv);
+    expect(config.reasoningModelId).toBe('claude-sonnet-5-5');
+    expect(config.reasoningEffort).toBe('low');
+
+    const overridden = loadConfig({
+      ...validEnv,
+      REASONING_MODEL_ID: 'claude-opus-5-5',
+      REASONING_EFFORT: 'medium',
+    });
+    expect(overridden.reasoningModelId).toBe('claude-opus-5-5');
+    expect(overridden.reasoningEffort).toBe('medium');
+    expect(loadConfig({ ...validEnv, REASONING_EFFORT: 'default' }).reasoningEffort).toBeUndefined();
+    expect(() => loadConfig({ ...validEnv, REASONING_EFFORT: 'extreme' })).toThrowError(
+      /REASONING_EFFORT/,
+    );
+  });
+
   it('defaults the approval TTL to 12 hours (Open Q1, resolved at T34) and accepts overrides', () => {
     expect(loadConfig(validEnv).approvalTtlHours).toBe(12);
     expect(loadConfig({ ...validEnv, APPROVAL_TTL_HOURS: '24' }).approvalTtlHours).toBe(24);

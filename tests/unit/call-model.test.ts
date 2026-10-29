@@ -294,6 +294,42 @@ describe('makeCallModel', () => {
     expect(seen?.prompt[1]).toEqual({ role: 'system', content: renderCurrentTimePrompt(NOW) });
   });
 
+  it('sends an explicit output cap — the pinned provider defaults unknown model ids to 4096', async () => {
+    let seen: DoGenerateOptions | undefined;
+    const callModel = makeCallModel({
+      model: mockModel([{ type: 'text', text: 'ok' }], (o) => {
+        seen = o;
+      }),
+      systemPrompt: SYSTEM,
+    });
+
+    await callModel(userMsg, { forceFinal: false });
+
+    expect(seen?.maxOutputTokens).toBe(16_000);
+  });
+
+  it('passes the configured effort to the anthropic provider, and omits it when unset', async () => {
+    let seen: DoGenerateOptions | undefined;
+    const withEffort = makeCallModel({
+      model: mockModel([{ type: 'text', text: 'ok' }], (o) => {
+        seen = o;
+      }),
+      systemPrompt: SYSTEM,
+      effort: 'low',
+    });
+    await withEffort(userMsg, { forceFinal: false });
+    expect(seen?.providerOptions).toEqual({ anthropic: { effort: 'low' } });
+
+    const withoutEffort = makeCallModel({
+      model: mockModel([{ type: 'text', text: 'ok' }], (o) => {
+        seen = o;
+      }),
+      systemPrompt: SYSTEM,
+    });
+    await withoutEffort(userMsg, { forceFinal: false });
+    expect(seen?.providerOptions).toBeUndefined();
+  });
+
   it('forceFinal forbids tool calls via toolChoice none', async () => {
     let seen: DoGenerateOptions | undefined;
     const callModel = makeCallModel({
