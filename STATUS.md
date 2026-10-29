@@ -770,8 +770,8 @@ refused** (no duplicate was ever written), but the model updated the named key
 only 1 time in 7; otherwise it **asked the member** whether to update or keep
 separately (2/8 including the first run; 0/3 on the prompt without item 13's
 line, so that line is not the cause). Asking is safe — nothing wrong is
-stored — but the eval asserts an update, so it is red more often than not.
-Open decision, recorded under item 13.
+stored. Resolved 2026-10-29: asking is accepted as correct and the eval
+asserts "no duplicate" instead (see item 13).
 
 `get_fact` used to read `household_facts` by exact key, so a read hit only if
 the model reproduced, weeks later, the slug it invented at `set_fact` time
@@ -845,10 +845,12 @@ below was **dropped**: a length cutoff hides real short keys (`tv-pin`,
 is low-harm once every answer carries the real keys. If `[tool]` log lines
 show junk matches, rank whole-term hits first instead.
 
-**Open decision — near-duplicate save asks instead of updating** (item 11's
-correction): keep asserting an update and nudge the refusal text toward
-"update it when the member's message clearly means it", or accept *ask* as a
-pass (assert only that no duplicate is written).
+**Decided 2026-10-29 — a near-duplicate save may ask** (item 11's correction):
+after the guard's refusal, either updating the named key or asking the member
+which they meant is correct ("locker N" may not be the stored "gym locker N").
+The eval now asserts the invariant instead: exactly one fact under the run's
+tag, holding the old or the new value, and no unprompted `distinct: true`.
+Green 3/3 in isolation plus one full-file run (5/5) the same day.
 
 The original finding:
 

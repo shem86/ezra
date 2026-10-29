@@ -61,7 +61,12 @@ function toolTrail(transcript: TurnMessage[]): string {
 }
 
 describe('fact-key lookup under the real model (STATUS item 11)', () => {
-  it('a near-duplicate save updates the existing fact instead of adding a second', async () => {
+  // The invariant is "never a second fact". After the guard's refusal the
+  // model may update the named key OR ask the member which they meant —
+  // both are correct (decided 2026-10-29: "locker N" may not be the stored
+  // "gym locker N", so asking is reasonable). What it must not do is force
+  // the duplicate through with distinct: true unprompted.
+  it('a near-duplicate save never adds a second fact — it updates or asks', async () => {
     const s = scenario('fact-dedup-on-save');
     const conv = h.conversationIdFor(s);
     await seedFact(set.save.key, set.save.oldValue);
@@ -69,10 +74,22 @@ describe('fact-key lookup under the real model (STATUS item 11)', () => {
     const result = await h.runTurn(conv, s.messages[0]!);
     expect(result.status).toBe('completed');
 
-    const trail = toolTrail(await h.transcript(conv));
+    const transcript = await h.transcript(conv);
+    const trail = toolTrail(transcript);
     expect(await factsTagged(set.save.tag), `tool path: ${trail}`).toEqual([
-      { key: set.save.key, value: expect.stringContaining(set.save.newValue) },
+      {
+        key: set.save.key,
+        value: expect.stringMatching(new RegExp(`${set.save.oldValue}|${set.save.newValue}`)),
+      },
     ]);
+    const forcedDistinct = transcript.some(
+      (m) =>
+        m.role === 'assistant' &&
+        m.toolCalls.some(
+          (c) => c.name === 'set_fact' && (c.args as { distinct?: unknown }).distinct === true,
+        ),
+    );
+    expect(forcedDistinct, `tool path: ${trail}`).toBe(false);
   }, 300_000);
 
   it('a question whose natural key misses is answered from the search fallback', async () => {
