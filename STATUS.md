@@ -50,9 +50,11 @@ mis-stored GHCR PAT) with no swap. Nothing else re-verified on this pass.
 
 **Partial update 2026-10-29:** added item 14 — turn model moved to Sonnet 5.5.
 Built and green (unit suite, build, lint, doc check) on branch
-`ccr-a9004ef7-r7zk3v`, **not released**. Same day, `pnpm eval` ran against
-the real model: Sonnet 5.5 at `low` passed 23/23 twice, with no 400s (details
-under item 14). Nothing else re-verified on this pass.
+`ccr-a9004ef7-r7zk3v`. Same day, `pnpm eval` ran against the real model:
+Sonnet 5.5 at `low` passed 23/23 twice, with no 400s (details under item 14).
+It merged as PR #66 and was **released as `v2.3.13`**: deploy run
+`40896265282` passed the migrate-gate and the healthcheck, with no rollback.
+Nothing else re-verified on this pass.
 
 This is the **single source of truth for current state**. Everything else is
 history:
@@ -873,7 +875,7 @@ built): a capped `list_facts` tool (keys plus fenced values, "showing N of M"),
 and dropping short/common terms (`all`, `כל`, …) from `factTerms`, whose
 substring search otherwise matches nearly everything.
 
-### 14. Turn model → Sonnet 5.5 — built and eval-passed, not released
+### 14. ✅ Turn model → Sonnet 5.5 — released as `v2.3.13`
 
 2026-10-29. `REASONING_MODEL_ID` now defaults to `claude-sonnet-5-5` (was
 `claude-sonnet-4-6`); the cheap tier (Haiku 4.5) is unchanged. Three things in
@@ -919,6 +921,14 @@ REASONING_EFFORT=default`) between the two runs:
 `REASONING_*` variable, and nothing under `infra/` pins one, so prod takes the
 new defaults (Sonnet 5.5 at `low`). Verified by reading the parameter's
 variable names only.
+
+**Released 2026-10-29 as `v2.3.13`** (PR #66). Deploy run `40896265282`
+succeeded: migrate-gate applied, healthcheck saw spine + backoffice up on
+2.3.13, no rollback. The live model id was not read from the container log.
+**Post-release watch:** any 400 mentioning `thinking` / `signature` / block
+ordering (fix = persist reasoning parts, a schema change, ask-first);
+`**` instead of `*bold*` in replies; reply quality at `low` (fallback:
+`REASONING_EFFORT=medium` in SSM, then redeploy).
 
 ---
 
