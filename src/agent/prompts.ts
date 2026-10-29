@@ -9,6 +9,7 @@
 
 import type { ApprovalOutcome } from '../hitl/resolve-approval.js';
 import { UNTRUSTED_OPEN, UNTRUSTED_CLOSE } from './untrusted.js';
+import type { ReplyLanguage } from './language.js';
 
 // Household invariants shared verbatim by the dev and production prompts —
 // extracted so the two can never drift apart on the rules that are
@@ -128,6 +129,15 @@ export function renderCurrentTimePrompt(now: Date): string {
   return [
     `## Current time`,
     `The current date and time is ${stamp} (US Eastern). Your training data is frozen around early 2025, so do NOT trust your own sense of today's date — always use the value above. Resolve every relative time ("today", "tonight", "tomorrow", "in 5 minutes", "next week") against it, and always pass a full year, month, and day to tools.`,
+  ].join('\n');
+}
+
+/** The per-turn reply-language note (see src/agent/language.ts for why it exists). */
+export function renderReplyLanguagePrompt(language: ReplyLanguage): string {
+  const name = language === 'en' ? 'English' : 'Hebrew';
+  return [
+    `## Reply language`,
+    `The latest member message is in ${name}, so write this reply in ${name} — even if earlier turns, tool results, or stored values are in the other language. Quote stored values as they are.`,
   ].join('\n');
 }
 
