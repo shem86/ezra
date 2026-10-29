@@ -791,10 +791,13 @@ misses show up (a migration — ask-first).
 ---
 
 ### 12. Spine log: non-household message previews logged; tool calls invisible
-**Status:** fix built, **not released** · **verified** 2026-10-28 by `pnpm lint`,
-`pnpm build` and the full `pnpm test` with the integration suite (822 tests) on
-branch `logs-tool-calls-and-redact-inbound`. The problem was found the same day
-by reading `docker logs hh-assistant-ezra-1` on the prod host.
+**Status:** ✅ **released as `v2.3.10`, deployed 2026-10-28** (PR #61) · verified
+on the host the same day: `docker ps` shows ezra, backoffice and backup on `2.3.10`,
+the socket is open, and the `ezra up:` marker printed. **Not yet observed:** a live `[inbound]` or
+`[tool]` line in the new format — no message had arrived since the restart.
+Pre-release checks: `pnpm lint`, `pnpm build` and the full `pnpm test` with the
+integration suite (822 tests). The problem was found by reading
+`docker logs hh-assistant-ezra-1` on the prod host.
 
 - **Privacy:** the `[inbound]` line ran for **every** message the socket saw —
   before ingestion's allowlist — and on the personal-number deployment that
@@ -813,8 +816,8 @@ by reading `docker logs hh-assistant-ezra-1` on the prod host.
   execution: chat, tool name, args (≤200 chars), outcome, and the result's first line
   (≤120 chars).
 
-**Not fixed by this:** the previews already written stay in the current
-container's log until the container is recreated (the next deploy does that).
+The previews written before the fix went away with the old container: the
+`v2.3.10` deploy recreated ezra, and with it the container's log.
 
 ### 13. "List all facts" answers incompletely and claims completeness
 **Status:** open · **verified** 2026-10-28 by reading the household
