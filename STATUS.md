@@ -831,9 +831,14 @@ The previews written before the fix went away with the old container: the
 ### 13. "List all facts" answers incompletely and claims completeness
 **Status:** ✅ **released as `v2.3.11`, deployed 2026-10-29** (PR #63) · verified
 on the host the same day: `docker ps` shows ezra, backoffice and backup on `2.3.11`,
-the socket is open, and the `ezra up:` marker printed. **Not yet observed:** a real
-`list_facts` or `get_fact` call in prod (`[tool]` lines) — no fact question
-since the restart. History: problem **verified** 2026-10-28 by
+the socket is open, and the `ezra up:` marker printed. **Observed in prod** 2026-10-29
+(`[tool]` lines plus the household `conversation_context`): "List all of the
+facts you have saved" made one `list_facts` call ("4 facts stored") and the
+reply listed all four, including `building-entrance-code`, the fact omitted
+on 2026-10-28. A follow-up plant-care question was answered with no tool call,
+verbatim from that `list_facts` result one turn earlier. That is accepted, since the
+data was seconds old, but it bends "read at the moment of use"; watch for
+stale answers after a compaction. History: problem **verified** 2026-10-28 by
 reading the household `conversation_context` and `household_facts` on prod
 (`v2.3.9`); fix verified the same day by `pnpm lint`, `pnpm build`, the full
 `pnpm test` with integration (831 tests), and the item 13 scenarios in
