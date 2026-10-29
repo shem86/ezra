@@ -6,7 +6,7 @@ import { MockLanguageModelV3 } from 'ai/test';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { makeCallModel, toSdkMessages, type ModelUsage } from '../../src/agent/call-model.js';
-import { renderCurrentTimePrompt } from '../../src/agent/prompts.js';
+import { renderCurrentTimePrompt, renderReplyLanguagePrompt } from '../../src/agent/prompts.js';
 import type { TurnMessage } from '../../src/agent/context.js';
 
 const SYSTEM = 'You are the household assistant.';
@@ -148,6 +148,22 @@ describe('toSdkMessages', () => {
   it('omits the current-time block when no now is given (back-compat)', () => {
     expect(toSdkMessages(SYSTEM, [], null)).toEqual(toSdkMessages(SYSTEM, [], null, undefined));
   });
+
+  it('a reply language becomes the LAST system block, after clock and digest — stable block untouched', () => {
+    const msgs: TurnMessage[] = [{ role: 'user', senderId: 'wife@wa', content: 'מה הסיסמה?' }];
+    const sdk = toSdkMessages(SYSTEM, msgs, '## Awaiting approval\n- [act-1] x', NOW, 'he');
+
+    expect(sdk[0]).toEqual(toSdkMessages(SYSTEM, [])[0]);
+    expect(sdk[1]).toEqual({ role: 'system', content: renderCurrentTimePrompt(NOW) });
+    expect(sdk[2]).toEqual({ role: 'system', content: '## Awaiting approval\n- [act-1] x' });
+    expect(sdk[3]).toEqual({ role: 'system', content: renderReplyLanguagePrompt('he') });
+    expect(sdk[3]).not.toHaveProperty('providerOptions');
+    expect(sdk[4]).toEqual({ role: 'user', content: 'wife@wa: מה הסיסמה?' });
+  });
+
+  it('no reply language adds no block', () => {
+    expect(toSdkMessages(SYSTEM, [], null, NOW, null)).toEqual(toSdkMessages(SYSTEM, [], null, NOW));
+  });
 });
 
 type DoGenerateOptions = Parameters<
@@ -244,12 +260,36 @@ describe('makeCallModel', () => {
       content: SYSTEM,
       providerOptions: { anthropic: { cacheControl: { type: 'ephemeral' } } },
     });
-    // The clock rides between the cached prefix and the transcript.
+    // The clock and the reply-language note ride between the cached prefix
+    // and the transcript.
     expect(seen?.prompt[1]).toEqual({ role: 'system', content: renderCurrentTimePrompt(NOW) });
-    expect(seen?.prompt[2]).toMatchObject({
+    expect(seen?.prompt[2]).toEqual({ role: 'system', content: renderReplyLanguagePrompt('en') });
+    expect(seen?.prompt[3]).toMatchObject({
       role: 'user',
       content: [{ type: 'text', text: 'wife@wa: add milk' }],
     });
+  });
+
+  it('derives the reply language from the latest member message, not the run before it', async () => {
+    let seen: DoGenerateOptions | undefined;
+    const callModel = makeCallModel({
+      model: mockModel([{ type: 'text', text: 'ok' }], (o) => {
+        seen = o;
+      }),
+      systemPrompt: SYSTEM,
+    });
+
+    await callModel(
+      [
+        { role: 'user', senderId: 'husband@wa', content: 'שדרגתי את המודל, זה אומר לך משהו?' },
+        { role: 'assistant', content: 'אין לי דרך לראות באיזה מודל אני רץ', toolCalls: [] },
+        { role: 'user', senderId: 'husband@wa', content: 'List all of the facts you have saved' },
+      ],
+      { forceFinal: false },
+    );
+
+    // [1] is the clock (default now); the language note follows it.
+    expect(seen?.prompt[2]).toEqual({ role: 'system', content: renderReplyLanguagePrompt('en') });
   });
 
   it('passes the per-turn digest through as the post-prefix system block', async () => {

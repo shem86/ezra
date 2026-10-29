@@ -56,6 +56,10 @@ It merged as PR #66 and was **released as `v2.3.13`**: deploy run
 `40896265282` passed the migrate-gate and the healthcheck, with no rollback.
 Nothing else re-verified on this pass.
 
+**Partial update 2026-10-29 (later):** added item 15 — reply language after a
+run of turns in the other language, fixed in code on branch
+`eval-reply-language`, not released. Nothing else re-verified on this pass.
+
 This is the **single source of truth for current state**. Everything else is
 history:
 
@@ -929,6 +933,29 @@ succeeded: migrate-gate applied, healthcheck saw spine + backoffice up on
 ordering (fix = persist reasoning parts, a schema change, ask-first);
 `**` instead of `*bold*` in replies; reply quality at `low` (fallback:
 `REASONING_EFFORT=medium` in SSM, then redeploy).
+
+### 15. Reply language after a run in the other language — fixed in code, not released
+
+2026-10-29. In prod, Sonnet 5.5 answered "List all of the facts you have
+saved" in Hebrew after three Hebrew turns. New `evals/language.eval.ts`
+replays that shape both ways: three turns in one language, then a message in
+the other, with a seeded fact in the other language. The pass is the language
+of the reply's opening line.
+
+| Config (before the fix) | en-after-he | he-after-en |
+|---|---|---|
+| Sonnet 5.5 `low` | 0/3 | 3/3 |
+| Sonnet 5.5 `medium` | 0/3 | 3/3 |
+| Sonnet 4.6 | 0/3 | 3/3 |
+| 5.5 `low` + a sharper prompt rule | 0/3 | 3/3 |
+
+So it is not a 5.5 regression, effort does not fix it, and prompt wording
+does not either. Fix: `makeCallModel` now derives the language of the latest
+**member** message (`replyLanguageFor` in `src/agent/language.ts`, majority
+script, system senders skipped) and passes it to `toSdkMessages`, which adds a
+per-turn `## Reply language` system block (`renderReplyLanguagePrompt`). It is
+the last system block, after the clock and digest; the cached prefix is
+unchanged. With the fix: **6/6** over 3 runs at `low`.
 
 ---
 
