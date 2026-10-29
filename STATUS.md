@@ -890,8 +890,28 @@ an unsettled answer can never buy `fast` or `deep`. `api.typesafe.ai` joined the
 (category `routing`; two stable Cloudflare A records, TTL 300). It is inert until the code is
 wired and released. Nothing calls the router yet.
 
-**Next:** Phase 3 (the `routeTurn` step in `handleTurn`, a multi-model `makeCallModel`, and a
-kill-after-route recovery test). The `TYPESAFE_API_KEY` is not yet in `.env` or SSM.
+**Phase 3 verified** 2026-10-29 by the full `pnpm test` with integration against the dev
+Postgres (936 green), by `pnpm test:recovery` (62 green), and by `pnpm build` and `pnpm lint`.
+- `makeRouteTurn` in `src/agent/route-turn.ts` is the body of the journaled `routeTurn` step. It
+  never throws: a Jev failure becomes a `fallback-error:<kind>` standard decision.
+- `handleTurn` runs it once per turn, before round 0, and every round (including the forced final)
+  runs on that tier. With no `routeTurn` dep the step sequence is unchanged.
+- `makeCallModel` picks the model per tier, falling back to the standard model.
+- The new kill drill in `tests/integration/handle-turn.test.ts` ("turn routing — the routeTurn
+  step") SIGKILLs a routed turn after the step journaled. The replay asks Jev **once** and runs on
+  the journaled tier.
+- A deliberate mutation (calling `routeTurn` outside `DBOS.runStep`) turned that drill red (Jev
+  asked twice), so the test catches the regression it exists for.
+
+Still **not composed** in `src/main.ts`: prod behavior is unchanged.
+
+**Next:** Phase 4 (ops):
+- `TURN_ROUTING` / `TYPESAFE_API_KEY` / tier model ids in config, plus the composition;
+- the `turn_route_log` migration and its write;
+- the startup probe and `[route]` lines;
+- tracing tags;
+- the backoffice Router panel and turn view;
+- `pnpm eval:route` and the agent rule. The `TYPESAFE_API_KEY` is not yet in `.env` or SSM.
 **Rotate it before prod:** it was pasted into a Claude session on 2026-10-29.
 
 ---

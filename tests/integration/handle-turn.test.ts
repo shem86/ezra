@@ -7,9 +7,15 @@ import {
   classifyLog,
   handleTurnWorkflow,
   launchTurnRuntime,
+  routedCappedTurnWorkflow,
+  routedTurnWorkflow,
+  tierLog,
   toolListFor,
   turnConnectionString,
 } from './helpers/turn-fixture.ts';
+import { mkdtempSync, readFileSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -21,6 +27,17 @@ import { parseTurnMessages, type TurnMessage } from '../../src/agent/context.ts'
 import type { BatchItem } from '../../src/agent/context.ts';
 
 const childEntry = fileURLToPath(new URL('./helpers/turn-child.ts', import.meta.url));
+const routeChildEntry = fileURLToPath(new URL('./helpers/turn-route-child.ts', import.meta.url));
+
+// One launch per file. The T22 kill test launches first (it must observe the
+// child's pending workflow before launch triggers recovery); this guard lets
+// a filtered run (-t) of any later test launch on its own.
+let launched = false;
+async function ensureLaunched(): Promise<void> {
+  if (launched) return;
+  await launchTurnRuntime();
+  launched = true;
+}
 // Unique per run so stale rows/workflows from aborted runs can't collide.
 const runId = `run-${Date.now()}`;
 let db: Client;
@@ -103,7 +120,7 @@ describe('handleTurn skeleton (T22)', () => {
     expect(await itemCount(list, 'before-kill')).toBe(1); // not lost
     expect(await itemCount(list, 'after-kill')).toBe(0); // killed mid-transaction
 
-    await launchTurnRuntime();
+    await ensureLaunched();
     // Resume explicitly AFTER launch (datasources ready): the child ran
     // under its own executor ID precisely so launch-time recovery — which
     // races datasource init on 4.19.8 (see dbos.md) — leaves it alone.
@@ -543,5 +560,141 @@ describe('relatedness routing (T36)', () => {
     expect(refined.tool_call).toMatchObject({ args: { item: 'refined-item' } });
     expect((await actionRow(secondId)).status).toBe('pending');
     expect((await actionRow(secondId)).tool_call).toMatchObject({ args: { item: 'bread' } });
+  });
+});
+
+// Turn routing (docs/specs/jev-turn-routing-plan.md Phase 3): the routeTurn
+// step journals the tier ONCE per turn, before round 0; every round of that
+// turn — the forced final included — runs on it, and recovery replays the
+// journaled tier instead of asking Jev again. The routed workflows use the
+// REAL makeRouteTurn over a scripted Jev (turn-fixture.ts).
+describe('turn routing — the routeTurn step', () => {
+  // Set before any routed turn (and before the drill spawns its child, which
+  // inherits it), so "Jev was not asked" is a real zero, not a missing log.
+  beforeAll(() => {
+    process.env.HH_JEV_LOG = join(mkdtempSync(join(tmpdir(), 'hh-jev-log-')), 'calls.log');
+  });
+
+  async function stepNames(workflowId: string): Promise<string[]> {
+    return ((await DBOS.listWorkflowSteps(workflowId)) ?? []).map((s) => s.name);
+  }
+
+  async function routeStepOutput(workflowId: string): Promise<Record<string, unknown>> {
+    const step = ((await DBOS.listWorkflowSteps(workflowId)) ?? []).find(
+      (s) => s.name === 'routeTurn',
+    );
+    expect(step, 'routeTurn step journaled').toBeDefined();
+    return step!.output as Record<string, unknown>;
+  }
+
+  function tiersFor(script: string) {
+    return tierLog.filter((e) => e.script === script).map((e) => e.tier);
+  }
+
+  function jevCallsFor(text: string): number {
+    const logPath = process.env.HH_JEV_LOG;
+    if (logPath === undefined || !existsSync(logPath)) return 0;
+    return readFileSync(logPath, 'utf8')
+      .split('\n')
+      .filter((line) => line === text).length;
+  }
+
+  it('recovery replay: kill after routeTurn journaled — replay reuses the tier, Jev asked once', async () => {
+    const conversationId = `conv-${runId}-route-kill`;
+    const wfid = `turnroutekill-${runId}`;
+    const text = `script:kill-drill [deep] ${runId}`;
+    const list = toolListFor(conversationId);
+    const child = spawn(process.execPath, [routeChildEntry, wfid, conversationId, text], {
+      env: process.env,
+      stdio: 'ignore',
+    });
+
+    await waitFor(async () => (await itemCount(list, 'before-kill')) >= 1, 30_000);
+    child.kill('SIGKILL'); // inside slow_add — routeTurn and round 0 already journaled
+    await waitForExit(child);
+    expect(await itemCount(list, 'after-kill')).toBe(0);
+
+    await ensureLaunched();
+    const resumed = await DBOS.resumeWorkflow(wfid);
+    const result = await resumed.getResult();
+
+    expect(result).toEqual({ status: 'completed', rounds: 3 });
+    expect(await itemCount(list, 'before-kill')).toBe(1);
+    expect(await itemCount(list, 'after-kill')).toBe(1);
+    // Jev was asked exactly once — by the child; the parent replayed the step.
+    expect(jevCallsFor(text)).toBe(1);
+    // Every model call the parent ran live used the journaled tier.
+    const parentTiers = tiersFor(text);
+    expect(parentTiers.length).toBeGreaterThan(0);
+    expect(new Set(parentTiers)).toEqual(new Set(['deep']));
+    expect(await routeStepOutput(wfid)).toMatchObject({ tier: 'deep', source: 'jev' });
+  }, 90_000);
+
+  it('runs routeTurn once, before the first model call, and every round on its tier', async () => {
+    await ensureLaunched();
+    const conversationId = `conv-${runId}-route-happy`;
+    const text = `script:add-then-done [deep] ${runId}`;
+    const wfid = `turnroute-${conversationId}`;
+    const handle = await DBOS.startWorkflow(routedTurnWorkflow, { workflowID: wfid })(
+      conversationId,
+      humanBatch(text),
+    );
+
+    expect(await handle.getResult()).toEqual({ status: 'completed', rounds: 2 });
+    const names = await stepNames(wfid);
+    expect(names.filter((n) => n === 'routeTurn')).toHaveLength(1);
+    expect(names.indexOf('routeTurn')).toBeLessThan(names.indexOf('callModel'));
+    expect(tiersFor(text)).toEqual(['deep', 'deep']);
+  });
+
+  it('the cap-hit forced final runs on the turn tier too', async () => {
+    await ensureLaunched();
+    const conversationId = `conv-${runId}-route-cap`;
+    const text = `script:loop-forever [fast] ${runId}`;
+    const handle = await DBOS.startWorkflow(routedCappedTurnWorkflow, {
+      workflowID: `turnroute-${conversationId}`,
+    })(conversationId, humanBatch(text));
+
+    expect(await handle.getResult()).toEqual({ status: 'cap-hit', rounds: 2 });
+    expect(tiersFor(text)).toEqual(['fast', 'fast', 'fast']); // 2 rounds + forced final
+  });
+
+  it('an unrouted workflow journals no routeTurn step and passes no tier', async () => {
+    await ensureLaunched();
+    const conversationId = `conv-${runId}-unrouted`;
+    const text = `script:add-then-done plain ${runId}`;
+    const wfid = `turnunrouted-${conversationId}`;
+    const handle = await DBOS.startWorkflow(handleTurnWorkflow, { workflowID: wfid })(
+      conversationId,
+      humanBatch(text),
+    );
+
+    await handle.getResult();
+    expect(await stepNames(wfid)).not.toContain('routeTurn');
+    expect(tiersFor(text)).toEqual([undefined, undefined]);
+  });
+
+  it('a turn while an action pends routes standard by pre-rule, without asking Jev', async () => {
+    await ensureLaunched();
+    const conversationId = `conv-${runId}-route-pending`;
+    const first = await DBOS.startWorkflow(routedTurnWorkflow, {
+      workflowID: `turnroute-${conversationId}-1`,
+    })(conversationId, humanBatch(`script:park [deep] ${runId}`));
+    expect(await first.getResult()).toMatchObject({ status: 'parked' });
+
+    const chatText = `[deep] unrelated chatter ${runId}`;
+    const wfid = `turnroute-${conversationId}-2`;
+    const second = await DBOS.startWorkflow(routedTurnWorkflow, { workflowID: wfid })(
+      conversationId,
+      humanBatch(chatText),
+    );
+    await second.getResult();
+
+    expect(jevCallsFor(`script:park [deep] ${runId}`)).toBe(1); // the log works…
+    expect(await routeStepOutput(wfid)).toMatchObject({
+      tier: 'standard',
+      source: 'pre-rule:pending-actions',
+    });
+    expect(jevCallsFor(chatText)).toBe(0);
   });
 });

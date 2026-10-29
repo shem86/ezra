@@ -324,3 +324,42 @@ describe('makeCallModel', () => {
     ]);
   });
 });
+
+// Turn routing (docs/specs/jev-turn-routing-plan.md §5): the turn's tier picks
+// the model; a tier with no model of its own — or no tier at all, the
+// unrouted path — runs on the base (standard) model, never fails the call.
+describe('makeCallModel tier selection', () => {
+  function tagged(tag: string, seen: string[]) {
+    return mockModel([{ type: 'text', text: tag }], () => seen.push(tag));
+  }
+
+  it('runs a routed turn on the model for its tier', async () => {
+    const seen: string[] = [];
+    const callModel = makeCallModel({
+      model: tagged('standard', seen),
+      models: { fast: tagged('fast', seen), deep: tagged('deep', seen) },
+      systemPrompt: SYSTEM,
+    });
+
+    await callModel(userMsg, { forceFinal: false, tier: 'deep' });
+    await callModel(userMsg, { forceFinal: true, tier: 'deep' });
+    await callModel(userMsg, { forceFinal: false, tier: 'fast' });
+    await callModel(userMsg, { forceFinal: false, tier: 'standard' });
+
+    expect(seen).toEqual(['deep', 'deep', 'fast', 'standard']);
+  });
+
+  it('falls back to the base model for an unrouted call or a tier without a model', async () => {
+    const seen: string[] = [];
+    const callModel = makeCallModel({
+      model: tagged('standard', seen),
+      models: { deep: tagged('deep', seen) },
+      systemPrompt: SYSTEM,
+    });
+
+    await callModel(userMsg, { forceFinal: false });
+    await callModel(userMsg, { forceFinal: false, tier: 'fast' });
+
+    expect(seen).toEqual(['standard', 'standard']);
+  });
+});

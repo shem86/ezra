@@ -8,6 +8,7 @@ import { generateText, type LanguageModel, type ModelMessage, type ToolSet } fro
 import type { HandleTurnDeps } from './handle-turn.js';
 import type { TurnMessage } from './context.js';
 import { renderCurrentTimePrompt } from './prompts.js';
+import type { Tier } from './turn-route.js';
 
 /** Per-call token accounting — feeds T31 traces and the T33 cost gate. */
 export interface ModelUsage {
@@ -20,6 +21,12 @@ export interface ModelUsage {
 export interface CallModelDeps {
   /** Instantiated by the composing caller from Config — never module-level. */
   readonly model: LanguageModel;
+  /**
+   * Per-tier models for routed turns (docs/specs/jev-turn-routing-plan.md).
+   * `model` is the standard tier; a call with no tier, or a tier with no
+   * entry here, runs on it — routing can only ever fall back to today.
+   */
+  readonly models?: Partial<Record<Tier, LanguageModel>>;
   /** The stable cacheable prefix (T32 brings the real one). */
   readonly systemPrompt: string;
   /** Definitions only — no execute: DBOS owns the loop (decision 4). */
@@ -47,7 +54,7 @@ const defaultNow = (): Date => new Date();
 export function makeCallModel(deps: CallModelDeps): HandleTurnDeps['callModel'] {
   return async function callModel(messages, options) {
     const result = await generateText({
-      model: deps.model,
+      model: (options.tier === undefined ? undefined : deps.models?.[options.tier]) ?? deps.model,
       // The system prompt travels as a message so cacheControl attaches (T7).
       allowSystemInMessages: true,
       messages: toSdkMessages(deps.systemPrompt, messages, options.digest, (deps.now ?? defaultNow)()),

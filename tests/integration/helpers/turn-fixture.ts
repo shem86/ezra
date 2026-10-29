@@ -31,6 +31,10 @@ import { defineTool } from '../../../src/tools/define-tool.ts';
 import { makeToolRegistry } from '../../../src/tools/registry.ts';
 import type { PendingActionDigestEntry } from '../../../src/agent/prompts.ts';
 import type { ClassifyInput, RelatednessVerdict } from '../../../src/agent/relatedness.ts';
+import { appendFileSync } from 'node:fs';
+import { makeRouteTurn } from '../../../src/agent/route-turn.ts';
+import type { Tier } from '../../../src/agent/turn-route.ts';
+import type { JevAnswer, JevClient } from '../../../src/agent/jev-client.ts';
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
@@ -178,10 +182,17 @@ const runToolStep = registerTransactionalStep(
  * messages and tool_use ids. The script is named by the conversation's
  * FIRST user message; the round is the count of assistant messages so far.
  */
+/** Every model call's tier, keyed by the conversation's first user message — routing tests assert on it. */
+export const tierLog: Array<{ readonly script: string; readonly tier: Tier | undefined }> = [];
+
 async function scriptedCallModel(
   msgs: readonly TurnMessage[],
   options: ModelCallOptions,
 ): Promise<AssistantMessage> {
+  tierLog.push({
+    script: msgs.find((m) => m.role === 'user')?.content ?? '',
+    tier: options.tier,
+  });
   if (options.forceFinal) {
     return { role: 'assistant', content: 'forced final: I got stuck, want me to keep going?', toolCalls: [] };
   }
@@ -289,6 +300,59 @@ export const handleTurnWorkflow = DBOS.registerWorkflow(makeHandleTurnWorkflow(b
 export const cappedTurnWorkflow = DBOS.registerWorkflow(
   makeHandleTurnWorkflow({ ...baseDeps, maxRounds: 3 }),
   { name: 'handleTurnCapped' },
+);
+
+/**
+ * Scripted Jev behind the REAL makeRouteTurn: a "[deep]" or "[fast]" tag in
+ * the latest message buys that tier, anything else reads as a plain
+ * reminder (standard). Each call is appended to HH_JEV_LOG when set — a file,
+ * so the recovery drill can count calls across the killed child and the
+ * resuming parent.
+ */
+const scriptedJev: JevClient = {
+  async ask(state) {
+    const latest = (state as { latest_messages: Array<{ text: string }> }).latest_messages
+      .map((m) => m.text)
+      .join(' ');
+    const logPath = process.env.HH_JEV_LOG;
+    if (logPath !== undefined) appendFileSync(logPath, `${latest}\n`);
+    const noul = (p: number): JevAnswer => ({ type: 'noul', noul: p });
+    const deep = latest.includes('[deep]');
+    const fast = latest.includes('[fast]');
+    const intent = deep ? 'planning_or_advice' : fast ? 'list_edit' : 'reminder';
+    return {
+      model: 'jev-scripted',
+      inputTokens: 0,
+      answers: {
+        asks_anything: noul(0.95),
+        intent: { type: 'choice', choice: intent, confidence: 0.9, probabilities: { [intent]: 0.95 } },
+        several_requests: noul(0.05),
+        refers_back: noul(0.05),
+        weighs_options: noul(deep ? 0.95 : 0.05),
+        schedule_reasoning: noul(0.05),
+        corrects_previous: noul(0.05),
+      },
+    };
+  },
+};
+
+const routedDeps = {
+  ...baseDeps,
+  routeTurn: makeRouteTurn({
+    jev: scriptedJev,
+    mode: 'on',
+    enabledTiers: new Set<Tier>(['fast', 'standard', 'deep']),
+    labelFor: (senderId) => senderId,
+  }),
+};
+
+export const routedTurnWorkflow = DBOS.registerWorkflow(makeHandleTurnWorkflow(routedDeps), {
+  name: 'handleTurnRouted',
+});
+
+export const routedCappedTurnWorkflow = DBOS.registerWorkflow(
+  makeHandleTurnWorkflow({ ...routedDeps, maxRounds: 2 }),
+  { name: 'handleTurnRoutedCapped' },
 );
 
 export async function launchTurnRuntime(): Promise<void> {
