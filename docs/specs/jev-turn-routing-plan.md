@@ -169,7 +169,8 @@ deterministic.
   made the refresh accumulate rotating answers, but a host that isn't in the set
   yet still gets its SYN **dropped**, not rejected, and our 1.5s timeout fires
   long before the ~10.5s egress fingerprint shows up. Mitigations:
-  - A startup probe and fallback-rate alerting, both in §5b. A dead router
+  - A startup probe logs `[route] jev ok` or `[route] jev unreachable: <kind>`,
+    and the fallback rate appears on the §5b health panel. A dead router
     otherwise degrades to today's behavior and nobody would ever notice.
 
 ### 5a. Debugging: where content lives (the existing split, unchanged)
@@ -191,33 +192,41 @@ today. Phase 4 adds a backoffice **turn view**: a workflow id shows its Langfuse
 spans, its `turn_route_log` row (payload, probabilities, tier) and the
 transcript slice side by side.
 
-### 5b. Knowing when it goes wrong (alerting)
+### 5b. Knowing when it goes wrong (router health — pulled, not paged)
 
-The fallback makes a broken router *harmless*; this section makes it *visible*.
-A `route-health` watch follows the `wa-version-watch` pattern: in-process, on an
-interval, sending to the Telegram alert channel. It reads `turn_route_log`
-through a registered read step, so the evidence is our own Postgres, not
-Langfuse.
+The fallback makes a broken router *harmless*; this section makes it *visible*,
+**without new Telegram traffic.** Telegram stays reserved for service up/down,
+and a router failure isn't an outage: every turn still runs on `standard`, which
+is exactly today's behavior. A page for it would train the channel to be
+ignored, the same reasoning `wa-version-watch` gives for its edge-triggering.
 
-**Every alert is edge-triggered and sends a ✅ all-clear when it clears.** That
-avoids the `HEALTH-GRACE-001` latch problem, where silence after an alert is
-ambiguous.
+Router health is **pulled**, from two places, both reading our own Postgres
+(`turn_route_log`), not Langfuse:
 
-| Signal | Trigger (starting values, tuned in shadow) | Kind |
-|---|---|---|
-| Jev unreachable at boot | startup probe fails | page |
-| Router failing | ≥ 3 consecutive `fallback-error`, or > 20% of the last 20 routed turns | page |
-| Router slow | p95 Jev latency over the last 20 turns > 1s (the timeout is 1.5s) | page |
-| Router silent | turns ran in 24h but `turn_route_log` got **no rows** (wiring broke, or the mode was silently off) | page |
-| Unevaluated config | the runtime eval fingerprint ≠ the stamped one (§8a) → also **forced to `shadow`** | page |
-| Tier mix off | `deep` > 40% of a day's turns (cost / injection), or unsettled answers > 50% | page |
-| Quality drift | `corrects_previous` > 0.7 after a turn, counted **per tier** | weekly digest, not a page |
+- **Backoffice "Router" panel** on the Status screen. Each row is computed from
+  `turn_route_log` and shown green/amber against the starting thresholds, which
+  are tuned in shadow:
 
-The weekly digest is one Telegram message: tier counts, fallback %, p95 latency,
-and corrections per tier. A `fast` tier whose correction rate climbs above
-`standard`'s is the clearest signal it's misrouting. Each flagged correction's
-`turn_route_log` row is a ready-made eval candidate for the builder to label
-(§8a), so production mistakes feed the eval set.
+  | Row | Amber when |
+  |---|---|
+  | Last routed turn | no rows in 24h while turns ran (wiring broke, or the mode was silently off) |
+  | Fallback rate | > 20% of the last 20 routed turns, or ≥ 3 in a row |
+  | Jev latency p95 | > 1s over the last 20 (the timeout is 1.5s) |
+  | Tier mix (24h) | `deep` > 40% (cost / injection) or unsettled > 50% |
+  | Corrections per tier (7d) | a tier's `corrects_previous` > 0.7 rate exceeds `standard`'s |
+
+  Clicking a row lists the offending `turn_route_log` rows in the §5a turn view.
+  A flagged correction is a ready-made eval candidate for the builder to label
+  (§8a), so production mistakes feed the eval set.
+- **`[route]` log lines:** the startup probe result, plus one line per state
+  change (fallback streak started or ended). They're grep-able on the host next
+  to `[socket]` / `[spine]`.
+
+When it gets looked at: during Phase 5 shadow, daily. After that, whenever
+ezra's answers feel off, and as a standing item in the periodic STATUS.md
+reconcile. If one condition later proves worth a push, the candidate is a
+fallback streak lasting longer than a day. Add it then, deliberately, and not
+as part of this plan.
 
 **Don't bundle a model upgrade.** The current defaults are `claude-haiku-4-5` and
 `claude-sonnet-4-6`. Moving tier ids to newer models is a separate change.
@@ -279,11 +288,11 @@ Bundling it would confound the Phase 5 comparison.
 
 | Failure | Effect | Caught by |
 |---|---|---|
-| Jev down, slow, or blocked at egress | every turn on `standard` = today's behavior | startup probe + fallback-rate alert (§5) |
+| Jev down, slow, or blocked at egress | every turn on `standard` = today's behavior | startup probe `[route]` line + Router panel fallback row (§5b) |
 | Short context-dependent message ("כן, את השני", "do that") routed `fast` | wrong item / wrong effect | `refers_back` Noul + eval hard cases |
 | Hebrew judged worse than English | biased routing by language | per-language eval slices; Phase 1 stop rule |
 | Jev model swap upstream | routing shifts silently | pinned `jev-1.14.0`; eval re-run is the bump gate |
-| Wording edit regresses routing | same | `questionsVersion` in traces + eval gate on edits |
+| Wording edit regresses routing | same | `questionsVersion` in traces + the eval-on-change agent rule (§8a) |
 | Injection forces `deep` | cost only | provider-side spend limit |
 | Opus latency on a WhatsApp reply | slow answer to a "big" ask | measured in Phase 5; acceptable or `deep` dropped |
 | Crash between `routeTurn` and `callModel` | — | journaled tier; recovery test (Phase 3) |
@@ -354,39 +363,27 @@ are structure-checked in CI, and accuracy is report-only and on-demand.
 - **CI:** coverage only. Every tier × language has holdout cases, and every
   `decideTier` row is exercised. **No live Jev calls in CI**, the same rule as
   for model calls.
-- **Re-runs are enforced, not remembered.** This uses the `check:docs` pattern:
-  CI checks mechanically, without making live calls.
-  1. **Fingerprint.** `routeEvalFingerprint()` hashes everything that can change
-     routing behavior:
-     - `turnRouteQuestions` and the thresholds;
-     - the `decideTier` source;
-     - the Jev model pin;
-     - the tier model ids;
-     - the fixtures file;
-     - the routing system-prompt inputs.
+- **Re-runs are an agent rule, not a mechanism.** Only coding agents work on this
+  repo, so the instruction goes where every agent reads it. That's enough; no
+  fingerprint and no CI gate, by the builder's call on 2026-10-29.
+  - **`.claude/rules/testing.md`** gets a "Routing evals" entry. Run
+    `pnpm eval:route` (router accuracy, plus the per-tier end-to-end scenarios)
+    before committing any change to:
+    - `src/agent/turn-route.ts` (wording, criteria, thresholds, `decideTier`);
+    - the Jev pin;
+    - a tier model id, **including a host env override** (`FAST_MODEL_ID` /
+      `DEEP_MODEL_ID`);
+    - `evals/fixtures/turn-route.ts`.
 
-     It lives next to the code it hashes, so a new input is added there.
-  2. **Stamp.** `pnpm eval:route` runs the live suite: the §8a router accuracy
-     and the per-tier end-to-end scenarios. It writes
-     `evals/results/turn-route.stamp.json`
-     `{ fingerprint, date, per-split scores, gate: pass }` **only when the gate
-     passes**. The stamp is committed, so the scores show up in the PR diff.
-  3. **CI gate** (`pnpm check:route-eval`, in `ci.yml` beside `check:docs`).
-     It recomputes the fingerprint and fails if it doesn't match the stamp:
-     *"routing inputs changed — run `pnpm eval:route` and commit the stamp"*. No
-     Jev or Claude calls happen in CI, so the "never real model calls in CI" rule
-     holds. Any PR that touches routing can't merge stale, whoever wrote it.
-  4. **Runtime gate.** The image carries the stamp. At boot the app computes the
-     fingerprint from the *live* Config, so a host env override of
-     `FAST_MODEL_ID`, which CI never sees, is caught. On a mismatch with
-     `TURN_ROUTING=on` it runs as `shadow` and pages (§5b). Prod never routes on
-     an unevaluated combination.
-  5. **Agents.** Add a line to `.claude/rules/testing.md` and to CLAUDE.md's
-     Commands section: changing routing means running `pnpm eval:route` and
-     committing the stamp. The CI gate is the backstop when that's forgotten.
-  - Out of reach of all of this: upstream behavior drift *under* a pinned Jev
-    version, and a shift in what the household asks. Those are caught in
-    production by §5b's correction-rate and tier-mix signals, not by the eval.
+    The result goes into the PR description: per-language holdout scores and
+    the asymmetric gate verdict.
+  - **CLAUDE.md** Commands section lists `pnpm eval:route` with a one-line
+    pointer to that rule.
+  - **`turn-route.ts` header comment** repeats it, so an agent editing the file
+    sees it without loading the rules.
+  - Out of reach: upstream drift *under* a pinned Jev version, and a shift in
+    what the household asks. Those show up in production on the §5b router
+    health panel (correction rate, tier mix), not in the eval.
 
 **Phase 1 — live probe, synthetic data only.**
 - About 40 hand-written cases, a third each English, Hebrew, and code-switched,
@@ -416,13 +413,11 @@ pre-rules skip Jev entirely (assert zero client calls).
 - The egress allowlist and nftables mirror, plus the drift test.
 - Tracing tags.
 - `TURN_ROUTING=shadow` in `pnpm dev`.
-- The `route-health` watch, startup probe and weekly digest (§5b). Their
-  triggers are unit-tested against fake `turn_route_log` rows, including the
-  all-clear re-arm.
-- `eval:route`, the stamp, and the `check:route-eval` CI gate, plus the runtime
-  fingerprint downgrade (§8a).
-- The backoffice turn view (§5a).
-- The agent rule lines.
+- The startup probe and `[route]` log lines (§5b).
+- The backoffice Router panel and turn view (§5a/§5b). Panel derivations are
+  unit-tested against fake `turn_route_log` rows.
+- `pnpm eval:route`.
+- The agent rule lines (§8a).
 - Update STATUS.md in the same PR.
 
 **Phase 5 — shadow on prod (~2 weeks), then evaluate.**
