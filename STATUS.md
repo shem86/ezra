@@ -867,6 +867,22 @@ built): a capped `list_facts` tool (keys plus fenced values, "showing N of M"),
 and dropping short/common terms (`all`, `כל`, …) from `factTerms`, whose
 substring search otherwise matches nearly everything.
 
+### 14. Jev turn routing (Haiku / Sonnet / Opus per turn) — Phase 1 passed, Phase 2 next
+**Status:** in progress. Plan [`docs/specs/jev-turn-routing-plan.md`](docs/specs/jev-turn-routing-plan.md).
+Builder decisions recorded 2026-10-29: household text to TypeSafe, a new egress host,
+superseding ADR-0007, an Opus tier, the `turn_route_log` migration, a staged rollout
+(`standard`/`deep` before `fast`), eval re-runs as an agent rule (no fingerprint gate), and router
+health in the backoffice rather than Telegram.
+
+**Phase 1 verified** 2026-10-29 by a live probe of `jev-1.14.0` on 45 synthetic cases
+(`spikes/jev-turn-route-probe.ts`): holdout 15/15 tiers exact, Hebrew and code-switched messages at
+parity with English, 0 harder turns sent to `fast`, p95 ≤ 369 ms. The record is in
+[`docs/spike-results.md`](docs/spike-results.md).
+
+**Next:** Phase 2 (pure core: questions module, `decideTier`, zero-dep Jev client), then Phase 3
+(the `routeTurn` step plus a recovery test). The `TYPESAFE_API_KEY` is not yet in `.env` or SSM.
+**Rotate it before prod:** it was pasted into a Claude session on 2026-10-29.
+
 ---
 
 ## Newly unblocked by going public (2026-07-14)

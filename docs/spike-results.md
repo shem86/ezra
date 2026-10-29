@@ -286,3 +286,41 @@ Gotchas burned in:
   extract the base + its bundled `-Xstream` WAL into `pg_wal` and start normally;
   recovery reaches base-end consistency and stops there. Adding archived WAL is
   what would roll *forward* past the rewind point (that path is the T17 drill).
+
+## Jev turn routing — Phase 1 live probe (PASS 2026-10-29)
+
+Plan: [`docs/specs/jev-turn-routing-plan.md`](specs/jev-turn-routing-plan.md) Phase 1. Spike:
+`spikes/jev-turn-route-probe.ts`. Cases: `evals/fixtures/turn-route/phase1-cases.json`, which are 45
+**synthetic** turns (15 English, 15 Hebrew, 15 code-switched), labelled by tier and per question.
+Holdout is every third case per language. Every exact payload and raw response is in
+`phase1-results-{tune,holdout}.json`.
+
+- **Model:** the pinned `jev-1.14.0` is accepted. `jev-latest` resolves to the same version as of
+  2026-10-29. Answers vary slightly between identical calls (0.82 vs 0.81 on a repeat), so never
+  assert exact probabilities.
+- **Tune (30), round 1:** 28/30 tiers were exact and none went to `fast` wrongly. Both misses were
+  "find a time we're both free" (he-11, mx-11) going to `deep`. v1 `weighs_options` contained an "or"
+  ("compare options, **plan around constraints**, or recommend"), and a slot search fits "plan around
+  constraints". The fix is `weighs_options_v2`: "make a plan or recommend one option over others", with
+  the slot search named as the false case. Both wordings ran as sibling questions in the same
+  requests.
+- **Tune (30), v2:** 30/30 exact in each language. The re-run reproduced 30/30.
+- **Holdout (15), one run, v2 frozen beforehand:** **15/15 exact (5/5 per language), 0 sent to
+  `fast` wrongly.**
+- **Hebrew is at parity with English.** Per-question agreement is the same across the three
+  languages, so the Phase 1 stop rule does not fire.
+- **Misses that don't change any tier:**
+  - `refers_back` reads ~0.7 on "thanks" after an assistant message. The social rule decides
+    those turns first.
+  - `intent` picks `calendar` over `planning_or_advice` for "plan Saturday around the calendars".
+    `weighs_options_v2` carries those turns to `deep`.
+  - he-09 `schedule_reasoning` is unsettled at 0.68 and has no tier impact.
+- **Latency** (sequential, from the dev Mac): p50 102–170 ms, p95 169–369 ms, max 772 ms. The planned
+  1.5 s timeout has ample headroom.
+- **Cost:** ~1,220 input tokens per request, so ≈ $0.00005 per turn. The four runs cost < $0.01
+  in total.
+- **Caveats:**
+  - 45 hand-written cases is a probe, not proof. §8a grows the set from labelled real
+    `turn_route_log` rows.
+  - Labels and wording come from the same author.
+  - The `fast` tier is still the risky one (§7b) and ships last.

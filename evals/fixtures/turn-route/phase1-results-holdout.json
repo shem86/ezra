@@ -1,0 +1,2062 @@
+{
+  "ranAt": "2026-10-29T14:15:12.442Z",
+  "split": "holdout",
+  "model": "jev-1.14.0",
+  "rows": [
+    {
+      "id": "en-03",
+      "lang": "en",
+      "holdout": true,
+      "label": "fast",
+      "routed": "fast",
+      "ms": 219,
+      "model": "jev-1.14.0",
+      "inputTokens": 1203,
+      "answers": {
+        "asks_anything": {
+          "type": "noul",
+          "noul": 0.99
+        },
+        "intent": {
+          "type": "choice",
+          "choice": "list_edit",
+          "confidence": 1,
+          "probabilities": {
+            "list_edit": 1,
+            "reminder": 0,
+            "calendar": 0,
+            "household_fact": 0,
+            "planning_or_advice": 0,
+            "social": 0
+          }
+        },
+        "several_requests": {
+          "type": "noul",
+          "noul": 0.06
+        },
+        "refers_back": {
+          "type": "noul",
+          "noul": 0.04
+        },
+        "weighs_options": {
+          "type": "noul",
+          "noul": 0.02
+        },
+        "weighs_options_v2": {
+          "type": "noul",
+          "noul": 0.02
+        },
+        "schedule_reasoning": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "corrects_previous": {
+          "type": "noul",
+          "noul": 0.02
+        }
+      },
+      "payload": {
+        "model": "jev-1.14.0",
+        "state": {
+          "household": "Two adults (husband, wife) messaging their home assistant on WhatsApp, in Hebrew, English, or a mix of both.",
+          "assistant_can": "edit shared shopping and to-do lists, set reminders, store and recall household facts, read and propose calendar events",
+          "recent_conversation": "(none)",
+          "latest_messages": [
+            {
+              "from": "wife",
+              "text": "we're out of eggs and bread, add them"
+            }
+          ]
+        },
+        "questions": {
+          "asks_anything": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to do something or to answer something?",
+            "criteria": {
+              "true": "The sender wants an action taken or a question answered, including a short \"yes\" that accepts an offer the assistant just made.",
+              "false": "The sender only thanks, greets, acknowledges, or reacts to what the assistant already did."
+            }
+          },
+          "intent": {
+            "type": "choice",
+            "instructions": "What is `latest_messages` mainly asking the assistant for?",
+            "criteria": {
+              "list_edit": "Adding, removing, or checking items on a shopping list or to-do list.",
+              "reminder": "Creating, moving, or cancelling a reminder at a time.",
+              "calendar": "Reading, creating, or changing calendar events, or finding a free time in the calendars.",
+              "household_fact": "Looking up or storing a household fact, such as a password, a code, or a phone number.",
+              "planning_or_advice": "Planning something, or recommending a choice between options.",
+              "social": "Thanks, greetings, acknowledgements, or emoji reactions."
+            }
+          },
+          "several_requests": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` contain more than one separate request for the assistant?",
+            "criteria": {
+              "true": "The sender asks for two or more different things, for example adding a list item and also setting a reminder.",
+              "false": "The sender asks for one thing, even if that one thing names several items, like adding eggs and bread to the same list."
+            }
+          },
+          "refers_back": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` refer to something in `recent_conversation` that must be looked up to understand what is meant?",
+            "criteria": {
+              "true": "The message only makes sense with the earlier conversation, like \"move it to Friday\" or a \"yes\" answering the assistant's question.",
+              "false": "The message is fully understandable on its own."
+            }
+          },
+          "weighs_options": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to compare options, plan around constraints, or recommend something?",
+            "criteria": {
+              "true": "The sender wants a plan made or a recommendation between alternatives, like which day is better or how to organise a weekend.",
+              "false": "The sender asks for a specific fact or a specific action, like what time an event is or adding an item."
+            }
+          },
+          "weighs_options_v2": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to make a plan or to recommend one option over others?",
+            "criteria": {
+              "true": "Answering needs a judgment call between alternatives, like which day is better for a visit or how to organise a weekend with guests.",
+              "false": "The sender wants one thing looked up or done, like the time of an event, adding an item, or finding a slot when both are free."
+            }
+          },
+          "schedule_reasoning": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask to find a time, check who is available, or work around a clash between schedules?",
+            "criteria": {
+              "true": "Answering needs looking across calendars or availability, like finding when both are free.",
+              "false": "The message names its time directly or is not about time, like setting a reminder for tomorrow at 9 or asking when one appointment is."
+            }
+          },
+          "corrects_previous": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` say the assistant's last reply in `recent_conversation` was wrong or misunderstood?",
+            "criteria": {
+              "true": "The sender points out a mistake, like \"no, I said Friday\" after the assistant set Thursday.",
+              "false": "The sender accepts the reply, thanks the assistant, or changes their own plan, like \"move it to Friday\" after Thursday was set as asked."
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "en-06",
+      "lang": "en",
+      "holdout": true,
+      "label": "standard",
+      "routed": "standard",
+      "ms": 98,
+      "model": "jev-1.14.0",
+      "inputTokens": 1235,
+      "answers": {
+        "asks_anything": {
+          "type": "noul",
+          "noul": 0.99
+        },
+        "intent": {
+          "type": "choice",
+          "choice": "reminder",
+          "confidence": 1,
+          "probabilities": {
+            "list_edit": 0,
+            "reminder": 1,
+            "calendar": 0,
+            "household_fact": 0,
+            "planning_or_advice": 0,
+            "social": 0
+          }
+        },
+        "several_requests": {
+          "type": "noul",
+          "noul": 0.04
+        },
+        "refers_back": {
+          "type": "noul",
+          "noul": 0.98
+        },
+        "weighs_options": {
+          "type": "noul",
+          "noul": 0.03
+        },
+        "weighs_options_v2": {
+          "type": "noul",
+          "noul": 0.03
+        },
+        "schedule_reasoning": {
+          "type": "noul",
+          "noul": 0.05
+        },
+        "corrects_previous": {
+          "type": "noul",
+          "noul": 0.13
+        }
+      },
+      "payload": {
+        "model": "jev-1.14.0",
+        "state": {
+          "household": "Two adults (husband, wife) messaging their home assistant on WhatsApp, in Hebrew, English, or a mix of both.",
+          "assistant_can": "edit shared shopping and to-do lists, set reminders, store and recall household facts, read and propose calendar events",
+          "recent_conversation": "husband: remind me thursday 5pm to pick up the dry cleaning\nassistant: Done — reminder set for Thursday at 5:00 PM to pick up the dry cleaning.",
+          "latest_messages": [
+            {
+              "from": "husband",
+              "text": "move it to friday"
+            }
+          ]
+        },
+        "questions": {
+          "asks_anything": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to do something or to answer something?",
+            "criteria": {
+              "true": "The sender wants an action taken or a question answered, including a short \"yes\" that accepts an offer the assistant just made.",
+              "false": "The sender only thanks, greets, acknowledges, or reacts to what the assistant already did."
+            }
+          },
+          "intent": {
+            "type": "choice",
+            "instructions": "What is `latest_messages` mainly asking the assistant for?",
+            "criteria": {
+              "list_edit": "Adding, removing, or checking items on a shopping list or to-do list.",
+              "reminder": "Creating, moving, or cancelling a reminder at a time.",
+              "calendar": "Reading, creating, or changing calendar events, or finding a free time in the calendars.",
+              "household_fact": "Looking up or storing a household fact, such as a password, a code, or a phone number.",
+              "planning_or_advice": "Planning something, or recommending a choice between options.",
+              "social": "Thanks, greetings, acknowledgements, or emoji reactions."
+            }
+          },
+          "several_requests": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` contain more than one separate request for the assistant?",
+            "criteria": {
+              "true": "The sender asks for two or more different things, for example adding a list item and also setting a reminder.",
+              "false": "The sender asks for one thing, even if that one thing names several items, like adding eggs and bread to the same list."
+            }
+          },
+          "refers_back": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` refer to something in `recent_conversation` that must be looked up to understand what is meant?",
+            "criteria": {
+              "true": "The message only makes sense with the earlier conversation, like \"move it to Friday\" or a \"yes\" answering the assistant's question.",
+              "false": "The message is fully understandable on its own."
+            }
+          },
+          "weighs_options": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to compare options, plan around constraints, or recommend something?",
+            "criteria": {
+              "true": "The sender wants a plan made or a recommendation between alternatives, like which day is better or how to organise a weekend.",
+              "false": "The sender asks for a specific fact or a specific action, like what time an event is or adding an item."
+            }
+          },
+          "weighs_options_v2": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to make a plan or to recommend one option over others?",
+            "criteria": {
+              "true": "Answering needs a judgment call between alternatives, like which day is better for a visit or how to organise a weekend with guests.",
+              "false": "The sender wants one thing looked up or done, like the time of an event, adding an item, or finding a slot when both are free."
+            }
+          },
+          "schedule_reasoning": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask to find a time, check who is available, or work around a clash between schedules?",
+            "criteria": {
+              "true": "Answering needs looking across calendars or availability, like finding when both are free.",
+              "false": "The message names its time directly or is not about time, like setting a reminder for tomorrow at 9 or asking when one appointment is."
+            }
+          },
+          "corrects_previous": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` say the assistant's last reply in `recent_conversation` was wrong or misunderstood?",
+            "criteria": {
+              "true": "The sender points out a mistake, like \"no, I said Friday\" after the assistant set Thursday.",
+              "false": "The sender accepts the reply, thanks the assistant, or changes their own plan, like \"move it to Friday\" after Thursday was set as asked."
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "en-09",
+      "lang": "en",
+      "holdout": true,
+      "label": "deep",
+      "routed": "deep",
+      "ms": 64,
+      "model": "jev-1.14.0",
+      "inputTokens": 1211,
+      "answers": {
+        "asks_anything": {
+          "type": "noul",
+          "noul": 0.98
+        },
+        "intent": {
+          "type": "choice",
+          "choice": "planning_or_advice",
+          "confidence": 0.53,
+          "probabilities": {
+            "list_edit": 0,
+            "reminder": 0,
+            "calendar": 0.39,
+            "household_fact": 0,
+            "planning_or_advice": 0.61,
+            "social": 0
+          }
+        },
+        "several_requests": {
+          "type": "noul",
+          "noul": 0.06
+        },
+        "refers_back": {
+          "type": "noul",
+          "noul": 0.05
+        },
+        "weighs_options": {
+          "type": "noul",
+          "noul": 0.98
+        },
+        "weighs_options_v2": {
+          "type": "noul",
+          "noul": 0.96
+        },
+        "schedule_reasoning": {
+          "type": "noul",
+          "noul": 0.91
+        },
+        "corrects_previous": {
+          "type": "noul",
+          "noul": 0.02
+        }
+      },
+      "payload": {
+        "model": "jev-1.14.0",
+        "state": {
+          "household": "Two adults (husband, wife) messaging their home assistant on WhatsApp, in Hebrew, English, or a mix of both.",
+          "assistant_can": "edit shared shopping and to-do lists, set reminders, store and recall household facts, read and propose calendar events",
+          "recent_conversation": "(none)",
+          "latest_messages": [
+            {
+              "from": "wife",
+              "text": "should we do the grocery run tonight or tomorrow morning, given what's on the calendar?"
+            }
+          ]
+        },
+        "questions": {
+          "asks_anything": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to do something or to answer something?",
+            "criteria": {
+              "true": "The sender wants an action taken or a question answered, including a short \"yes\" that accepts an offer the assistant just made.",
+              "false": "The sender only thanks, greets, acknowledges, or reacts to what the assistant already did."
+            }
+          },
+          "intent": {
+            "type": "choice",
+            "instructions": "What is `latest_messages` mainly asking the assistant for?",
+            "criteria": {
+              "list_edit": "Adding, removing, or checking items on a shopping list or to-do list.",
+              "reminder": "Creating, moving, or cancelling a reminder at a time.",
+              "calendar": "Reading, creating, or changing calendar events, or finding a free time in the calendars.",
+              "household_fact": "Looking up or storing a household fact, such as a password, a code, or a phone number.",
+              "planning_or_advice": "Planning something, or recommending a choice between options.",
+              "social": "Thanks, greetings, acknowledgements, or emoji reactions."
+            }
+          },
+          "several_requests": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` contain more than one separate request for the assistant?",
+            "criteria": {
+              "true": "The sender asks for two or more different things, for example adding a list item and also setting a reminder.",
+              "false": "The sender asks for one thing, even if that one thing names several items, like adding eggs and bread to the same list."
+            }
+          },
+          "refers_back": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` refer to something in `recent_conversation` that must be looked up to understand what is meant?",
+            "criteria": {
+              "true": "The message only makes sense with the earlier conversation, like \"move it to Friday\" or a \"yes\" answering the assistant's question.",
+              "false": "The message is fully understandable on its own."
+            }
+          },
+          "weighs_options": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to compare options, plan around constraints, or recommend something?",
+            "criteria": {
+              "true": "The sender wants a plan made or a recommendation between alternatives, like which day is better or how to organise a weekend.",
+              "false": "The sender asks for a specific fact or a specific action, like what time an event is or adding an item."
+            }
+          },
+          "weighs_options_v2": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to make a plan or to recommend one option over others?",
+            "criteria": {
+              "true": "Answering needs a judgment call between alternatives, like which day is better for a visit or how to organise a weekend with guests.",
+              "false": "The sender wants one thing looked up or done, like the time of an event, adding an item, or finding a slot when both are free."
+            }
+          },
+          "schedule_reasoning": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask to find a time, check who is available, or work around a clash between schedules?",
+            "criteria": {
+              "true": "Answering needs looking across calendars or availability, like finding when both are free.",
+              "false": "The message names its time directly or is not about time, like setting a reminder for tomorrow at 9 or asking when one appointment is."
+            }
+          },
+          "corrects_previous": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` say the assistant's last reply in `recent_conversation` was wrong or misunderstood?",
+            "criteria": {
+              "true": "The sender points out a mistake, like \"no, I said Friday\" after the assistant set Thursday.",
+              "false": "The sender accepts the reply, thanks the assistant, or changes their own plan, like \"move it to Friday\" after Thursday was set as asked."
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "en-12",
+      "lang": "en",
+      "holdout": true,
+      "label": "fast",
+      "routed": "fast",
+      "ms": 109,
+      "model": "jev-1.14.0",
+      "inputTokens": 1212,
+      "answers": {
+        "asks_anything": {
+          "type": "noul",
+          "noul": 0.08
+        },
+        "intent": {
+          "type": "choice",
+          "choice": "social",
+          "confidence": 1,
+          "probabilities": {
+            "list_edit": 0,
+            "reminder": 0,
+            "calendar": 0,
+            "household_fact": 0,
+            "planning_or_advice": 0,
+            "social": 1
+          }
+        },
+        "several_requests": {
+          "type": "noul",
+          "noul": 0.02
+        },
+        "refers_back": {
+          "type": "noul",
+          "noul": 0.7
+        },
+        "weighs_options": {
+          "type": "noul",
+          "noul": 0.02
+        },
+        "weighs_options_v2": {
+          "type": "noul",
+          "noul": 0.02
+        },
+        "schedule_reasoning": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "corrects_previous": {
+          "type": "noul",
+          "noul": 0.03
+        }
+      },
+      "payload": {
+        "model": "jev-1.14.0",
+        "state": {
+          "household": "Two adults (husband, wife) messaging their home assistant on WhatsApp, in Hebrew, English, or a mix of both.",
+          "assistant_can": "edit shared shopping and to-do lists, set reminders, store and recall household facts, read and propose calendar events",
+          "recent_conversation": "assistant: Your reminder for the vet is set for Monday at 10:00 AM.",
+          "latest_messages": [
+            {
+              "from": "husband",
+              "text": "ok"
+            }
+          ]
+        },
+        "questions": {
+          "asks_anything": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to do something or to answer something?",
+            "criteria": {
+              "true": "The sender wants an action taken or a question answered, including a short \"yes\" that accepts an offer the assistant just made.",
+              "false": "The sender only thanks, greets, acknowledges, or reacts to what the assistant already did."
+            }
+          },
+          "intent": {
+            "type": "choice",
+            "instructions": "What is `latest_messages` mainly asking the assistant for?",
+            "criteria": {
+              "list_edit": "Adding, removing, or checking items on a shopping list or to-do list.",
+              "reminder": "Creating, moving, or cancelling a reminder at a time.",
+              "calendar": "Reading, creating, or changing calendar events, or finding a free time in the calendars.",
+              "household_fact": "Looking up or storing a household fact, such as a password, a code, or a phone number.",
+              "planning_or_advice": "Planning something, or recommending a choice between options.",
+              "social": "Thanks, greetings, acknowledgements, or emoji reactions."
+            }
+          },
+          "several_requests": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` contain more than one separate request for the assistant?",
+            "criteria": {
+              "true": "The sender asks for two or more different things, for example adding a list item and also setting a reminder.",
+              "false": "The sender asks for one thing, even if that one thing names several items, like adding eggs and bread to the same list."
+            }
+          },
+          "refers_back": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` refer to something in `recent_conversation` that must be looked up to understand what is meant?",
+            "criteria": {
+              "true": "The message only makes sense with the earlier conversation, like \"move it to Friday\" or a \"yes\" answering the assistant's question.",
+              "false": "The message is fully understandable on its own."
+            }
+          },
+          "weighs_options": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to compare options, plan around constraints, or recommend something?",
+            "criteria": {
+              "true": "The sender wants a plan made or a recommendation between alternatives, like which day is better or how to organise a weekend.",
+              "false": "The sender asks for a specific fact or a specific action, like what time an event is or adding an item."
+            }
+          },
+          "weighs_options_v2": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to make a plan or to recommend one option over others?",
+            "criteria": {
+              "true": "Answering needs a judgment call between alternatives, like which day is better for a visit or how to organise a weekend with guests.",
+              "false": "The sender wants one thing looked up or done, like the time of an event, adding an item, or finding a slot when both are free."
+            }
+          },
+          "schedule_reasoning": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask to find a time, check who is available, or work around a clash between schedules?",
+            "criteria": {
+              "true": "Answering needs looking across calendars or availability, like finding when both are free.",
+              "false": "The message names its time directly or is not about time, like setting a reminder for tomorrow at 9 or asking when one appointment is."
+            }
+          },
+          "corrects_previous": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` say the assistant's last reply in `recent_conversation` was wrong or misunderstood?",
+            "criteria": {
+              "true": "The sender points out a mistake, like \"no, I said Friday\" after the assistant set Thursday.",
+              "false": "The sender accepts the reply, thanks the assistant, or changes their own plan, like \"move it to Friday\" after Thursday was set as asked."
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "en-15",
+      "lang": "en",
+      "holdout": true,
+      "label": "standard",
+      "routed": "standard",
+      "ms": 105,
+      "model": "jev-1.14.0",
+      "inputTokens": 1229,
+      "answers": {
+        "asks_anything": {
+          "type": "noul",
+          "noul": 0.95
+        },
+        "intent": {
+          "type": "choice",
+          "choice": "reminder",
+          "confidence": 1,
+          "probabilities": {
+            "list_edit": 0,
+            "reminder": 1,
+            "calendar": 0,
+            "household_fact": 0,
+            "planning_or_advice": 0,
+            "social": 0
+          }
+        },
+        "several_requests": {
+          "type": "noul",
+          "noul": 0.05
+        },
+        "refers_back": {
+          "type": "noul",
+          "noul": 0.88
+        },
+        "weighs_options": {
+          "type": "noul",
+          "noul": 0.03
+        },
+        "weighs_options_v2": {
+          "type": "noul",
+          "noul": 0.04
+        },
+        "schedule_reasoning": {
+          "type": "noul",
+          "noul": 0.02
+        },
+        "corrects_previous": {
+          "type": "noul",
+          "noul": 0.99
+        }
+      },
+      "payload": {
+        "model": "jev-1.14.0",
+        "state": {
+          "household": "Two adults (husband, wife) messaging their home assistant on WhatsApp, in Hebrew, English, or a mix of both.",
+          "assistant_can": "edit shared shopping and to-do lists, set reminders, store and recall household facts, read and propose calendar events",
+          "recent_conversation": "wife: remind me friday to renew the car insurance\nassistant: Reminder set for Thursday at 9:00 AM to renew the car insurance.",
+          "latest_messages": [
+            {
+              "from": "wife",
+              "text": "no, I said friday not thursday"
+            }
+          ]
+        },
+        "questions": {
+          "asks_anything": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to do something or to answer something?",
+            "criteria": {
+              "true": "The sender wants an action taken or a question answered, including a short \"yes\" that accepts an offer the assistant just made.",
+              "false": "The sender only thanks, greets, acknowledges, or reacts to what the assistant already did."
+            }
+          },
+          "intent": {
+            "type": "choice",
+            "instructions": "What is `latest_messages` mainly asking the assistant for?",
+            "criteria": {
+              "list_edit": "Adding, removing, or checking items on a shopping list or to-do list.",
+              "reminder": "Creating, moving, or cancelling a reminder at a time.",
+              "calendar": "Reading, creating, or changing calendar events, or finding a free time in the calendars.",
+              "household_fact": "Looking up or storing a household fact, such as a password, a code, or a phone number.",
+              "planning_or_advice": "Planning something, or recommending a choice between options.",
+              "social": "Thanks, greetings, acknowledgements, or emoji reactions."
+            }
+          },
+          "several_requests": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` contain more than one separate request for the assistant?",
+            "criteria": {
+              "true": "The sender asks for two or more different things, for example adding a list item and also setting a reminder.",
+              "false": "The sender asks for one thing, even if that one thing names several items, like adding eggs and bread to the same list."
+            }
+          },
+          "refers_back": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` refer to something in `recent_conversation` that must be looked up to understand what is meant?",
+            "criteria": {
+              "true": "The message only makes sense with the earlier conversation, like \"move it to Friday\" or a \"yes\" answering the assistant's question.",
+              "false": "The message is fully understandable on its own."
+            }
+          },
+          "weighs_options": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to compare options, plan around constraints, or recommend something?",
+            "criteria": {
+              "true": "The sender wants a plan made or a recommendation between alternatives, like which day is better or how to organise a weekend.",
+              "false": "The sender asks for a specific fact or a specific action, like what time an event is or adding an item."
+            }
+          },
+          "weighs_options_v2": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to make a plan or to recommend one option over others?",
+            "criteria": {
+              "true": "Answering needs a judgment call between alternatives, like which day is better for a visit or how to organise a weekend with guests.",
+              "false": "The sender wants one thing looked up or done, like the time of an event, adding an item, or finding a slot when both are free."
+            }
+          },
+          "schedule_reasoning": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask to find a time, check who is available, or work around a clash between schedules?",
+            "criteria": {
+              "true": "Answering needs looking across calendars or availability, like finding when both are free.",
+              "false": "The message names its time directly or is not about time, like setting a reminder for tomorrow at 9 or asking when one appointment is."
+            }
+          },
+          "corrects_previous": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` say the assistant's last reply in `recent_conversation` was wrong or misunderstood?",
+            "criteria": {
+              "true": "The sender points out a mistake, like \"no, I said Friday\" after the assistant set Thursday.",
+              "false": "The sender accepts the reply, thanks the assistant, or changes their own plan, like \"move it to Friday\" after Thursday was set as asked."
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "he-03",
+      "lang": "he",
+      "holdout": true,
+      "label": "fast",
+      "routed": "fast",
+      "ms": 83,
+      "model": "jev-1.14.0",
+      "inputTokens": 1213,
+      "answers": {
+        "asks_anything": {
+          "type": "noul",
+          "noul": 0.99
+        },
+        "intent": {
+          "type": "choice",
+          "choice": "list_edit",
+          "confidence": 1,
+          "probabilities": {
+            "list_edit": 1,
+            "reminder": 0,
+            "calendar": 0,
+            "household_fact": 0,
+            "planning_or_advice": 0,
+            "social": 0
+          }
+        },
+        "several_requests": {
+          "type": "noul",
+          "noul": 0.06
+        },
+        "refers_back": {
+          "type": "noul",
+          "noul": 0.07
+        },
+        "weighs_options": {
+          "type": "noul",
+          "noul": 0.03
+        },
+        "weighs_options_v2": {
+          "type": "noul",
+          "noul": 0.02
+        },
+        "schedule_reasoning": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "corrects_previous": {
+          "type": "noul",
+          "noul": 0.02
+        }
+      },
+      "payload": {
+        "model": "jev-1.14.0",
+        "state": {
+          "household": "Two adults (husband, wife) messaging their home assistant on WhatsApp, in Hebrew, English, or a mix of both.",
+          "assistant_can": "edit shared shopping and to-do lists, set reminders, store and recall household facts, read and propose calendar events",
+          "recent_conversation": "(none)",
+          "latest_messages": [
+            {
+              "from": "wife",
+              "text": "נגמרו ביצים ולחם, תוסיף"
+            }
+          ]
+        },
+        "questions": {
+          "asks_anything": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to do something or to answer something?",
+            "criteria": {
+              "true": "The sender wants an action taken or a question answered, including a short \"yes\" that accepts an offer the assistant just made.",
+              "false": "The sender only thanks, greets, acknowledges, or reacts to what the assistant already did."
+            }
+          },
+          "intent": {
+            "type": "choice",
+            "instructions": "What is `latest_messages` mainly asking the assistant for?",
+            "criteria": {
+              "list_edit": "Adding, removing, or checking items on a shopping list or to-do list.",
+              "reminder": "Creating, moving, or cancelling a reminder at a time.",
+              "calendar": "Reading, creating, or changing calendar events, or finding a free time in the calendars.",
+              "household_fact": "Looking up or storing a household fact, such as a password, a code, or a phone number.",
+              "planning_or_advice": "Planning something, or recommending a choice between options.",
+              "social": "Thanks, greetings, acknowledgements, or emoji reactions."
+            }
+          },
+          "several_requests": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` contain more than one separate request for the assistant?",
+            "criteria": {
+              "true": "The sender asks for two or more different things, for example adding a list item and also setting a reminder.",
+              "false": "The sender asks for one thing, even if that one thing names several items, like adding eggs and bread to the same list."
+            }
+          },
+          "refers_back": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` refer to something in `recent_conversation` that must be looked up to understand what is meant?",
+            "criteria": {
+              "true": "The message only makes sense with the earlier conversation, like \"move it to Friday\" or a \"yes\" answering the assistant's question.",
+              "false": "The message is fully understandable on its own."
+            }
+          },
+          "weighs_options": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to compare options, plan around constraints, or recommend something?",
+            "criteria": {
+              "true": "The sender wants a plan made or a recommendation between alternatives, like which day is better or how to organise a weekend.",
+              "false": "The sender asks for a specific fact or a specific action, like what time an event is or adding an item."
+            }
+          },
+          "weighs_options_v2": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to make a plan or to recommend one option over others?",
+            "criteria": {
+              "true": "Answering needs a judgment call between alternatives, like which day is better for a visit or how to organise a weekend with guests.",
+              "false": "The sender wants one thing looked up or done, like the time of an event, adding an item, or finding a slot when both are free."
+            }
+          },
+          "schedule_reasoning": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask to find a time, check who is available, or work around a clash between schedules?",
+            "criteria": {
+              "true": "Answering needs looking across calendars or availability, like finding when both are free.",
+              "false": "The message names its time directly or is not about time, like setting a reminder for tomorrow at 9 or asking when one appointment is."
+            }
+          },
+          "corrects_previous": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` say the assistant's last reply in `recent_conversation` was wrong or misunderstood?",
+            "criteria": {
+              "true": "The sender points out a mistake, like \"no, I said Friday\" after the assistant set Thursday.",
+              "false": "The sender accepts the reply, thanks the assistant, or changes their own plan, like \"move it to Friday\" after Thursday was set as asked."
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "he-06",
+      "lang": "he",
+      "holdout": true,
+      "label": "standard",
+      "routed": "standard",
+      "ms": 140,
+      "model": "jev-1.14.0",
+      "inputTokens": 1288,
+      "answers": {
+        "asks_anything": {
+          "type": "noul",
+          "noul": 0.99
+        },
+        "intent": {
+          "type": "choice",
+          "choice": "reminder",
+          "confidence": 0.99,
+          "probabilities": {
+            "list_edit": 0,
+            "reminder": 0.99,
+            "calendar": 0.01,
+            "household_fact": 0,
+            "planning_or_advice": 0,
+            "social": 0
+          }
+        },
+        "several_requests": {
+          "type": "noul",
+          "noul": 0.04
+        },
+        "refers_back": {
+          "type": "noul",
+          "noul": 0.97
+        },
+        "weighs_options": {
+          "type": "noul",
+          "noul": 0.03
+        },
+        "weighs_options_v2": {
+          "type": "noul",
+          "noul": 0.04
+        },
+        "schedule_reasoning": {
+          "type": "noul",
+          "noul": 0.04
+        },
+        "corrects_previous": {
+          "type": "noul",
+          "noul": 0.17
+        }
+      },
+      "payload": {
+        "model": "jev-1.14.0",
+        "state": {
+          "household": "Two adults (husband, wife) messaging their home assistant on WhatsApp, in Hebrew, English, or a mix of both.",
+          "assistant_can": "edit shared shopping and to-do lists, set reminders, store and recall household facts, read and propose calendar events",
+          "recent_conversation": "husband: תזכיר לי ביום חמישי בחמש לאסוף את הניקוי היבש\nassistant: קבעתי תזכורת ליום חמישי ב-17:00 לאסוף את הניקוי היבש.",
+          "latest_messages": [
+            {
+              "from": "husband",
+              "text": "תעביר את זה לשישי"
+            }
+          ]
+        },
+        "questions": {
+          "asks_anything": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to do something or to answer something?",
+            "criteria": {
+              "true": "The sender wants an action taken or a question answered, including a short \"yes\" that accepts an offer the assistant just made.",
+              "false": "The sender only thanks, greets, acknowledges, or reacts to what the assistant already did."
+            }
+          },
+          "intent": {
+            "type": "choice",
+            "instructions": "What is `latest_messages` mainly asking the assistant for?",
+            "criteria": {
+              "list_edit": "Adding, removing, or checking items on a shopping list or to-do list.",
+              "reminder": "Creating, moving, or cancelling a reminder at a time.",
+              "calendar": "Reading, creating, or changing calendar events, or finding a free time in the calendars.",
+              "household_fact": "Looking up or storing a household fact, such as a password, a code, or a phone number.",
+              "planning_or_advice": "Planning something, or recommending a choice between options.",
+              "social": "Thanks, greetings, acknowledgements, or emoji reactions."
+            }
+          },
+          "several_requests": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` contain more than one separate request for the assistant?",
+            "criteria": {
+              "true": "The sender asks for two or more different things, for example adding a list item and also setting a reminder.",
+              "false": "The sender asks for one thing, even if that one thing names several items, like adding eggs and bread to the same list."
+            }
+          },
+          "refers_back": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` refer to something in `recent_conversation` that must be looked up to understand what is meant?",
+            "criteria": {
+              "true": "The message only makes sense with the earlier conversation, like \"move it to Friday\" or a \"yes\" answering the assistant's question.",
+              "false": "The message is fully understandable on its own."
+            }
+          },
+          "weighs_options": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to compare options, plan around constraints, or recommend something?",
+            "criteria": {
+              "true": "The sender wants a plan made or a recommendation between alternatives, like which day is better or how to organise a weekend.",
+              "false": "The sender asks for a specific fact or a specific action, like what time an event is or adding an item."
+            }
+          },
+          "weighs_options_v2": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to make a plan or to recommend one option over others?",
+            "criteria": {
+              "true": "Answering needs a judgment call between alternatives, like which day is better for a visit or how to organise a weekend with guests.",
+              "false": "The sender wants one thing looked up or done, like the time of an event, adding an item, or finding a slot when both are free."
+            }
+          },
+          "schedule_reasoning": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask to find a time, check who is available, or work around a clash between schedules?",
+            "criteria": {
+              "true": "Answering needs looking across calendars or availability, like finding when both are free.",
+              "false": "The message names its time directly or is not about time, like setting a reminder for tomorrow at 9 or asking when one appointment is."
+            }
+          },
+          "corrects_previous": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` say the assistant's last reply in `recent_conversation` was wrong or misunderstood?",
+            "criteria": {
+              "true": "The sender points out a mistake, like \"no, I said Friday\" after the assistant set Thursday.",
+              "false": "The sender accepts the reply, thanks the assistant, or changes their own plan, like \"move it to Friday\" after Thursday was set as asked."
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "he-09",
+      "lang": "he",
+      "holdout": true,
+      "label": "deep",
+      "routed": "deep",
+      "ms": 119,
+      "model": "jev-1.14.0",
+      "inputTokens": 1234,
+      "answers": {
+        "asks_anything": {
+          "type": "noul",
+          "noul": 0.98
+        },
+        "intent": {
+          "type": "choice",
+          "choice": "planning_or_advice",
+          "confidence": 0.59,
+          "probabilities": {
+            "list_edit": 0,
+            "reminder": 0,
+            "calendar": 0.34,
+            "household_fact": 0,
+            "planning_or_advice": 0.66,
+            "social": 0
+          }
+        },
+        "several_requests": {
+          "type": "noul",
+          "noul": 0.06
+        },
+        "refers_back": {
+          "type": "noul",
+          "noul": 0.05
+        },
+        "weighs_options": {
+          "type": "noul",
+          "noul": 0.97
+        },
+        "weighs_options_v2": {
+          "type": "noul",
+          "noul": 0.96
+        },
+        "schedule_reasoning": {
+          "type": "noul",
+          "noul": 0.68
+        },
+        "corrects_previous": {
+          "type": "noul",
+          "noul": 0.02
+        }
+      },
+      "payload": {
+        "model": "jev-1.14.0",
+        "state": {
+          "household": "Two adults (husband, wife) messaging their home assistant on WhatsApp, in Hebrew, English, or a mix of both.",
+          "assistant_can": "edit shared shopping and to-do lists, set reminders, store and recall household facts, read and propose calendar events",
+          "recent_conversation": "(none)",
+          "latest_messages": [
+            {
+              "from": "wife",
+              "text": "כדאי לעשות קניות הערב או מחר בבוקר, לפי מה שיש ביומן?"
+            }
+          ]
+        },
+        "questions": {
+          "asks_anything": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to do something or to answer something?",
+            "criteria": {
+              "true": "The sender wants an action taken or a question answered, including a short \"yes\" that accepts an offer the assistant just made.",
+              "false": "The sender only thanks, greets, acknowledges, or reacts to what the assistant already did."
+            }
+          },
+          "intent": {
+            "type": "choice",
+            "instructions": "What is `latest_messages` mainly asking the assistant for?",
+            "criteria": {
+              "list_edit": "Adding, removing, or checking items on a shopping list or to-do list.",
+              "reminder": "Creating, moving, or cancelling a reminder at a time.",
+              "calendar": "Reading, creating, or changing calendar events, or finding a free time in the calendars.",
+              "household_fact": "Looking up or storing a household fact, such as a password, a code, or a phone number.",
+              "planning_or_advice": "Planning something, or recommending a choice between options.",
+              "social": "Thanks, greetings, acknowledgements, or emoji reactions."
+            }
+          },
+          "several_requests": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` contain more than one separate request for the assistant?",
+            "criteria": {
+              "true": "The sender asks for two or more different things, for example adding a list item and also setting a reminder.",
+              "false": "The sender asks for one thing, even if that one thing names several items, like adding eggs and bread to the same list."
+            }
+          },
+          "refers_back": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` refer to something in `recent_conversation` that must be looked up to understand what is meant?",
+            "criteria": {
+              "true": "The message only makes sense with the earlier conversation, like \"move it to Friday\" or a \"yes\" answering the assistant's question.",
+              "false": "The message is fully understandable on its own."
+            }
+          },
+          "weighs_options": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to compare options, plan around constraints, or recommend something?",
+            "criteria": {
+              "true": "The sender wants a plan made or a recommendation between alternatives, like which day is better or how to organise a weekend.",
+              "false": "The sender asks for a specific fact or a specific action, like what time an event is or adding an item."
+            }
+          },
+          "weighs_options_v2": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to make a plan or to recommend one option over others?",
+            "criteria": {
+              "true": "Answering needs a judgment call between alternatives, like which day is better for a visit or how to organise a weekend with guests.",
+              "false": "The sender wants one thing looked up or done, like the time of an event, adding an item, or finding a slot when both are free."
+            }
+          },
+          "schedule_reasoning": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask to find a time, check who is available, or work around a clash between schedules?",
+            "criteria": {
+              "true": "Answering needs looking across calendars or availability, like finding when both are free.",
+              "false": "The message names its time directly or is not about time, like setting a reminder for tomorrow at 9 or asking when one appointment is."
+            }
+          },
+          "corrects_previous": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` say the assistant's last reply in `recent_conversation` was wrong or misunderstood?",
+            "criteria": {
+              "true": "The sender points out a mistake, like \"no, I said Friday\" after the assistant set Thursday.",
+              "false": "The sender accepts the reply, thanks the assistant, or changes their own plan, like \"move it to Friday\" after Thursday was set as asked."
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "he-12",
+      "lang": "he",
+      "holdout": true,
+      "label": "fast",
+      "routed": "fast",
+      "ms": 138,
+      "model": "jev-1.14.0",
+      "inputTokens": 1232,
+      "answers": {
+        "asks_anything": {
+          "type": "noul",
+          "noul": 0.07
+        },
+        "intent": {
+          "type": "choice",
+          "choice": "social",
+          "confidence": 1,
+          "probabilities": {
+            "list_edit": 0,
+            "reminder": 0,
+            "calendar": 0,
+            "household_fact": 0,
+            "planning_or_advice": 0,
+            "social": 1
+          }
+        },
+        "several_requests": {
+          "type": "noul",
+          "noul": 0.02
+        },
+        "refers_back": {
+          "type": "noul",
+          "noul": 0.67
+        },
+        "weighs_options": {
+          "type": "noul",
+          "noul": 0.02
+        },
+        "weighs_options_v2": {
+          "type": "noul",
+          "noul": 0.03
+        },
+        "schedule_reasoning": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "corrects_previous": {
+          "type": "noul",
+          "noul": 0.03
+        }
+      },
+      "payload": {
+        "model": "jev-1.14.0",
+        "state": {
+          "household": "Two adults (husband, wife) messaging their home assistant on WhatsApp, in Hebrew, English, or a mix of both.",
+          "assistant_can": "edit shared shopping and to-do lists, set reminders, store and recall household facts, read and propose calendar events",
+          "recent_conversation": "assistant: התזכורת לווטרינר נקבעה ליום שני ב-10:00.",
+          "latest_messages": [
+            {
+              "from": "husband",
+              "text": "סבבה"
+            }
+          ]
+        },
+        "questions": {
+          "asks_anything": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to do something or to answer something?",
+            "criteria": {
+              "true": "The sender wants an action taken or a question answered, including a short \"yes\" that accepts an offer the assistant just made.",
+              "false": "The sender only thanks, greets, acknowledges, or reacts to what the assistant already did."
+            }
+          },
+          "intent": {
+            "type": "choice",
+            "instructions": "What is `latest_messages` mainly asking the assistant for?",
+            "criteria": {
+              "list_edit": "Adding, removing, or checking items on a shopping list or to-do list.",
+              "reminder": "Creating, moving, or cancelling a reminder at a time.",
+              "calendar": "Reading, creating, or changing calendar events, or finding a free time in the calendars.",
+              "household_fact": "Looking up or storing a household fact, such as a password, a code, or a phone number.",
+              "planning_or_advice": "Planning something, or recommending a choice between options.",
+              "social": "Thanks, greetings, acknowledgements, or emoji reactions."
+            }
+          },
+          "several_requests": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` contain more than one separate request for the assistant?",
+            "criteria": {
+              "true": "The sender asks for two or more different things, for example adding a list item and also setting a reminder.",
+              "false": "The sender asks for one thing, even if that one thing names several items, like adding eggs and bread to the same list."
+            }
+          },
+          "refers_back": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` refer to something in `recent_conversation` that must be looked up to understand what is meant?",
+            "criteria": {
+              "true": "The message only makes sense with the earlier conversation, like \"move it to Friday\" or a \"yes\" answering the assistant's question.",
+              "false": "The message is fully understandable on its own."
+            }
+          },
+          "weighs_options": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to compare options, plan around constraints, or recommend something?",
+            "criteria": {
+              "true": "The sender wants a plan made or a recommendation between alternatives, like which day is better or how to organise a weekend.",
+              "false": "The sender asks for a specific fact or a specific action, like what time an event is or adding an item."
+            }
+          },
+          "weighs_options_v2": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to make a plan or to recommend one option over others?",
+            "criteria": {
+              "true": "Answering needs a judgment call between alternatives, like which day is better for a visit or how to organise a weekend with guests.",
+              "false": "The sender wants one thing looked up or done, like the time of an event, adding an item, or finding a slot when both are free."
+            }
+          },
+          "schedule_reasoning": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask to find a time, check who is available, or work around a clash between schedules?",
+            "criteria": {
+              "true": "Answering needs looking across calendars or availability, like finding when both are free.",
+              "false": "The message names its time directly or is not about time, like setting a reminder for tomorrow at 9 or asking when one appointment is."
+            }
+          },
+          "corrects_previous": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` say the assistant's last reply in `recent_conversation` was wrong or misunderstood?",
+            "criteria": {
+              "true": "The sender points out a mistake, like \"no, I said Friday\" after the assistant set Thursday.",
+              "false": "The sender accepts the reply, thanks the assistant, or changes their own plan, like \"move it to Friday\" after Thursday was set as asked."
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "he-15",
+      "lang": "he",
+      "holdout": true,
+      "label": "standard",
+      "routed": "standard",
+      "ms": 110,
+      "model": "jev-1.14.0",
+      "inputTokens": 1258,
+      "answers": {
+        "asks_anything": {
+          "type": "noul",
+          "noul": 0.9
+        },
+        "intent": {
+          "type": "choice",
+          "choice": "list_edit",
+          "confidence": 1,
+          "probabilities": {
+            "list_edit": 1,
+            "reminder": 0,
+            "calendar": 0,
+            "household_fact": 0,
+            "planning_or_advice": 0,
+            "social": 0
+          }
+        },
+        "several_requests": {
+          "type": "noul",
+          "noul": 0.06
+        },
+        "refers_back": {
+          "type": "noul",
+          "noul": 0.88
+        },
+        "weighs_options": {
+          "type": "noul",
+          "noul": 0.03
+        },
+        "weighs_options_v2": {
+          "type": "noul",
+          "noul": 0.03
+        },
+        "schedule_reasoning": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "corrects_previous": {
+          "type": "noul",
+          "noul": 0.98
+        }
+      },
+      "payload": {
+        "model": "jev-1.14.0",
+        "state": {
+          "household": "Two adults (husband, wife) messaging their home assistant on WhatsApp, in Hebrew, English, or a mix of both.",
+          "assistant_can": "edit shared shopping and to-do lists, set reminders, store and recall household facts, read and propose calendar events",
+          "recent_conversation": "wife: תוסיף חלב סויה לרשימה\nassistant: הוספתי חלב לרשימת הקניות.",
+          "latest_messages": [
+            {
+              "from": "wife",
+              "text": "לא, אמרתי חלב סויה, לא חלב רגיל"
+            }
+          ]
+        },
+        "questions": {
+          "asks_anything": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to do something or to answer something?",
+            "criteria": {
+              "true": "The sender wants an action taken or a question answered, including a short \"yes\" that accepts an offer the assistant just made.",
+              "false": "The sender only thanks, greets, acknowledges, or reacts to what the assistant already did."
+            }
+          },
+          "intent": {
+            "type": "choice",
+            "instructions": "What is `latest_messages` mainly asking the assistant for?",
+            "criteria": {
+              "list_edit": "Adding, removing, or checking items on a shopping list or to-do list.",
+              "reminder": "Creating, moving, or cancelling a reminder at a time.",
+              "calendar": "Reading, creating, or changing calendar events, or finding a free time in the calendars.",
+              "household_fact": "Looking up or storing a household fact, such as a password, a code, or a phone number.",
+              "planning_or_advice": "Planning something, or recommending a choice between options.",
+              "social": "Thanks, greetings, acknowledgements, or emoji reactions."
+            }
+          },
+          "several_requests": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` contain more than one separate request for the assistant?",
+            "criteria": {
+              "true": "The sender asks for two or more different things, for example adding a list item and also setting a reminder.",
+              "false": "The sender asks for one thing, even if that one thing names several items, like adding eggs and bread to the same list."
+            }
+          },
+          "refers_back": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` refer to something in `recent_conversation` that must be looked up to understand what is meant?",
+            "criteria": {
+              "true": "The message only makes sense with the earlier conversation, like \"move it to Friday\" or a \"yes\" answering the assistant's question.",
+              "false": "The message is fully understandable on its own."
+            }
+          },
+          "weighs_options": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to compare options, plan around constraints, or recommend something?",
+            "criteria": {
+              "true": "The sender wants a plan made or a recommendation between alternatives, like which day is better or how to organise a weekend.",
+              "false": "The sender asks for a specific fact or a specific action, like what time an event is or adding an item."
+            }
+          },
+          "weighs_options_v2": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to make a plan or to recommend one option over others?",
+            "criteria": {
+              "true": "Answering needs a judgment call between alternatives, like which day is better for a visit or how to organise a weekend with guests.",
+              "false": "The sender wants one thing looked up or done, like the time of an event, adding an item, or finding a slot when both are free."
+            }
+          },
+          "schedule_reasoning": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask to find a time, check who is available, or work around a clash between schedules?",
+            "criteria": {
+              "true": "Answering needs looking across calendars or availability, like finding when both are free.",
+              "false": "The message names its time directly or is not about time, like setting a reminder for tomorrow at 9 or asking when one appointment is."
+            }
+          },
+          "corrects_previous": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` say the assistant's last reply in `recent_conversation` was wrong or misunderstood?",
+            "criteria": {
+              "true": "The sender points out a mistake, like \"no, I said Friday\" after the assistant set Thursday.",
+              "false": "The sender accepts the reply, thanks the assistant, or changes their own plan, like \"move it to Friday\" after Thursday was set as asked."
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "mx-03",
+      "lang": "mixed",
+      "holdout": true,
+      "label": "fast",
+      "routed": "fast",
+      "ms": 84,
+      "model": "jev-1.14.0",
+      "inputTokens": 1202,
+      "answers": {
+        "asks_anything": {
+          "type": "noul",
+          "noul": 0.99
+        },
+        "intent": {
+          "type": "choice",
+          "choice": "list_edit",
+          "confidence": 1,
+          "probabilities": {
+            "list_edit": 1,
+            "reminder": 0,
+            "calendar": 0,
+            "household_fact": 0,
+            "planning_or_advice": 0,
+            "social": 0
+          }
+        },
+        "several_requests": {
+          "type": "noul",
+          "noul": 0.06
+        },
+        "refers_back": {
+          "type": "noul",
+          "noul": 0.04
+        },
+        "weighs_options": {
+          "type": "noul",
+          "noul": 0.02
+        },
+        "weighs_options_v2": {
+          "type": "noul",
+          "noul": 0.02
+        },
+        "schedule_reasoning": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "corrects_previous": {
+          "type": "noul",
+          "noul": 0.02
+        }
+      },
+      "payload": {
+        "model": "jev-1.14.0",
+        "state": {
+          "household": "Two adults (husband, wife) messaging their home assistant on WhatsApp, in Hebrew, English, or a mix of both.",
+          "assistant_can": "edit shared shopping and to-do lists, set reminders, store and recall household facts, read and propose calendar events",
+          "recent_conversation": "(none)",
+          "latest_messages": [
+            {
+              "from": "wife",
+              "text": "תוסיף eggs ו-bread"
+            }
+          ]
+        },
+        "questions": {
+          "asks_anything": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to do something or to answer something?",
+            "criteria": {
+              "true": "The sender wants an action taken or a question answered, including a short \"yes\" that accepts an offer the assistant just made.",
+              "false": "The sender only thanks, greets, acknowledges, or reacts to what the assistant already did."
+            }
+          },
+          "intent": {
+            "type": "choice",
+            "instructions": "What is `latest_messages` mainly asking the assistant for?",
+            "criteria": {
+              "list_edit": "Adding, removing, or checking items on a shopping list or to-do list.",
+              "reminder": "Creating, moving, or cancelling a reminder at a time.",
+              "calendar": "Reading, creating, or changing calendar events, or finding a free time in the calendars.",
+              "household_fact": "Looking up or storing a household fact, such as a password, a code, or a phone number.",
+              "planning_or_advice": "Planning something, or recommending a choice between options.",
+              "social": "Thanks, greetings, acknowledgements, or emoji reactions."
+            }
+          },
+          "several_requests": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` contain more than one separate request for the assistant?",
+            "criteria": {
+              "true": "The sender asks for two or more different things, for example adding a list item and also setting a reminder.",
+              "false": "The sender asks for one thing, even if that one thing names several items, like adding eggs and bread to the same list."
+            }
+          },
+          "refers_back": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` refer to something in `recent_conversation` that must be looked up to understand what is meant?",
+            "criteria": {
+              "true": "The message only makes sense with the earlier conversation, like \"move it to Friday\" or a \"yes\" answering the assistant's question.",
+              "false": "The message is fully understandable on its own."
+            }
+          },
+          "weighs_options": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to compare options, plan around constraints, or recommend something?",
+            "criteria": {
+              "true": "The sender wants a plan made or a recommendation between alternatives, like which day is better or how to organise a weekend.",
+              "false": "The sender asks for a specific fact or a specific action, like what time an event is or adding an item."
+            }
+          },
+          "weighs_options_v2": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to make a plan or to recommend one option over others?",
+            "criteria": {
+              "true": "Answering needs a judgment call between alternatives, like which day is better for a visit or how to organise a weekend with guests.",
+              "false": "The sender wants one thing looked up or done, like the time of an event, adding an item, or finding a slot when both are free."
+            }
+          },
+          "schedule_reasoning": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask to find a time, check who is available, or work around a clash between schedules?",
+            "criteria": {
+              "true": "Answering needs looking across calendars or availability, like finding when both are free.",
+              "false": "The message names its time directly or is not about time, like setting a reminder for tomorrow at 9 or asking when one appointment is."
+            }
+          },
+          "corrects_previous": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` say the assistant's last reply in `recent_conversation` was wrong or misunderstood?",
+            "criteria": {
+              "true": "The sender points out a mistake, like \"no, I said Friday\" after the assistant set Thursday.",
+              "false": "The sender accepts the reply, thanks the assistant, or changes their own plan, like \"move it to Friday\" after Thursday was set as asked."
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "mx-06",
+      "lang": "mixed",
+      "holdout": true,
+      "label": "standard",
+      "routed": "standard",
+      "ms": 78,
+      "model": "jev-1.14.0",
+      "inputTokens": 1240,
+      "answers": {
+        "asks_anything": {
+          "type": "noul",
+          "noul": 0.99
+        },
+        "intent": {
+          "type": "choice",
+          "choice": "reminder",
+          "confidence": 1,
+          "probabilities": {
+            "list_edit": 0,
+            "reminder": 1,
+            "calendar": 0,
+            "household_fact": 0,
+            "planning_or_advice": 0,
+            "social": 0
+          }
+        },
+        "several_requests": {
+          "type": "noul",
+          "noul": 0.03
+        },
+        "refers_back": {
+          "type": "noul",
+          "noul": 0.97
+        },
+        "weighs_options": {
+          "type": "noul",
+          "noul": 0.03
+        },
+        "weighs_options_v2": {
+          "type": "noul",
+          "noul": 0.03
+        },
+        "schedule_reasoning": {
+          "type": "noul",
+          "noul": 0.04
+        },
+        "corrects_previous": {
+          "type": "noul",
+          "noul": 0.13
+        }
+      },
+      "payload": {
+        "model": "jev-1.14.0",
+        "state": {
+          "household": "Two adults (husband, wife) messaging their home assistant on WhatsApp, in Hebrew, English, or a mix of both.",
+          "assistant_can": "edit shared shopping and to-do lists, set reminders, store and recall household facts, read and propose calendar events",
+          "recent_conversation": "husband: remind me thursday 5pm to pick up the dry cleaning\nassistant: Done — reminder set for Thursday at 5:00 PM to pick up the dry cleaning.",
+          "latest_messages": [
+            {
+              "from": "husband",
+              "text": "תזיז את זה ל-Friday"
+            }
+          ]
+        },
+        "questions": {
+          "asks_anything": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to do something or to answer something?",
+            "criteria": {
+              "true": "The sender wants an action taken or a question answered, including a short \"yes\" that accepts an offer the assistant just made.",
+              "false": "The sender only thanks, greets, acknowledges, or reacts to what the assistant already did."
+            }
+          },
+          "intent": {
+            "type": "choice",
+            "instructions": "What is `latest_messages` mainly asking the assistant for?",
+            "criteria": {
+              "list_edit": "Adding, removing, or checking items on a shopping list or to-do list.",
+              "reminder": "Creating, moving, or cancelling a reminder at a time.",
+              "calendar": "Reading, creating, or changing calendar events, or finding a free time in the calendars.",
+              "household_fact": "Looking up or storing a household fact, such as a password, a code, or a phone number.",
+              "planning_or_advice": "Planning something, or recommending a choice between options.",
+              "social": "Thanks, greetings, acknowledgements, or emoji reactions."
+            }
+          },
+          "several_requests": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` contain more than one separate request for the assistant?",
+            "criteria": {
+              "true": "The sender asks for two or more different things, for example adding a list item and also setting a reminder.",
+              "false": "The sender asks for one thing, even if that one thing names several items, like adding eggs and bread to the same list."
+            }
+          },
+          "refers_back": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` refer to something in `recent_conversation` that must be looked up to understand what is meant?",
+            "criteria": {
+              "true": "The message only makes sense with the earlier conversation, like \"move it to Friday\" or a \"yes\" answering the assistant's question.",
+              "false": "The message is fully understandable on its own."
+            }
+          },
+          "weighs_options": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to compare options, plan around constraints, or recommend something?",
+            "criteria": {
+              "true": "The sender wants a plan made or a recommendation between alternatives, like which day is better or how to organise a weekend.",
+              "false": "The sender asks for a specific fact or a specific action, like what time an event is or adding an item."
+            }
+          },
+          "weighs_options_v2": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to make a plan or to recommend one option over others?",
+            "criteria": {
+              "true": "Answering needs a judgment call between alternatives, like which day is better for a visit or how to organise a weekend with guests.",
+              "false": "The sender wants one thing looked up or done, like the time of an event, adding an item, or finding a slot when both are free."
+            }
+          },
+          "schedule_reasoning": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask to find a time, check who is available, or work around a clash between schedules?",
+            "criteria": {
+              "true": "Answering needs looking across calendars or availability, like finding when both are free.",
+              "false": "The message names its time directly or is not about time, like setting a reminder for tomorrow at 9 or asking when one appointment is."
+            }
+          },
+          "corrects_previous": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` say the assistant's last reply in `recent_conversation` was wrong or misunderstood?",
+            "criteria": {
+              "true": "The sender points out a mistake, like \"no, I said Friday\" after the assistant set Thursday.",
+              "false": "The sender accepts the reply, thanks the assistant, or changes their own plan, like \"move it to Friday\" after Thursday was set as asked."
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "mx-09",
+      "lang": "mixed",
+      "holdout": true,
+      "label": "deep",
+      "routed": "deep",
+      "ms": 94,
+      "model": "jev-1.14.0",
+      "inputTokens": 1214,
+      "answers": {
+        "asks_anything": {
+          "type": "noul",
+          "noul": 0.98
+        },
+        "intent": {
+          "type": "choice",
+          "choice": "calendar",
+          "confidence": 0.52,
+          "probabilities": {
+            "list_edit": 0,
+            "reminder": 0,
+            "calendar": 0.6,
+            "household_fact": 0,
+            "planning_or_advice": 0.4,
+            "social": 0
+          }
+        },
+        "several_requests": {
+          "type": "noul",
+          "noul": 0.07
+        },
+        "refers_back": {
+          "type": "noul",
+          "noul": 0.05
+        },
+        "weighs_options": {
+          "type": "noul",
+          "noul": 0.98
+        },
+        "weighs_options_v2": {
+          "type": "noul",
+          "noul": 0.97
+        },
+        "schedule_reasoning": {
+          "type": "noul",
+          "noul": 0.9
+        },
+        "corrects_previous": {
+          "type": "noul",
+          "noul": 0.02
+        }
+      },
+      "payload": {
+        "model": "jev-1.14.0",
+        "state": {
+          "household": "Two adults (husband, wife) messaging their home assistant on WhatsApp, in Hebrew, English, or a mix of both.",
+          "assistant_can": "edit shared shopping and to-do lists, set reminders, store and recall household facts, read and propose calendar events",
+          "recent_conversation": "(none)",
+          "latest_messages": [
+            {
+              "from": "wife",
+              "text": "should we go to סבתא on Friday or Saturday? מה עדיף given the calendars"
+            }
+          ]
+        },
+        "questions": {
+          "asks_anything": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to do something or to answer something?",
+            "criteria": {
+              "true": "The sender wants an action taken or a question answered, including a short \"yes\" that accepts an offer the assistant just made.",
+              "false": "The sender only thanks, greets, acknowledges, or reacts to what the assistant already did."
+            }
+          },
+          "intent": {
+            "type": "choice",
+            "instructions": "What is `latest_messages` mainly asking the assistant for?",
+            "criteria": {
+              "list_edit": "Adding, removing, or checking items on a shopping list or to-do list.",
+              "reminder": "Creating, moving, or cancelling a reminder at a time.",
+              "calendar": "Reading, creating, or changing calendar events, or finding a free time in the calendars.",
+              "household_fact": "Looking up or storing a household fact, such as a password, a code, or a phone number.",
+              "planning_or_advice": "Planning something, or recommending a choice between options.",
+              "social": "Thanks, greetings, acknowledgements, or emoji reactions."
+            }
+          },
+          "several_requests": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` contain more than one separate request for the assistant?",
+            "criteria": {
+              "true": "The sender asks for two or more different things, for example adding a list item and also setting a reminder.",
+              "false": "The sender asks for one thing, even if that one thing names several items, like adding eggs and bread to the same list."
+            }
+          },
+          "refers_back": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` refer to something in `recent_conversation` that must be looked up to understand what is meant?",
+            "criteria": {
+              "true": "The message only makes sense with the earlier conversation, like \"move it to Friday\" or a \"yes\" answering the assistant's question.",
+              "false": "The message is fully understandable on its own."
+            }
+          },
+          "weighs_options": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to compare options, plan around constraints, or recommend something?",
+            "criteria": {
+              "true": "The sender wants a plan made or a recommendation between alternatives, like which day is better or how to organise a weekend.",
+              "false": "The sender asks for a specific fact or a specific action, like what time an event is or adding an item."
+            }
+          },
+          "weighs_options_v2": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to make a plan or to recommend one option over others?",
+            "criteria": {
+              "true": "Answering needs a judgment call between alternatives, like which day is better for a visit or how to organise a weekend with guests.",
+              "false": "The sender wants one thing looked up or done, like the time of an event, adding an item, or finding a slot when both are free."
+            }
+          },
+          "schedule_reasoning": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask to find a time, check who is available, or work around a clash between schedules?",
+            "criteria": {
+              "true": "Answering needs looking across calendars or availability, like finding when both are free.",
+              "false": "The message names its time directly or is not about time, like setting a reminder for tomorrow at 9 or asking when one appointment is."
+            }
+          },
+          "corrects_previous": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` say the assistant's last reply in `recent_conversation` was wrong or misunderstood?",
+            "criteria": {
+              "true": "The sender points out a mistake, like \"no, I said Friday\" after the assistant set Thursday.",
+              "false": "The sender accepts the reply, thanks the assistant, or changes their own plan, like \"move it to Friday\" after Thursday was set as asked."
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "mx-12",
+      "lang": "mixed",
+      "holdout": true,
+      "label": "fast",
+      "routed": "fast",
+      "ms": 100,
+      "model": "jev-1.14.0",
+      "inputTokens": 1213,
+      "answers": {
+        "asks_anything": {
+          "type": "noul",
+          "noul": 0.07
+        },
+        "intent": {
+          "type": "choice",
+          "choice": "social",
+          "confidence": 1,
+          "probabilities": {
+            "list_edit": 0,
+            "reminder": 0,
+            "calendar": 0,
+            "household_fact": 0,
+            "planning_or_advice": 0,
+            "social": 1
+          }
+        },
+        "several_requests": {
+          "type": "noul",
+          "noul": 0.02
+        },
+        "refers_back": {
+          "type": "noul",
+          "noul": 0.78
+        },
+        "weighs_options": {
+          "type": "noul",
+          "noul": 0.02
+        },
+        "weighs_options_v2": {
+          "type": "noul",
+          "noul": 0.02
+        },
+        "schedule_reasoning": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "corrects_previous": {
+          "type": "noul",
+          "noul": 0.02
+        }
+      },
+      "payload": {
+        "model": "jev-1.14.0",
+        "state": {
+          "household": "Two adults (husband, wife) messaging their home assistant on WhatsApp, in Hebrew, English, or a mix of both.",
+          "assistant_can": "edit shared shopping and to-do lists, set reminders, store and recall household facts, read and propose calendar events",
+          "recent_conversation": "assistant: Your reminder for the vet is set for Monday at 10:00 AM.",
+          "latest_messages": [
+            {
+              "from": "husband",
+              "text": "👍"
+            }
+          ]
+        },
+        "questions": {
+          "asks_anything": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to do something or to answer something?",
+            "criteria": {
+              "true": "The sender wants an action taken or a question answered, including a short \"yes\" that accepts an offer the assistant just made.",
+              "false": "The sender only thanks, greets, acknowledges, or reacts to what the assistant already did."
+            }
+          },
+          "intent": {
+            "type": "choice",
+            "instructions": "What is `latest_messages` mainly asking the assistant for?",
+            "criteria": {
+              "list_edit": "Adding, removing, or checking items on a shopping list or to-do list.",
+              "reminder": "Creating, moving, or cancelling a reminder at a time.",
+              "calendar": "Reading, creating, or changing calendar events, or finding a free time in the calendars.",
+              "household_fact": "Looking up or storing a household fact, such as a password, a code, or a phone number.",
+              "planning_or_advice": "Planning something, or recommending a choice between options.",
+              "social": "Thanks, greetings, acknowledgements, or emoji reactions."
+            }
+          },
+          "several_requests": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` contain more than one separate request for the assistant?",
+            "criteria": {
+              "true": "The sender asks for two or more different things, for example adding a list item and also setting a reminder.",
+              "false": "The sender asks for one thing, even if that one thing names several items, like adding eggs and bread to the same list."
+            }
+          },
+          "refers_back": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` refer to something in `recent_conversation` that must be looked up to understand what is meant?",
+            "criteria": {
+              "true": "The message only makes sense with the earlier conversation, like \"move it to Friday\" or a \"yes\" answering the assistant's question.",
+              "false": "The message is fully understandable on its own."
+            }
+          },
+          "weighs_options": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to compare options, plan around constraints, or recommend something?",
+            "criteria": {
+              "true": "The sender wants a plan made or a recommendation between alternatives, like which day is better or how to organise a weekend.",
+              "false": "The sender asks for a specific fact or a specific action, like what time an event is or adding an item."
+            }
+          },
+          "weighs_options_v2": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to make a plan or to recommend one option over others?",
+            "criteria": {
+              "true": "Answering needs a judgment call between alternatives, like which day is better for a visit or how to organise a weekend with guests.",
+              "false": "The sender wants one thing looked up or done, like the time of an event, adding an item, or finding a slot when both are free."
+            }
+          },
+          "schedule_reasoning": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask to find a time, check who is available, or work around a clash between schedules?",
+            "criteria": {
+              "true": "Answering needs looking across calendars or availability, like finding when both are free.",
+              "false": "The message names its time directly or is not about time, like setting a reminder for tomorrow at 9 or asking when one appointment is."
+            }
+          },
+          "corrects_previous": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` say the assistant's last reply in `recent_conversation` was wrong or misunderstood?",
+            "criteria": {
+              "true": "The sender points out a mistake, like \"no, I said Friday\" after the assistant set Thursday.",
+              "false": "The sender accepts the reply, thanks the assistant, or changes their own plan, like \"move it to Friday\" after Thursday was set as asked."
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "mx-15",
+      "lang": "mixed",
+      "holdout": true,
+      "label": "standard",
+      "routed": "standard",
+      "ms": 104,
+      "model": "jev-1.14.0",
+      "inputTokens": 1252,
+      "answers": {
+        "asks_anything": {
+          "type": "noul",
+          "noul": 0.96
+        },
+        "intent": {
+          "type": "choice",
+          "choice": "calendar",
+          "confidence": 1,
+          "probabilities": {
+            "list_edit": 0,
+            "reminder": 0,
+            "calendar": 1,
+            "household_fact": 0,
+            "planning_or_advice": 0,
+            "social": 0
+          }
+        },
+        "several_requests": {
+          "type": "noul",
+          "noul": 0.06
+        },
+        "refers_back": {
+          "type": "noul",
+          "noul": 0.89
+        },
+        "weighs_options": {
+          "type": "noul",
+          "noul": 0.04
+        },
+        "weighs_options_v2": {
+          "type": "noul",
+          "noul": 0.05
+        },
+        "schedule_reasoning": {
+          "type": "noul",
+          "noul": 0.03
+        },
+        "corrects_previous": {
+          "type": "noul",
+          "noul": 0.98
+        }
+      },
+      "payload": {
+        "model": "jev-1.14.0",
+        "state": {
+          "household": "Two adults (husband, wife) messaging their home assistant on WhatsApp, in Hebrew, English, or a mix of both.",
+          "assistant_can": "edit shared shopping and to-do lists, set reminders, store and recall household facts, read and propose calendar events",
+          "recent_conversation": "husband: put dinner with the Levys on wife's calendar saturday 8pm\nassistant: I've proposed adding \"Dinner with the Levys\" to husband's calendar on Saturday at 8:00 PM.",
+          "latest_messages": [
+            {
+              "from": "husband",
+              "text": "no no, זה צריך להיות ב-wife's calendar"
+            }
+          ]
+        },
+        "questions": {
+          "asks_anything": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to do something or to answer something?",
+            "criteria": {
+              "true": "The sender wants an action taken or a question answered, including a short \"yes\" that accepts an offer the assistant just made.",
+              "false": "The sender only thanks, greets, acknowledges, or reacts to what the assistant already did."
+            }
+          },
+          "intent": {
+            "type": "choice",
+            "instructions": "What is `latest_messages` mainly asking the assistant for?",
+            "criteria": {
+              "list_edit": "Adding, removing, or checking items on a shopping list or to-do list.",
+              "reminder": "Creating, moving, or cancelling a reminder at a time.",
+              "calendar": "Reading, creating, or changing calendar events, or finding a free time in the calendars.",
+              "household_fact": "Looking up or storing a household fact, such as a password, a code, or a phone number.",
+              "planning_or_advice": "Planning something, or recommending a choice between options.",
+              "social": "Thanks, greetings, acknowledgements, or emoji reactions."
+            }
+          },
+          "several_requests": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` contain more than one separate request for the assistant?",
+            "criteria": {
+              "true": "The sender asks for two or more different things, for example adding a list item and also setting a reminder.",
+              "false": "The sender asks for one thing, even if that one thing names several items, like adding eggs and bread to the same list."
+            }
+          },
+          "refers_back": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` refer to something in `recent_conversation` that must be looked up to understand what is meant?",
+            "criteria": {
+              "true": "The message only makes sense with the earlier conversation, like \"move it to Friday\" or a \"yes\" answering the assistant's question.",
+              "false": "The message is fully understandable on its own."
+            }
+          },
+          "weighs_options": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to compare options, plan around constraints, or recommend something?",
+            "criteria": {
+              "true": "The sender wants a plan made or a recommendation between alternatives, like which day is better or how to organise a weekend.",
+              "false": "The sender asks for a specific fact or a specific action, like what time an event is or adding an item."
+            }
+          },
+          "weighs_options_v2": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask the assistant to make a plan or to recommend one option over others?",
+            "criteria": {
+              "true": "Answering needs a judgment call between alternatives, like which day is better for a visit or how to organise a weekend with guests.",
+              "false": "The sender wants one thing looked up or done, like the time of an event, adding an item, or finding a slot when both are free."
+            }
+          },
+          "schedule_reasoning": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` ask to find a time, check who is available, or work around a clash between schedules?",
+            "criteria": {
+              "true": "Answering needs looking across calendars or availability, like finding when both are free.",
+              "false": "The message names its time directly or is not about time, like setting a reminder for tomorrow at 9 or asking when one appointment is."
+            }
+          },
+          "corrects_previous": {
+            "type": "noul",
+            "instructions": "Does `latest_messages` say the assistant's last reply in `recent_conversation` was wrong or misunderstood?",
+            "criteria": {
+              "true": "The sender points out a mistake, like \"no, I said Friday\" after the assistant set Thursday.",
+              "false": "The sender accepts the reply, thanks the assistant, or changes their own plan, like \"move it to Friday\" after Thursday was set as asked."
+            }
+          }
+        }
+      }
+    }
+  ]
+}

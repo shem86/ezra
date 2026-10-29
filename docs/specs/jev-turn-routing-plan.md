@@ -67,7 +67,7 @@ against (`pnpm eval` 8/8):
 | `intent` | Choice | What is `latest_messages` mainly asking for? — `list_edit` · `reminder` · `calendar` · `household_fact` · `planning_or_advice` · `social` (thanks, greetings, acknowledgements) |
 | `several_requests` | Noul | Does `latest_messages` contain more than one separate request? |
 | `refers_back` | Noul | Does `latest_messages` refer to something earlier in `recent_conversation` that must be looked up to understand it? (e.g. "move it to Thursday") |
-| `weighs_options` | Noul | Does `latest_messages` ask the assistant to compare options, plan around constraints, or recommend something? |
+| `weighs_options` | Noul | Does `latest_messages` ask the assistant to make a plan or to recommend one option over others? *(v2 — Phase 1: v1's "plan around constraints" pulled "find a time we're both free" to `deep`; the slot search is now the named `false` case)* |
 | `schedule_reasoning` | Noul | Does `latest_messages` ask to find a time, check availability, or resolve a clash between schedules? |
 
 One more question rides along in the same request: speculative, with no extra
@@ -79,7 +79,8 @@ round trip, and **not** read by `decideTier`. It exists only for monitoring
 | `corrects_previous` | Noul | Does `latest_messages` say the assistant's last reply in `recent_conversation` was wrong or misunderstood? |
 
 Criteria name the confusing case concretely. For example, for `weighs_options`:
-*"Asking what time an event is, is not weighing options."* Every `false`
+*"…like the time of an event, adding an item, or finding a slot when both are free"*
+is its `false` criterion. Every `false`
 criterion is written as a situation, not as "not X".
 
 ### 3c. The table (code: `src/agent/turn-route.ts`, a pure function)
@@ -385,7 +386,7 @@ are structure-checked in CI, and accuracy is report-only and on-demand.
     what the household asks. Those show up in production on the §5b router
     health panel (correction rate, tier mix), not in the eval.
 
-**Phase 1 — live probe, synthetic data only.**
+**Phase 1 — live probe, synthetic data only.** ✅ PASS 2026-10-29: holdout 15/15, Hebrew at parity, p95 ≤ 369 ms. Verdict in [spike-results](../spike-results.md).
 - About 40 hand-written cases, a third each English, Hebrew, and code-switched,
   built on the T32/T38 fixture style. They cover each tier plus hard cases ("move
   it to Thursday", "remind me AND add eggs", "what should we do Saturday given
