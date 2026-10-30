@@ -146,7 +146,8 @@ describe('create_calendar_event through the approval machinery (T40)', () => {
 
     // The prompt the spouse quotes reads humanly, not as raw JSON.
     expect(fx.promptText).toContain('תור לרופא שיניים');
-    expect(fx.promptText).toContain('2026-06-25');
+    expect(fx.promptText).toContain('Thu, Jun 25 · 16:00–17:00');
+    expect(fx.promptText).not.toContain('2026-06-25');
     expect(fx.promptText).toContain("wife's calendar");
     expect(fx.promptText).not.toContain('{');
 

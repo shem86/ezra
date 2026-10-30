@@ -212,7 +212,7 @@ describe('handleTurn skeleton (T22)', () => {
     // stamped as prompt_message_id.
     const closing = messages[messages.length - 1];
     expect(closing?.role).toBe('assistant');
-    expect(closing && 'content' in closing ? closing.content : '').toContain(actionId);
+    expect(closing && 'content' in closing ? closing.content : '').not.toContain(actionId);
     expect(closing && 'content' in closing ? closing.content : '').toMatch(/reply to this message/i);
     assertEveryToolUseAnswered(messages);
 
@@ -232,7 +232,7 @@ describe('handleTurn skeleton (T22)', () => {
     assertEveryToolUseAnswered(messages);
     const closing = messages[messages.length - 1];
     expect(closing?.role).toBe('assistant');
-    expect(closing && 'content' in closing ? closing.content : '').toContain(actionId);
+    expect(closing && 'content' in closing ? closing.content : '').not.toContain(actionId);
 
     const parked = await db.query('SELECT status FROM pending_actions WHERE action_id = $1', [actionId]);
     expect(parked.rows).toEqual([{ status: 'pending' }]);
@@ -443,8 +443,8 @@ describe('relatedness routing (T36)', () => {
     const messages = await transcript(conversationId);
     const closing = messages.at(-1);
     expect(closing?.role).toBe('assistant');
-    expect(closing && 'content' in closing ? closing.content : '').toContain('Approval needed');
-    expect(closing && 'content' in closing ? closing.content : '').toContain(actionId);
+    expect(closing && 'content' in closing ? closing.content : '').toContain('Approve? Reply to this message');
+    expect(closing && 'content' in closing ? closing.content : '').not.toContain(actionId);
     expect(closing && 'content' in closing ? closing.content : '').toContain('refined-item');
   });
 

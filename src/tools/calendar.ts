@@ -44,6 +44,24 @@ function nextDay(date: string): { year: number; month: number; day: number } {
   return { year: next.getUTCFullYear(), month: next.getUTCMonth() + 1, day: next.getUTCDate() };
 }
 
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * "Sat, Oct 31 · 19:00–21:00" for the approval prompt. Pure string/UTC
+ * arithmetic (summarize renders inside the workflow on replay). Deliberately
+ * not ISO: WhatsApp auto-links YYYY-MM-DD dates.
+ */
+function whenLabel(date: string, time: string, durationMin: number): string {
+  const { year, month, day } = parseDate(date);
+  const weekday = WEEKDAYS[new Date(Date.UTC(year, month - 1, day)).getUTCDay()];
+  const [hour, minute] = time.split(':').map(Number);
+  const endTotal = hour! * 60 + minute! + durationMin;
+  const end = `${String(Math.floor(endTotal / 60) % 24).padStart(2, '0')}:${String(endTotal % 60).padStart(2, '0')}`;
+  const overnight = endTotal >= 1440 ? ' (next day)' : '';
+  return `${weekday}, ${MONTHS[month - 1]} ${day} · ${time}–${end}${overnight}`;
+}
+
 function daysBetween(fromDate: string, toDate: string): number {
   const from = parseDate(fromDate);
   const to = parseDate(toDate);
@@ -87,8 +105,10 @@ export const createCalendarEventTool = defineTool<CalendarToolDeps, typeof creat
   schema: createCalendarEventSchema,
   riskTier: 'confirm-before',
   externalId: (ctx) => deriveCalendarEventId(ctx.actionId),
+  // Title on its own line: a Hebrew title spliced mid-sentence between quotes
+  // garbles bidi rendering in WhatsApp; alone on a line it renders RTL cleanly.
   summarize: (args) =>
-    `"${args.title}" on ${args.date} at ${args.time} (${args.durationMin} min, ${args.owner}'s calendar)`,
+    `Add to ${args.owner}'s calendar:\n${args.title}\n${whenLabel(args.date, args.time, args.durationMin)}`,
   // Slot still free on the TARGET calendar at execute time — ignoring our own
   // deterministic id, so a replay after a landed-but-uncommitted create does
   // not read its own event as a conflict.

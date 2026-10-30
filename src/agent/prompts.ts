@@ -150,7 +150,8 @@ export function renderPendingActionsDigest(
       entry.expiresAt === undefined
         ? ''
         : ` (expires ${easternTime.format(entry.expiresAt)} Eastern)`;
-    return `- [${entry.actionId}] ${entry.toolName}: ${entry.summary}${expiry}`;
+    const summary = entry.summary.replace(/\n+/g, ' — ');
+    return `- [${entry.actionId}] ${entry.toolName}: ${summary}${expiry}`;
   });
   return `## Awaiting approval\nThese proposed actions are waiting for a yes/no. Mention them only when relevant; never treat them as done:\n${lines.join('\n')}`;
 }
@@ -160,13 +161,12 @@ export function renderPendingActionsDigest(
  * given its inputs — the workflow appends it during replay, so no clock, no
  * randomness. The send receipt of THIS message becomes prompt_message_id,
  * which is what a quoted reply approves (T35) even with several outstanding.
+ * The binding keys on that message id, never the text — so the user-facing
+ * copy carries no action id or tool name (the id embeds the group JID, which
+ * WhatsApp auto-links). The model still sees both in the pending digest.
  */
-export function renderApprovalPrompt(entry: {
-  readonly actionId: string;
-  readonly toolName: string;
-  readonly summary: string;
-}): string {
-  return `Approval needed: ${entry.toolName} ${entry.summary}\nReply to this message to approve or decline. [${entry.actionId}]`;
+export function renderApprovalPrompt(entry: { readonly summary: string }): string {
+  return `${entry.summary}\n\nApprove? Reply to this message with yes or no.`;
 }
 
 /**
