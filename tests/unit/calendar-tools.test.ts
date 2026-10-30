@@ -200,11 +200,21 @@ describe('create_calendar_event', () => {
       owner: 'husband',
     });
     const summary = createCalendarEventTool.summarize!(args);
-    expect(summary).toContain('תור לרופא שיניים');
-    expect(summary).toContain('2026-06-25');
-    expect(summary).toContain('16:00');
-    expect(summary).toContain('husband');
-    expect(summary).not.toContain('{');
+    expect(summary).toBe("Add to husband's calendar:\nתור לרופא שיניים\nThu, Jun 25 · 16:00–17:00");
+  });
+
+  it('keeps the title off quote marks and the date off ISO (WhatsApp auto-links it)', () => {
+    const args = createCalendarEventTool.schema.parse({
+      title: 'לצאת לספוג אווירה של האלווין 🎃',
+      date: '2026-10-31',
+      time: '23:30',
+      durationMin: 120,
+      owner: 'husband',
+    });
+    const summary = createCalendarEventTool.summarize!(args);
+    expect(summary.split('\n')[1]).toBe('לצאת לספוג אווירה של האלווין 🎃');
+    expect(summary).not.toContain('2026-10-31');
+    expect(summary).toContain('Sat, Oct 31 · 23:30–01:30 (next day)');
   });
 
   it('tells the model it only proposes — never to report the event as booked', () => {

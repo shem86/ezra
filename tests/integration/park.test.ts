@@ -93,9 +93,9 @@ describe('production park (T34)', () => {
     expect(sent).toEqual([deriveActionId(conv2, callA.id), deriveActionId(conv2, callB.id)]);
     expect(transport.sent).toHaveLength(2);
     expect(transport.sent[0]?.conversationId).toBe(conv2);
-    expect(transport.sent[0]?.text).toContain(deriveActionId(conv2, callA.id));
+    expect(transport.sent[0]?.text).not.toContain(deriveActionId(conv2, callA.id));
     expect(transport.sent[0]?.text).toContain('first');
-    expect(transport.sent[1]?.text).toContain(deriveActionId(conv2, callB.id));
+    expect(transport.sent[1]?.text).toContain('second');
 
     const rowA = await getPendingAction(db, deriveActionId(conv2, callA.id));
     const rowB = await getPendingAction(db, deriveActionId(conv2, callB.id));

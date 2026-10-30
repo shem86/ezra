@@ -365,7 +365,7 @@ export function makeHandleTurnWorkflow(
       }
 
       let parked = false;
-      const parkedCalls: Array<{ readonly call: ToolCall; readonly actionId: string }> = [];
+      const parkedCalls: ToolCall[] = [];
       for (const call of assistant.toolCalls) {
         const result = await deps.runTool(call, conversationId);
         // ALWAYS answer — an unanswered tool_use errors the next model call.
@@ -373,7 +373,7 @@ export function makeHandleTurnWorkflow(
         if (result.parked) {
           parked = true;
           if (result.actionId !== undefined) {
-            parkedCalls.push({ call, actionId: result.actionId });
+            parkedCalls.push(call);
           }
         }
       }
@@ -385,12 +385,10 @@ export function makeHandleTurnWorkflow(
         // (the assistant message holds the call), so replay regenerates the
         // identical closing message; the composer sends it and stamps its
         // receipt as prompt_message_id.
-        for (const { call, actionId } of parkedCalls) {
+        for (const call of parkedCalls) {
           msgs.push({
             role: 'assistant',
             content: renderApprovalPrompt({
-              actionId,
-              toolName: call.name,
               summary:
                 deps.summarizeProposal === undefined
                   ? JSON.stringify(call.args)

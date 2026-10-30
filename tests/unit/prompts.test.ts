@@ -123,21 +123,16 @@ describe('renderCurrentTimePrompt', () => {
 });
 
 describe('renderApprovalPrompt', () => {
-  it('identifies the action and tells the user to quote-reply', () => {
-    const prompt = renderApprovalPrompt({
-      actionId: 'act-conv-1-tu_9',
-      toolName: 'create_event',
-      summary: '{"title":"dentist"}',
-    });
+  it('shows the summary and tells the user to quote-reply', () => {
+    const prompt = renderApprovalPrompt({ summary: "Add to wife's calendar:\ndentist" });
 
-    expect(prompt).toContain('act-conv-1-tu_9');
-    expect(prompt).toContain('create_event');
     expect(prompt).toContain('dentist');
+    expect(prompt).toContain('Reply to this message');
     expect(prompt).toMatch(/reply to this message/i);
   });
 
   it('is deterministic — same inputs, same bytes (workflow replay renders it)', () => {
-    const entry = { actionId: 'act-1', toolName: 'create_event', summary: '{}' };
+    const entry = { summary: '{}' };
     expect(renderApprovalPrompt(entry)).toBe(renderApprovalPrompt(entry));
   });
 });
@@ -157,6 +152,13 @@ describe('renderPendingActionsDigest', () => {
     expect(digest).toContain('create_event');
     expect(digest).toContain('dentist Tuesday 15:00');
     expect(digest).toContain('תור לרופא שיניים');
+  });
+
+  it('flattens a multi-line summary onto its one digest line', () => {
+    const digest = renderPendingActionsDigest([
+      entry({ summary: "Add to wife's calendar:\nדנטיסט\nThu, Jun 25 · 16:00–17:00" }),
+    ]);
+    expect(digest).toContain("Add to wife's calendar: — דנטיסט — Thu, Jun 25 · 16:00–17:00");
   });
 
   it('renders expiry as Eastern wall time, never server time', () => {

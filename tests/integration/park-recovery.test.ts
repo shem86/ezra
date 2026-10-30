@@ -114,7 +114,7 @@ describe('kill-mid-park recovery (T34)', () => {
       (m) => m.role === 'assistant' && m.content.includes('Reply to this message'),
     );
     expect(prompts).toHaveLength(1);
-    expect(prompts[0] && 'content' in prompts[0] ? prompts[0].content : '').toContain(actionId);
+    expect(prompts[0] && 'content' in prompts[0] ? prompts[0].content : '').not.toContain(actionId);
     expect(messages.at(-1)).toBe(prompts[0]);
 
     // Every tool_use answered, parks included.
