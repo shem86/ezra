@@ -7,8 +7,15 @@
 import { generateText, type LanguageModel, type ModelMessage, type ToolSet } from 'ai';
 import type { HandleTurnDeps } from './handle-turn.js';
 import type { TurnMessage } from './context.js';
-import { renderCurrentTimePrompt } from './prompts.js';
+import { renderCurrentTimePrompt, renderReplyLanguagePrompt } from './prompts.js';
+import { replyLanguageFor, type ReplyLanguage } from './language.js';
+import type { ReasoningEffort } from '../ops/config.js';
 import type { Tier } from './turn-route.js';
+
+// The pinned @ai-sdk/anthropic sizes max_tokens from a table of model ids it
+// knows and falls back to 4096 for any other (claude-sonnet-5-5 included).
+// Thinking counts against max_tokens, so leave room for it and the reply.
+const MAX_OUTPUT_TOKENS = 16_000;
 
 /** Per-call token accounting — feeds T31 traces and the T33 cost gate. */
 export interface ModelUsage {
@@ -29,12 +36,19 @@ export interface CallModelDeps {
    * entry here, runs on it — routing can only ever fall back to today.
    */
   readonly models?: Partial<Record<Tier, LanguageModel>>;
+  /**
+   * Effort for a call running on a tier model. `effort` below belongs to the
+   * base model only; a tier model with no entry here gets none (its default).
+   */
+  readonly efforts?: Partial<Record<Tier, ReasoningEffort>>;
   /** The stable cacheable prefix (T32 brings the real one). */
   readonly systemPrompt: string;
   /** Definitions only — no execute: DBOS owns the loop (decision 4). */
   readonly tools?: ToolSet;
   /** Observability tap; must not throw (a throw fails and retries the step). */
   readonly onUsage?: (usage: ModelUsage) => void;
+  /** Anthropic `output_config.effort`; undefined sends none (model default). */
+  readonly effort?: ReasoningEffort;
   /**
    * Clock seam (defaults to the real clock). Read inside this step, NOT in the
    * workflow body — a completed step replays its journaled output, so the
@@ -43,6 +57,17 @@ export interface CallModelDeps {
    * "now", so every turn pushes the real current time (see renderCurrentTimePrompt).
    */
   readonly now?: () => Date;
+}
+
+/** Config's per-tier efforts → CallModelDeps['efforts'], omitting tiers set to `default`. */
+export function tierEfforts(routing: {
+  readonly fastEffort: ReasoningEffort | undefined;
+  readonly deepEffort: ReasoningEffort | undefined;
+}): Partial<Record<Tier, ReasoningEffort>> {
+  return {
+    ...(routing.fastEffort === undefined ? {} : { fast: routing.fastEffort }),
+    ...(routing.deepEffort === undefined ? {} : { deep: routing.deepEffort }),
+  };
 }
 
 /**
@@ -55,13 +80,26 @@ const defaultNow = (): Date => new Date();
 
 export function makeCallModel(deps: CallModelDeps): HandleTurnDeps['callModel'] {
   return async function callModel(messages, options) {
+    const tierModel = options.tier === undefined ? undefined : deps.models?.[options.tier];
+    // `effort` is tuned for the base (standard) model; a tier model gets only
+    // its own configured effort — Haiku 4.5 rejects the parameter outright.
+    const effort =
+      tierModel === undefined ? deps.effort : options.tier === undefined ? undefined : deps.efforts?.[options.tier];
     const result = await generateText({
-      model: (options.tier === undefined ? undefined : deps.models?.[options.tier]) ?? deps.model,
+      model: tierModel ?? deps.model,
       // The system prompt travels as a message so cacheControl attaches (T7).
       allowSystemInMessages: true,
-      messages: toSdkMessages(deps.systemPrompt, messages, options.digest, (deps.now ?? defaultNow)()),
+      messages: toSdkMessages(
+        deps.systemPrompt,
+        messages,
+        options.digest,
+        (deps.now ?? defaultNow)(),
+        replyLanguageFor(messages),
+      ),
       ...(deps.tools === undefined ? {} : { tools: deps.tools }),
       toolChoice: options.forceFinal ? 'none' : 'auto',
+      maxOutputTokens: MAX_OUTPUT_TOKENS,
+      ...(effort === undefined ? {} : { providerOptions: { anthropic: { effort } } }),
     });
 
     deps.onUsage?.({
@@ -95,13 +133,15 @@ export function makeCallModel(deps: CallModelDeps): HandleTurnDeps['callModel'] 
  * one system array where each keeps its own cache_control, so the stable
  * block's breakpoint — and its cache — survives every per-turn change. The
  * clock comes first of the dynamic blocks (the model needs "now" to read
- * everything else), then the digest.
+ * everything else), then the digest, then the reply-language note — last, so
+ * it sits nearest the transcript it has to outweigh.
  */
 export function toSdkMessages(
   systemPrompt: string,
   msgs: readonly TurnMessage[],
   digest?: string | null,
   now?: Date,
+  replyLanguage?: ReplyLanguage | null,
 ): ModelMessage[] {
   // Tool-result parts require the tool's name, which the transcript only
   // carries on the originating assistant call — collect ids up front so an
@@ -125,6 +165,9 @@ export function toSdkMessages(
   }
   if (digest != null) {
     sdk.push({ role: 'system', content: digest });
+  }
+  if (replyLanguage != null) {
+    sdk.push({ role: 'system', content: renderReplyLanguagePrompt(replyLanguage) });
   }
 
   for (const msg of msgs) {

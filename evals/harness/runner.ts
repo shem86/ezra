@@ -17,7 +17,7 @@ import { Client } from 'pg';
 import { loadConfig } from '../../src/ops/config.ts';
 import { registerTransactionalStep } from '../../src/orchestration/steps.ts';
 import { makeHandleTurnWorkflow, type TurnResult } from '../../src/agent/handle-turn.ts';
-import { makeCallModel } from '../../src/agent/call-model.ts';
+import { makeCallModel, tierEfforts } from '../../src/agent/call-model.ts';
 import {
   makeProductionSystemPrompt,
   type PendingActionDigestEntry,
@@ -115,8 +115,10 @@ export async function composeEvalHarness(options: EvalHarnessOptions = {}): Prom
             fast: anthropic(config.turnRouting.fastModelId),
             deep: anthropic(config.turnRouting.deepModelId),
           },
+          efforts: tierEfforts(config.turnRouting),
         }),
     tools: toToolSet(registry),
+    ...(config.reasoningEffort === undefined ? {} : { effort: config.reasoningEffort }),
   });
   const routeTurn =
     forceTier === undefined

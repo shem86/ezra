@@ -6,7 +6,7 @@ import { MockLanguageModelV3 } from 'ai/test';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { makeCallModel, toSdkMessages, type ModelUsage } from '../../src/agent/call-model.js';
-import { renderCurrentTimePrompt } from '../../src/agent/prompts.js';
+import { renderCurrentTimePrompt, renderReplyLanguagePrompt } from '../../src/agent/prompts.js';
 import type { TurnMessage } from '../../src/agent/context.js';
 
 const SYSTEM = 'You are the household assistant.';
@@ -148,6 +148,22 @@ describe('toSdkMessages', () => {
   it('omits the current-time block when no now is given (back-compat)', () => {
     expect(toSdkMessages(SYSTEM, [], null)).toEqual(toSdkMessages(SYSTEM, [], null, undefined));
   });
+
+  it('a reply language becomes the LAST system block, after clock and digest — stable block untouched', () => {
+    const msgs: TurnMessage[] = [{ role: 'user', senderId: 'wife@wa', content: 'מה הסיסמה?' }];
+    const sdk = toSdkMessages(SYSTEM, msgs, '## Awaiting approval\n- [act-1] x', NOW, 'he');
+
+    expect(sdk[0]).toEqual(toSdkMessages(SYSTEM, [])[0]);
+    expect(sdk[1]).toEqual({ role: 'system', content: renderCurrentTimePrompt(NOW) });
+    expect(sdk[2]).toEqual({ role: 'system', content: '## Awaiting approval\n- [act-1] x' });
+    expect(sdk[3]).toEqual({ role: 'system', content: renderReplyLanguagePrompt('he') });
+    expect(sdk[3]).not.toHaveProperty('providerOptions');
+    expect(sdk[4]).toEqual({ role: 'user', content: 'wife@wa: מה הסיסמה?' });
+  });
+
+  it('no reply language adds no block', () => {
+    expect(toSdkMessages(SYSTEM, [], null, NOW, null)).toEqual(toSdkMessages(SYSTEM, [], null, NOW));
+  });
 });
 
 type DoGenerateOptions = Parameters<
@@ -244,12 +260,36 @@ describe('makeCallModel', () => {
       content: SYSTEM,
       providerOptions: { anthropic: { cacheControl: { type: 'ephemeral' } } },
     });
-    // The clock rides between the cached prefix and the transcript.
+    // The clock and the reply-language note ride between the cached prefix
+    // and the transcript.
     expect(seen?.prompt[1]).toEqual({ role: 'system', content: renderCurrentTimePrompt(NOW) });
-    expect(seen?.prompt[2]).toMatchObject({
+    expect(seen?.prompt[2]).toEqual({ role: 'system', content: renderReplyLanguagePrompt('en') });
+    expect(seen?.prompt[3]).toMatchObject({
       role: 'user',
       content: [{ type: 'text', text: 'wife@wa: add milk' }],
     });
+  });
+
+  it('derives the reply language from the latest member message, not the run before it', async () => {
+    let seen: DoGenerateOptions | undefined;
+    const callModel = makeCallModel({
+      model: mockModel([{ type: 'text', text: 'ok' }], (o) => {
+        seen = o;
+      }),
+      systemPrompt: SYSTEM,
+    });
+
+    await callModel(
+      [
+        { role: 'user', senderId: 'husband@wa', content: 'שדרגתי את המודל, זה אומר לך משהו?' },
+        { role: 'assistant', content: 'אין לי דרך לראות באיזה מודל אני רץ', toolCalls: [] },
+        { role: 'user', senderId: 'husband@wa', content: 'List all of the facts you have saved' },
+      ],
+      { forceFinal: false },
+    );
+
+    // [1] is the clock (default now); the language note follows it.
+    expect(seen?.prompt[2]).toEqual({ role: 'system', content: renderReplyLanguagePrompt('en') });
   });
 
   it('passes the per-turn digest through as the post-prefix system block', async () => {
@@ -292,6 +332,42 @@ describe('makeCallModel', () => {
     // Stable prefix first (cached), then the clock (no cacheControl).
     expect(seen?.prompt[0]).toMatchObject({ role: 'system', content: SYSTEM });
     expect(seen?.prompt[1]).toEqual({ role: 'system', content: renderCurrentTimePrompt(NOW) });
+  });
+
+  it('sends an explicit output cap — the pinned provider defaults unknown model ids to 4096', async () => {
+    let seen: DoGenerateOptions | undefined;
+    const callModel = makeCallModel({
+      model: mockModel([{ type: 'text', text: 'ok' }], (o) => {
+        seen = o;
+      }),
+      systemPrompt: SYSTEM,
+    });
+
+    await callModel(userMsg, { forceFinal: false });
+
+    expect(seen?.maxOutputTokens).toBe(16_000);
+  });
+
+  it('passes the configured effort to the anthropic provider, and omits it when unset', async () => {
+    let seen: DoGenerateOptions | undefined;
+    const withEffort = makeCallModel({
+      model: mockModel([{ type: 'text', text: 'ok' }], (o) => {
+        seen = o;
+      }),
+      systemPrompt: SYSTEM,
+      effort: 'low',
+    });
+    await withEffort(userMsg, { forceFinal: false });
+    expect(seen?.providerOptions).toEqual({ anthropic: { effort: 'low' } });
+
+    const withoutEffort = makeCallModel({
+      model: mockModel([{ type: 'text', text: 'ok' }], (o) => {
+        seen = o;
+      }),
+      systemPrompt: SYSTEM,
+    });
+    await withoutEffort(userMsg, { forceFinal: false });
+    expect(seen?.providerOptions).toBeUndefined();
   });
 
   it('forceFinal forbids tool calls via toolChoice none', async () => {
@@ -347,6 +423,58 @@ describe('makeCallModel tier selection', () => {
     await callModel(userMsg, { forceFinal: false, tier: 'standard' });
 
     expect(seen).toEqual(['deep', 'deep', 'fast', 'standard']);
+  });
+
+  // REASONING_EFFORT is tuned for the standard model (Sonnet 5.5 rejects
+  // `disabled`) and Haiku 4.5 REJECTS the parameter: sending it on a routed
+  // fast turn would 400 every one of them. A tier model runs at its default.
+  it('sends REASONING_EFFORT on the standard model only — never to a tier model', async () => {
+    const efforts: Array<[string, unknown]> = [];
+    const capture = (tag: string) =>
+      mockModel([{ type: 'text', text: 'ok' }], (o) =>
+        efforts.push([tag, (o.providerOptions?.anthropic as { effort?: unknown } | undefined)?.effort]),
+      );
+    const callModel = makeCallModel({
+      model: capture('standard'),
+      models: { fast: capture('fast'), deep: capture('deep') },
+      systemPrompt: SYSTEM,
+      effort: 'low',
+    });
+
+    await callModel(userMsg, { forceFinal: false });
+    await callModel(userMsg, { forceFinal: false, tier: 'standard' });
+    await callModel(userMsg, { forceFinal: false, tier: 'fast' });
+    await callModel(userMsg, { forceFinal: true, tier: 'deep' });
+
+    expect(efforts).toEqual([
+      ['standard', 'low'],
+      ['standard', 'low'],
+      ['fast', undefined],
+      ['deep', undefined],
+    ]);
+  });
+
+  it('sends each tier model its own effort when one is configured', async () => {
+    const efforts: Array<[string, unknown]> = [];
+    const capture = (tag: string) =>
+      mockModel([{ type: 'text', text: 'ok' }], (o) =>
+        efforts.push([tag, (o.providerOptions?.anthropic as { effort?: unknown } | undefined)?.effort]),
+      );
+    const callModel = makeCallModel({
+      model: capture('standard'),
+      models: { fast: capture('fast'), deep: capture('deep') },
+      efforts: { fast: 'low', deep: 'medium' },
+      systemPrompt: SYSTEM,
+      effort: 'low',
+    });
+
+    await callModel(userMsg, { forceFinal: false, tier: 'fast' });
+    await callModel(userMsg, { forceFinal: false, tier: 'deep' });
+
+    expect(efforts).toEqual([
+      ['fast', 'low'],
+      ['deep', 'medium'],
+    ]);
   });
 
   it('reports the turn tier with usage so traces can split cost per tier', async () => {

@@ -16,7 +16,7 @@ import { makeTracer } from '../ops/tracing.js';
 import { makeLangfuseSink } from '../ops/langfuse-sink.js';
 import { registerTransactionalStep } from '../orchestration/steps.js';
 import { makeHandleTurnWorkflow } from '../agent/handle-turn.js';
-import { makeCallModel } from '../agent/call-model.js';
+import { makeCallModel, tierEfforts } from '../agent/call-model.js';
 import { makeMemberLabeler, makeTurnRouting } from '../agent/route-turn.js';
 import { createRouteStreakLog, probeJev } from '../ops/route-health.js';
 import { writeTurnRouteLog, type TurnRouteLogInput } from '../memory/turn-route-log.js';
@@ -95,8 +95,10 @@ async function main(): Promise<void> {
             fast: anthropic(routing.fastModelId),
             deep: anthropic(routing.deepModelId),
           },
+          efforts: tierEfforts(routing),
         }),
     tools: toToolSet(registry),
+    ...(config.reasoningEffort === undefined ? {} : { effort: config.reasoningEffort }),
     onUsage: tracer.onModelUsage,
   });
 

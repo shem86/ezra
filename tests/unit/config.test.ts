@@ -91,6 +91,24 @@ describe('loadConfig', () => {
     expect(config.langfuseBaseUrl).toBe('https://cloud.langfuse.com');
   });
 
+  it('defaults the turn model to Sonnet 5.5 at low effort, both overridable', () => {
+    const config = loadConfig(validEnv);
+    expect(config.reasoningModelId).toBe('claude-sonnet-5-5');
+    expect(config.reasoningEffort).toBe('low');
+
+    const overridden = loadConfig({
+      ...validEnv,
+      REASONING_MODEL_ID: 'claude-opus-5-5',
+      REASONING_EFFORT: 'medium',
+    });
+    expect(overridden.reasoningModelId).toBe('claude-opus-5-5');
+    expect(overridden.reasoningEffort).toBe('medium');
+    expect(loadConfig({ ...validEnv, REASONING_EFFORT: 'default' }).reasoningEffort).toBeUndefined();
+    expect(() => loadConfig({ ...validEnv, REASONING_EFFORT: 'extreme' })).toThrowError(
+      /REASONING_EFFORT/,
+    );
+  });
+
   it('defaults the approval TTL to 12 hours (Open Q1, resolved at T34) and accepts overrides', () => {
     expect(loadConfig(validEnv).approvalTtlHours).toBe(12);
     expect(loadConfig({ ...validEnv, APPROVAL_TTL_HOURS: '24' }).approvalTtlHours).toBe(24);
@@ -250,8 +268,12 @@ describe('loadConfig: turn routing', () => {
   it('defaults the Jev pin, the tier models, and the stage-1 tier set', () => {
     const { turnRouting } = loadConfig(validEnv);
     expect(turnRouting.jevModel).toBe('jev-1.14.0');
-    expect(turnRouting.fastModelId).toBe('claude-haiku-4-5-20251001');
+    expect(turnRouting.fastModelId).toBe('claude-haiku-5-5');
     expect(turnRouting.deepModelId).toBe('claude-opus-5-5');
+    // Haiku 5.5 thinks at `medium` by default; a fast tier wants `low`.
+    // Opus 5.5's own default is `medium` — explicit, so it's a visible knob.
+    expect(turnRouting.fastEffort).toBe('low');
+    expect(turnRouting.deepEffort).toBe('medium');
     expect([...turnRouting.enabledTiers].sort()).toEqual(['deep', 'standard']);
   });
 
@@ -277,6 +299,12 @@ describe('loadConfig: turn routing', () => {
     expect(() => loadConfig({ ...validEnv, TURN_ROUTING_TIERS: 'standard,opus' })).toThrow(
       /TURN_ROUTING_TIERS/,
     );
+  });
+
+  it('maps a tier effort of `default` to none (the model decides)', () => {
+    const config = loadConfig({ ...validEnv, FAST_EFFORT: 'default', DEEP_EFFORT: 'high' });
+    expect(config.turnRouting.fastEffort).toBeUndefined();
+    expect(config.turnRouting.deepEffort).toBe('high');
   });
 
   it('accepts tier model overrides', () => {

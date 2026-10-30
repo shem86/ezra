@@ -22,7 +22,12 @@ const envSchema = z.object({
   // Reasoning = every turn call (ADR-0003); cheap = classification only
   // (compaction summarize, T36 relatedness). Overridable for T33 retuning.
   CHEAP_MODEL_ID: z.string().min(1).default('claude-haiku-4-5-20251001'),
-  REASONING_MODEL_ID: z.string().min(1).default('claude-sonnet-4-6'),
+  REASONING_MODEL_ID: z.string().min(1).default('claude-sonnet-5-5'),
+  // Sonnet 5.5 always thinks (`disabled` 400s); `low` is the closest stand-in
+  // for the no-thinking turns Sonnet 4.6 ran. `default` sends no effort at
+  // all — for a REASONING_MODEL_ID that rejects the parameter (Haiku 4.5).
+  // Applies to the standard tier only: a routed fast/deep turn sends none.
+  REASONING_EFFORT: z.enum(['low', 'medium', 'high', 'xhigh', 'max', 'default']).default('low'),
   // Turn routing (docs/specs/jev-turn-routing-plan.md). Off by default, so a
   // deploy without these vars runs exactly as before. REASONING_MODEL_ID stays
   // the standard tier; any change to the tier ids or the Jev pin — host env
@@ -30,8 +35,14 @@ const envSchema = z.object({
   TURN_ROUTING: z.enum(['off', 'shadow', 'on']).default('off'),
   TYPESAFE_API_KEY: z.string().min(1).optional(),
   JEV_MODEL: z.string().min(1).default(DEFAULT_JEV_MODEL),
-  FAST_MODEL_ID: z.string().min(1).default('claude-haiku-4-5-20251001'),
+  FAST_MODEL_ID: z.string().min(1).default('claude-haiku-5-5'),
   DEEP_MODEL_ID: z.string().min(1).default('claude-opus-5-5'),
+  // Per-tier effort (REASONING_EFFORT stays the standard tier's). Haiku 5.5
+  // thinks at `medium` by default — a fast tier wants `low`. `medium` is
+  // Opus 5.5's own default, made explicit. `default` sends none: required
+  // for a tier model that rejects the parameter (Haiku 4.5).
+  FAST_EFFORT: z.enum(['low', 'medium', 'high', 'xhigh', 'max', 'default']).default('low'),
+  DEEP_EFFORT: z.enum(['low', 'medium', 'high', 'xhigh', 'max', 'default']).default('medium'),
   // §7b staged rollout: standard+deep first, fast only after its own gate.
   TURN_ROUTING_TIERS: z
     .string()
@@ -130,12 +141,15 @@ const productionEnvSchema = envSchema.extend({
   ),
 });
 
+export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
 export interface Config {
   readonly databaseUrl: string;
   readonly anthropicApiKey: string;
   readonly voyageApiKey: string;
   readonly cheapModelId: string;
   readonly reasoningModelId: string;
+  readonly reasoningEffort: ReasoningEffort | undefined;
   readonly langfusePublicKey: string;
   readonly langfuseSecretKey: string;
   readonly langfuseBaseUrl: string;
@@ -159,6 +173,9 @@ export interface TurnRoutingConfig {
   readonly jevModel: string;
   readonly fastModelId: string;
   readonly deepModelId: string;
+  /** Undefined ⇒ no effort sent to that tier's model (its default). */
+  readonly fastEffort: ReasoningEffort | undefined;
+  readonly deepEffort: ReasoningEffort | undefined;
   readonly enabledTiers: ReadonlySet<Tier>;
 }
 
@@ -352,6 +369,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     voyageApiKey: parsed.data.VOYAGE_API_KEY,
     cheapModelId: parsed.data.CHEAP_MODEL_ID,
     reasoningModelId: parsed.data.REASONING_MODEL_ID,
+    reasoningEffort:
+      parsed.data.REASONING_EFFORT === 'default' ? undefined : parsed.data.REASONING_EFFORT,
     langfusePublicKey: parsed.data.LANGFUSE_PUBLIC_KEY,
     langfuseSecretKey: parsed.data.LANGFUSE_SECRET_KEY,
     langfuseBaseUrl: parsed.data.LANGFUSE_BASE_URL,
@@ -372,6 +391,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       jevModel: parsed.data.JEV_MODEL,
       fastModelId: parsed.data.FAST_MODEL_ID,
       deepModelId: parsed.data.DEEP_MODEL_ID,
+      fastEffort: parsed.data.FAST_EFFORT === 'default' ? undefined : parsed.data.FAST_EFFORT,
+      deepEffort: parsed.data.DEEP_EFFORT === 'default' ? undefined : parsed.data.DEEP_EFFORT,
       enabledTiers: parsed.data.TURN_ROUTING_TIERS,
     },
   };

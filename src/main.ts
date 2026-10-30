@@ -33,7 +33,7 @@ import { makeReminderSweepWorkflow, type DueReminder } from './orchestration/sch
 import { makeExpirySweepWorkflow, toOverdueActions } from './hitl/expiry.js';
 import { markExpired } from './hitl/pending-actions.js';
 import { makeHandleTurnWorkflow } from './agent/handle-turn.js';
-import { makeCallModel } from './agent/call-model.js';
+import { makeCallModel, tierEfforts } from './agent/call-model.js';
 import { makeMemberLabeler, makeTurnRouting } from './agent/route-turn.js';
 import { createRouteStreakLog, probeJev } from './ops/route-health.js';
 import { writeTurnRouteLog, type TurnRouteLogInput } from './memory/turn-route-log.js';
@@ -109,6 +109,12 @@ async function main(): Promise<void> {
     // socket-drop bound; a real outage holds the socket not-open far longer
     // (the retry loop gives up at ~4.3min, then stays 'closed').
     downGraceMs: 180_000,
+    // The module default swallows silently, which made a failed down-alert
+    // indistinguishable from "no incident" in prod logs. alerts.ts builds
+    // every error message without the token-bearing URL, so .message is safe.
+    onAlertError: (error) => {
+      console.warn(`[alerts] send failed: ${error instanceof Error ? error.message : String(error)}`);
+    },
   });
   const deadman = createDeadmanPinger({
     pingUrl: config.deadmanPingUrl,
@@ -158,8 +164,10 @@ async function main(): Promise<void> {
             fast: anthropic(routing.fastModelId),
             deep: anthropic(routing.deepModelId),
           },
+          efforts: tierEfforts(routing),
         }),
     tools: toToolSet(registry),
+    ...(config.reasoningEffort === undefined ? {} : { effort: config.reasoningEffort }),
     onUsage: tracer.onModelUsage,
   });
 

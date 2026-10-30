@@ -302,7 +302,7 @@ systemd units, `daemon-reload`s, enables the timers, and applies
 
 Routing is **off by default**: an `.env` without the vars below runs today's
 Sonnet-only spine, with no Jev call and no `routeTurn` step. The plan is in
-`docs/specs/jev-turn-routing-plan.md` and the state is in STATUS.md item 14.
+`docs/specs/jev-turn-routing-plan.md` and the state is in STATUS.md item 16.
 
 To go to shadow, which logs Jev's choice while every turn still runs standard:
 

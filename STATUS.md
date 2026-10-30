@@ -48,6 +48,18 @@ deployed — the deploy run's on-host log reached the healthy launch markers.
 The first two deploy attempts failed at `docker login ghcr.io` (an expired, then a
 mis-stored GHCR PAT) with no swap. Nothing else re-verified on this pass.
 
+**Partial update 2026-10-29:** added item 14 — turn model moved to Sonnet 5.5.
+Built and green (unit suite, build, lint, doc check) on branch
+`ccr-a9004ef7-r7zk3v`. Same day, `pnpm eval` ran against the real model:
+Sonnet 5.5 at `low` passed 23/23 twice, with no 400s (details under item 14).
+It merged as PR #66 and was **released as `v2.3.13`**: deploy run
+`40896265282` passed the migrate-gate and the healthcheck, with no rollback.
+Nothing else re-verified on this pass.
+
+**Partial update 2026-10-29 (later):** added item 15 — reply language after a
+run of turns in the other language, fixed in code (PR #68) and **released as
+`v2.3.14`**. Nothing else re-verified on this pass.
+
 This is the **single source of truth for current state**. Everything else is
 history:
 
@@ -867,7 +879,91 @@ built): a capped `list_facts` tool (keys plus fenced values, "showing N of M"),
 and dropping short/common terms (`all`, `כל`, …) from `factTerms`, whose
 substring search otherwise matches nearly everything.
 
-### 14. Jev turn routing (Haiku / Sonnet / Opus per turn) — Phase 1 passed, Phase 2 next
+### 14. ✅ Turn model → Sonnet 5.5 — released as `v2.3.13`
+
+2026-10-29. `REASONING_MODEL_ID` now defaults to `claude-sonnet-5-5` (was
+`claude-sonnet-4-6`); the cheap tier (Haiku 4.5) is unchanged. Three things in
+the pinned `@ai-sdk/anthropic` 3.0.82 made a bare id swap unsafe, so the change
+carries them:
+
+- **Output cap.** The provider doesn't know the id and falls back to
+  `max_tokens` 4096, while Sonnet 5.5 always thinks and thinking counts against
+  the cap. `makeCallModel` now sends an explicit 16k.
+- **Thinking can't be off.** Sonnet 4.6 ran these turns with no thinking;
+  on 5.5 `disabled` is a 400. New `REASONING_EFFORT` config (default `low`,
+  `default` sends none) is passed as provider `effort` — the closest match to
+  the old latency.
+- **Forced tool choice 400s.** The eval judge's `Output.object` would have
+  fallen back to a forced-tool JSON shim; `makeCompactionJudge` now forces
+  native `outputFormat`.
+
+**Eval, 2026-10-29** (local dev Postgres, run from the worktree with a
+dedicated `hh_assistant_eval` database; `compaction-prod` skipped as designed).
+New defaults (Sonnet 5.5, `REASONING_EFFORT` unset, so `low`) were run twice,
+with a 4.6 baseline (`REASONING_MODEL_ID=claude-sonnet-4-6
+REASONING_EFFORT=default`) between the two runs:
+
+| | Sonnet 5.5 `low` | Sonnet 4.6 baseline |
+|---|---|---|
+| Pass | **23/23** (both runs) | 22/23 |
+| decision-9 (M5 gate) | 7/7 | 6/7: sender-attribution created no reminder |
+| Summed test time | 136s | 160s |
+| 400s / truncation | none | none |
+
+- **Thinking replay:** no `thinking` / `signature` / block-ordering 400s.
+  The facts and injection scenarios each make a tool call and then a second
+  model round, so the path that strips thinking blocks ran. Caveat: at `low`
+  effort the model may skip thinking on simple turns. This shows no 400s in
+  practice; it does not prove thinking blocks were present and stripped.
+  Watch prod logs for these 400s after release.
+- **Latency:** at `low`, 5.5 is no slower than 4.6 without thinking.
+  Per-test times include DB setup, so the comparison is approximate.
+- **Not checked by the eval:** WhatsApp formatting (`*bold*`, never `**`).
+  No scenario asserts it. Spot-check the first prod replies.
+
+**Prod env checked, 2026-10-29:** SSM `/hh-assistant/env` (19 vars) sets no
+`REASONING_*` variable, and nothing under `infra/` pins one, so prod takes the
+new defaults (Sonnet 5.5 at `low`). Verified by reading the parameter's
+variable names only.
+
+**Released 2026-10-29 as `v2.3.13`** (PR #66). Deploy run `40896265282`
+succeeded: migrate-gate applied, healthcheck saw spine + backoffice up on
+2.3.13, no rollback. The live model id was not read from the container log.
+**Post-release watch:** any 400 mentioning `thinking` / `signature` / block
+ordering (fix = persist reasoning parts, a schema change, ask-first);
+`**` instead of `*bold*` in replies; reply quality at `low` (fallback:
+`REASONING_EFFORT=medium` in SSM, then redeploy).
+
+### 15. ✅ Reply language after a run in the other language — released as `v2.3.14`
+
+2026-10-29. In prod, Sonnet 5.5 answered "List all of the facts you have
+saved" in Hebrew after three Hebrew turns. New `evals/language.eval.ts`
+replays that shape both ways: three turns in one language, then a message in
+the other, with a seeded fact in the other language. The pass is the language
+of the reply's opening line.
+
+| Config (before the fix) | en-after-he | he-after-en |
+|---|---|---|
+| Sonnet 5.5 `low` | 0/3 | 3/3 |
+| Sonnet 5.5 `medium` | 0/3 | 3/3 |
+| Sonnet 4.6 | 0/3 | 3/3 |
+| 5.5 `low` + a sharper prompt rule | 0/3 | 3/3 |
+
+So it is not a 5.5 regression, effort does not fix it, and prompt wording
+does not either. Fix: `makeCallModel` now derives the language of the latest
+**member** message (`replyLanguageFor` in `src/agent/language.ts`, majority
+script, system senders skipped) and passes it to `toSdkMessages`, which adds a
+per-turn `## Reply language` system block (`renderReplyLanguagePrompt`). It is
+the last system block, after the clock and digest; the cached prefix is
+unchanged. With the fix: **6/6** over 3 runs at `low`.
+
+**Released 2026-10-29 as `v2.3.14`** (PR #68), after a full `pnpm eval` of
+25/25. Deploy run `40905601753` succeeded (migrate-gate applied, healthcheck
+saw spine + backoffice up on 2.3.14, no rollback), and the container log shows
+a clean `ezra up` on image `2.3.14`. Not yet observed on a real code-switched
+prod turn.
+
+### 16. Jev turn routing (Haiku / Sonnet / Opus per turn) — Phases 1–4 done; prod shadow (Phase 5) under way
 **Status:** in progress. Plan [`docs/specs/jev-turn-routing-plan.md`](docs/specs/jev-turn-routing-plan.md).
 Builder decisions recorded 2026-10-29: household text to TypeSafe, a new egress host,
 superseding ADR-0007, an Opus tier, the `turn_route_log` migration, a staged rollout
@@ -931,14 +1027,36 @@ Live evidence the same day:
   (`fast`) and `claude-opus-5-5` (`deep`). A bogus `DEEP_MODEL_ID` turned the deep run red,
   proving the deep tier really calls the configured model.
 
-**Next: Phase 5, the prod shadow run** (builder steps):
-1. Rotate the TypeSafe key.
-2. Add `TURN_ROUTING=shadow` and the new `TYPESAFE_API_KEY` to the `/hh-assistant/env` SSM
-   parameter (`infra/runtime.md`).
-3. Merge and cut a release.
-4. Confirm `[route] jev ok` in the container log.
-5. Read the backoffice Router panel daily for about 2 weeks. The `TYPESAFE_API_KEY` is not yet in `.env` or SSM.
-**Rotate it before prod:** it was pasted into a Claude session on 2026-10-29.
+**Merged with main 2026-10-30** (Sonnet 5.5 as the turn model, item 14; the reply-language note,
+item 15). The merge surfaced one real interaction bug, fixed with a reproduction test first:
+`REASONING_EFFORT` (`low`) was sent on **every** tier, and Haiku 4.5 rejects the parameter, so
+every routed fast turn would have returned a 400. `makeCallModel` now sends it to the standard
+model only.
+
+**Tier models updated 2026-10-30** (builder ask):
+- **Fast tier:** `claude-haiku-5-5`, which supports effort and thinks by default, replaces
+  Haiku 4.5.
+- **Per-tier effort:** `tierEfforts` in `src/agent/call-model.ts` applies `FAST_EFFORT` (default
+  `low`) and `DEEP_EFFORT` (default `medium`, Opus 5.5's own default made explicit).
+- **`pnpm eval:route` re-run the same day:**
+  - router 54/54, holdout 6/6/6, 0 sent to `fast` wrongly;
+  - per-tier 6/6 effects on Haiku 5.5 at `low` and Opus 5.5 at `medium`.
+- **Eval test defect fixed:** the eval's fact test shared one "cabin wifi" fact across tiers and
+  runs. The near-duplicate guard then correctly made Opus ask which fact to update instead of
+  saving. The test now clears its own `Cabin-ev…` rows first; the exact-value assertion is
+  unchanged.
+- **Not changed:** `CHEAP_MODEL_ID` (relatedness classifier + compaction summarizer) stays on
+  Haiku 4.5. That is a separate change with its own evals.
+
+**Phase 5 (prod shadow) — started 2026-10-30:**
+- **Config:** `TURN_ROUTING=shadow` and `TYPESAFE_API_KEY` added to the `/hh-assistant/env` SSM
+  parameter (version 3 → 4, verified by reading it back).
+- **Headroom:** that parameter is now 8,184 of the 8,192 characters an advanced-tier parameter
+  allows. The next env var will not fit until something moves out, e.g. its 58 comment lines
+  (~3.6k chars) or a second parameter.
+- **Key rotation:** the builder chose not to rotate the key pasted into the 2026-10-29 session.
+- **Remaining:** release, confirm `[route] mode shadow` and `[route] jev ok` on the host, then read
+  the backoffice Router panel daily for about 2 weeks before deciding Phase 6.
 
 ---
 

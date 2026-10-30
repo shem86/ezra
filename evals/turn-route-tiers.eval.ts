@@ -76,6 +76,12 @@ describe.each(['fast', 'deep'] as const)('tier %s — autonomous effects under t
   it('saves a household fact with its exact value (Hebrew)', async () => {
     const conv = conversation(`tier-${tier}-fact`);
     const value = `Cabin-${tag}-${tier}`;
+    // household_facts is shared: the other tier's save and earlier runs leave
+    // a "cabin wifi" fact behind, and the near-duplicate guard then rightly
+    // makes the model ASK which one to update (STATUS item 13) — nothing is
+    // saved. Clear only this eval's own rows (values carrying its `Cabin-ev…`
+    // tags) so each tier starts from a household with no cabin wifi fact.
+    await h.db.query(`DELETE FROM household_facts WHERE value LIKE '%Cabin-ev%'`);
     await h.runTurn(conv, {
       senderId: 'wife@wa',
       text: `תשמור שהסיסמה של הוויפי בצימר היא ${value}`,
