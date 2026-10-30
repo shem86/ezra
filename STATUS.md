@@ -1055,8 +1055,25 @@ model only.
   allows. The next env var will not fit until something moves out, e.g. its 58 comment lines
   (~3.6k chars) or a second parameter.
 - **Key rotation:** the builder chose not to rotate the key pasted into the 2026-10-29 session.
-- **Remaining:** release, confirm `[route] mode shadow` and `[route] jev ok` on the host, then read
-  the backoffice Router panel daily for about 2 weeks before deciding Phase 6.
+- **Released as `v2.4.0`, 2026-10-30** (PR #71, merge `ae4a237`). Verified:
+  - **Deploy:** run `41077759126` succeeded. The migrate gate applied
+    `0009-turn-route-log.sql`, and containers `ezra`, `backoffice` and `backup` are up on
+    `2.4.0`.
+  - **Container log:** `[socket] open`, `ezra up: …`, then
+    `[route] mode shadow · tiers standard,deep · jev-1.14.0`.
+- **The startup probe reported `jev unreachable: timeout`, and the cause was egress catch-up, not
+  the key.** The `hh-egress` refresh timer last ran at 15:06:35, before the deploy checked out the
+  new allowlist (15:07–15:08). Until its next run (15:09:37), the kernel log showed SYNs dropped to
+  TypeSafe's two Cloudflare IPs (`104.18.24.46`, `104.18.25.46`). After that refresh both are in
+  `allowed4`. From inside the container, `api.typesafe.ai` answers in 125 ms, and the delivered
+  key (108 chars) gets HTTP 200.
+- **Lesson:** a newly allowlisted host is unreachable for up to one refresh interval (3 min)
+  after a deploy. A boot-time probe in that window always times out. Re-check from inside the
+  container before suspecting the key.
+- **Shadow data:** no household turn had arrived since the deploy at the time of the check, so
+  `turn_route_log` was still empty. The first routed rows arrive with the next message.
+- **Remaining:** read the backoffice Turn router panel daily for about 2 weeks, then decide
+  Phase 6 (`on` with `standard,deep`, or stop).
 
 ---
 
