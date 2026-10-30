@@ -20,7 +20,8 @@ const DEEP_SHARE_MAX = 0.4;
 const UNSETTLED_SHARE_MAX = 0.5;
 const YES = 0.7;
 const NO = 0.3;
-const RECENT = 15;
+/** Turn-view depth: the panel shows 15 and pages through the rest. */
+const RECENT = 100;
 const DAY_MS = 24 * 60 * 60 * 1_000;
 
 const answersSchema = z.looseObject({

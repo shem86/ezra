@@ -132,4 +132,11 @@ describe('deriveRouterHealth', () => {
     );
     expect(health.recent.map((r) => r.workflowId)).toEqual(['new', 'old']);
   });
+
+  it('hands the turn view up to 100 recent rows — the panel pages through them', () => {
+    const rows = Array.from({ length: 120 }, (_, i) => row({ workflowId: `wf-${i}`, createdAt: minutesAgo(i + 1) }));
+    const health = deriveRouterHealth(input(rows));
+    expect(health.recent).toHaveLength(100);
+    expect(health.recent[0]!.workflowId).toBe('wf-0');
+  });
 });
