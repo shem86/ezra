@@ -36,6 +36,8 @@ import {
   shouldCompact,
   type CompactionConfig,
 } from './compaction.js';
+import type { RouteDecision, RouteTurnInput } from './route-turn.js';
+import type { Tier } from './turn-route.js';
 import {
   renderApprovalOutcome,
   renderApprovalPrompt,
@@ -52,6 +54,12 @@ export interface ModelCallOptions {
    * breakpoint survives digest changes (T32 discipline, live since T34).
    */
   readonly digest?: string | null;
+  /**
+   * The turn's journaled routing tier — the same for every round, the forced
+   * final included (one tier per turn: no mid-turn switch, one prompt cache).
+   * Absent on an unrouted turn, which runs on the standard model.
+   */
+  readonly tier?: Tier;
 }
 
 export interface HandleTurnDeps {
@@ -102,6 +110,24 @@ export interface HandleTurnDeps {
   readonly summarizeProposal?: (call: ToolCall) => string;
   /** Absent ⇒ no compaction (the T22 skeleton behavior, unchanged). */
   readonly compaction?: CompactionDeps;
+  /**
+   * Turn routing (docs/specs/jev-turn-routing-plan.md): plain async (Jev
+   * I/O) — the workflow wraps it in DBOS.runStep once per turn, before round
+   * 0, and reads only the journaled decision. Must never throw (makeRouteTurn
+   * folds every failure into a standard fallback). Absent ⇒ no routeTurn
+   * step and no tier: the step sequence is exactly the pre-routing one.
+   */
+  readonly routeTurn?: (input: RouteTurnInput) => Promise<RouteDecision>;
+  /**
+   * Must already be a registered datasource transaction, idempotent on
+   * workflowId (a replay re-calls it). Persists the journaled decision to
+   * turn_route_log. Absent ⇒ the decision lives only in the journal.
+   */
+  readonly logRoute?: (input: {
+    readonly workflowId: string;
+    readonly conversationId: string;
+    readonly decision: RouteDecision;
+  }) => Promise<boolean>;
 }
 
 export interface RelatednessDeps {
@@ -173,6 +199,9 @@ export function makeHandleTurnWorkflow(
     // message rides separately, the tail is its conversational context.
     // Pure render over journaled input — replay-deterministic.
     const recentContext = renderForSummary(msgs.slice(-6));
+    // The router reads the same pre-batch transcript; later pushes (hitl
+    // outcomes, this batch) land past this index.
+    const priorCount = msgs.length;
     msgs.push(...toModelMessages(batch));
 
     // Quoted approval replies resolve BEFORE the digest read, so the digest
@@ -294,11 +323,38 @@ export function makeHandleTurnWorkflow(
     // anyway, so the digest can't go stale within one. Rendering is pure.
     const digest = renderPendingActionsDigest(pendingEntries);
 
+    // One tier per turn, journaled before round 0 (plan §2: no mid-turn
+    // switch). Every input is journaled or workflow input, so replay feeds
+    // the step identically — and a completed step replays its output anyway.
+    let tier: Tier | undefined;
+    const routeTurn = deps.routeTurn;
+    if (routeTurn !== undefined) {
+      const routeInput: RouteTurnInput = {
+        prior: msgs.slice(0, priorCount),
+        latest: batch.flatMap((item) => {
+          const text = extractMessageText(item);
+          return text === null ? [] : [{ senderId: item.senderId, text }];
+        }),
+        hasPendingActions: pendingEntries.length > 0,
+        hasQuotedReply: batch.some((item) => extractQuotedReply(item) !== null),
+      };
+      const decision = await DBOS.runStep(() => routeTurn(routeInput), { name: 'routeTurn' });
+      tier = decision.tier;
+      if (deps.logRoute !== undefined) {
+        const workflowId = DBOS.workflowID;
+        if (workflowId === undefined) {
+          throw new Error('handleTurn: no workflowID — the route log needs it for the idempotency key');
+        }
+        await deps.logRoute({ workflowId, conversationId, decision });
+      }
+    }
+    const tierOption = tier === undefined ? {} : { tier };
+
     let status: TurnStatus = 'cap-hit';
     let rounds = 0;
     for (let i = 0; i < maxRounds; i++) {
       const assistant = await DBOS.runStep(
-        () => deps.callModel(msgs, { forceFinal: false, digest }),
+        () => deps.callModel(msgs, { forceFinal: false, digest, ...tierOption }),
         { name: 'callModel' },
       );
       rounds += 1;
@@ -350,7 +406,7 @@ export function makeHandleTurnWorkflow(
 
     if (status === 'cap-hit') {
       const finalMessage = await DBOS.runStep(
-        () => deps.callModel(msgs, { forceFinal: true, digest }),
+        () => deps.callModel(msgs, { forceFinal: true, digest, ...tierOption }),
         { name: 'callModelForcedFinal' },
       );
       if (finalMessage.toolCalls.length > 0) {

@@ -18,6 +18,26 @@ export interface CompactionEvalEnv {
   readonly spotcheckLimit: number;
 }
 
+/** `pnpm eval:route` knobs (docs/specs/jev-turn-routing-plan.md §8a). */
+export interface TurnRouteEvalEnv {
+  /** Undefined ⇒ the Jev-accuracy suite skips (no key, no live calls). */
+  readonly typesafeApiKey: string | undefined;
+  /** The pin under evaluation — defaults to the production default. */
+  readonly jevModel: string | undefined;
+  /** Optional report path (vitest's run reporter swallows console.log). */
+  readonly reportPath: string | undefined;
+}
+
+export function readTurnRouteEvalEnv(
+  env: Record<string, string | undefined> = process.env,
+): TurnRouteEvalEnv {
+  return {
+    typesafeApiKey: env.TYPESAFE_API_KEY,
+    jevModel: env.JEV_MODEL,
+    reportPath: env.TURN_ROUTE_EVAL_REPORT,
+  };
+}
+
 export function readCompactionEvalEnv(
   env: Record<string, string | undefined> = process.env,
 ): CompactionEvalEnv {

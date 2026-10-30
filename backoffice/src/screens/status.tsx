@@ -5,7 +5,27 @@ import { Icon } from '../components/icon';
 import { Badge, Card, Dot } from '../components/primitives';
 import { api, type ApiClient } from '../api/client';
 import { useAsync } from '../api/use-async';
-import type { StatusResponse } from '../api/types';
+import type { RouterResponse, StatusResponse } from '../api/types';
+import { RouterPanel } from './router-panel';
+
+/** Its own fetch, so a router-read failure never blanks the probe list. */
+function RouterSection({ client, reload }: { client: ApiClient; reload: number }): React.JSX.Element | null {
+  const { router } = client;
+  const { data, error } = useAsync<RouterResponse | null>(
+    (signal) => (router === undefined ? Promise.resolve(null) : router(signal)),
+    reload,
+  );
+  if (router === undefined) return null;
+  if (error !== null) {
+    return (
+      <Card>
+        <span style={{ color: 'var(--muted)' }}>Turn router: could not load ({error}).</span>
+      </Card>
+    );
+  }
+  if (data === null) return null;
+  return <RouterPanel data={data} />;
+}
 
 export function StatusScreen({ client = api }: { client?: ApiClient }): React.JSX.Element {
   // Re-run the probes when the refresh button is pressed (useAsync re-loads on key change).
@@ -61,6 +81,8 @@ export function StatusScreen({ client = api }: { client?: ApiClient }): React.JS
           </button>
         </div>
       </Card>
+
+      <RouterSection client={client} reload={reload} />
 
       <Card>
         <div style={{ marginBottom: 14, fontSize: 13, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--muted)' }}>

@@ -400,3 +400,110 @@ describe('makeCallModel', () => {
     ]);
   });
 });
+
+// Turn routing (docs/specs/jev-turn-routing-plan.md §5): the turn's tier picks
+// the model; a tier with no model of its own — or no tier at all, the
+// unrouted path — runs on the base (standard) model, never fails the call.
+describe('makeCallModel tier selection', () => {
+  function tagged(tag: string, seen: string[]) {
+    return mockModel([{ type: 'text', text: tag }], () => seen.push(tag));
+  }
+
+  it('runs a routed turn on the model for its tier', async () => {
+    const seen: string[] = [];
+    const callModel = makeCallModel({
+      model: tagged('standard', seen),
+      models: { fast: tagged('fast', seen), deep: tagged('deep', seen) },
+      systemPrompt: SYSTEM,
+    });
+
+    await callModel(userMsg, { forceFinal: false, tier: 'deep' });
+    await callModel(userMsg, { forceFinal: true, tier: 'deep' });
+    await callModel(userMsg, { forceFinal: false, tier: 'fast' });
+    await callModel(userMsg, { forceFinal: false, tier: 'standard' });
+
+    expect(seen).toEqual(['deep', 'deep', 'fast', 'standard']);
+  });
+
+  // REASONING_EFFORT is tuned for the standard model (Sonnet 5.5 rejects
+  // `disabled`) and Haiku 4.5 REJECTS the parameter: sending it on a routed
+  // fast turn would 400 every one of them. A tier model runs at its default.
+  it('sends REASONING_EFFORT on the standard model only — never to a tier model', async () => {
+    const efforts: Array<[string, unknown]> = [];
+    const capture = (tag: string) =>
+      mockModel([{ type: 'text', text: 'ok' }], (o) =>
+        efforts.push([tag, (o.providerOptions?.anthropic as { effort?: unknown } | undefined)?.effort]),
+      );
+    const callModel = makeCallModel({
+      model: capture('standard'),
+      models: { fast: capture('fast'), deep: capture('deep') },
+      systemPrompt: SYSTEM,
+      effort: 'low',
+    });
+
+    await callModel(userMsg, { forceFinal: false });
+    await callModel(userMsg, { forceFinal: false, tier: 'standard' });
+    await callModel(userMsg, { forceFinal: false, tier: 'fast' });
+    await callModel(userMsg, { forceFinal: true, tier: 'deep' });
+
+    expect(efforts).toEqual([
+      ['standard', 'low'],
+      ['standard', 'low'],
+      ['fast', undefined],
+      ['deep', undefined],
+    ]);
+  });
+
+  it('sends each tier model its own effort when one is configured', async () => {
+    const efforts: Array<[string, unknown]> = [];
+    const capture = (tag: string) =>
+      mockModel([{ type: 'text', text: 'ok' }], (o) =>
+        efforts.push([tag, (o.providerOptions?.anthropic as { effort?: unknown } | undefined)?.effort]),
+      );
+    const callModel = makeCallModel({
+      model: capture('standard'),
+      models: { fast: capture('fast'), deep: capture('deep') },
+      efforts: { fast: 'low', deep: 'medium' },
+      systemPrompt: SYSTEM,
+      effort: 'low',
+    });
+
+    await callModel(userMsg, { forceFinal: false, tier: 'fast' });
+    await callModel(userMsg, { forceFinal: false, tier: 'deep' });
+
+    expect(efforts).toEqual([
+      ['fast', 'low'],
+      ['deep', 'medium'],
+    ]);
+  });
+
+  it('reports the turn tier with usage so traces can split cost per tier', async () => {
+    const usages: ModelUsage[] = [];
+    const callModel = makeCallModel({
+      model: mockModel([{ type: 'text', text: 'ok' }]),
+      models: { deep: mockModel([{ type: 'text', text: 'ok' }]) },
+      systemPrompt: SYSTEM,
+      onUsage: (u) => usages.push(u),
+    });
+
+    await callModel(userMsg, { forceFinal: false, tier: 'deep' });
+    await callModel(userMsg, { forceFinal: false });
+
+    expect(usages[0]!.tier).toBe('deep');
+    expect(usages[1]).not.toHaveProperty('tier');
+  });
+
+  it('falls back to the base model for an unrouted call or a tier without a model', async () => {
+    const seen: string[] = [];
+    const callModel = makeCallModel({
+      model: tagged('standard', seen),
+      models: { deep: tagged('deep', seen) },
+      systemPrompt: SYSTEM,
+    });
+
+    await callModel(userMsg, { forceFinal: false });
+    await callModel(userMsg, { forceFinal: false, tier: 'fast' });
+
+    expect(seen).toEqual(['standard', 'standard']);
+  });
+});

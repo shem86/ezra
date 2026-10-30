@@ -35,6 +35,32 @@
 - Don't re-run an already-green command unless code changed since.
 - Never skip/weaken a failing test to get CI green (SPEC "Never").
 
+## Routing evals (turn routing — `docs/specs/jev-turn-routing-plan.md` §8a)
+
+**Run `pnpm eval:route` before committing a change to ANY of these, and put
+its report in the PR description:**
+
+- `src/agent/turn-route.ts` — a question, criterion, option, threshold, or
+  `decideTier`;
+- the Jev pin (`JEV_MODEL` / `DEFAULT_JEV_MODEL`);
+- a tier model id — `FAST_MODEL_ID`, `DEEP_MODEL_ID`, `REASONING_MODEL_ID`,
+  **including a host env override**, which no CI sees;
+- `evals/fixtures/turn-route/`.
+
+It runs two suites:
+
+- `evals/turn-route.eval.ts` is live Jev accuracy through the shipping code,
+  costing well under a cent. It gates on the holdout split: zero turns harder
+  than fast routed fast, and at most one tier miss per language.
+- `evals/turn-route-tiers.eval.ts` runs real Haiku and Opus turns (cents)
+  asserting the autonomous effects on each tier.
+
+There is deliberately no fingerprint or CI gate (builder call, 2026-10-29).
+Only agents work on this repo, so this rule IS the mechanism. Don't skip it
+because a change "only touches wording": wording changes are exactly what it
+exists for. Tune on the tune split only. Never edit a criterion to fix one
+named case, and never fit a threshold to a handful of rows.
+
 ## Recovery-test patterns (from the T8 spike — reuse, don't reinvent)
 
 - **Kill-mid-flight:** spawn the workflow in a child `node` process, poll the

@@ -10,6 +10,7 @@ import type { TurnMessage } from './context.js';
 import { renderCurrentTimePrompt, renderReplyLanguagePrompt } from './prompts.js';
 import { replyLanguageFor, type ReplyLanguage } from './language.js';
 import type { ReasoningEffort } from '../ops/config.js';
+import type { Tier } from './turn-route.js';
 
 // The pinned @ai-sdk/anthropic sizes max_tokens from a table of model ids it
 // knows and falls back to 4096 for any other (claude-sonnet-5-5 included).
@@ -22,11 +23,24 @@ export interface ModelUsage {
   readonly outputTokens: number | undefined;
   readonly cacheReadTokens: number | undefined;
   readonly cacheWriteTokens: number | undefined;
+  /** The routed turn's tier — absent on an unrouted call. */
+  readonly tier?: Tier;
 }
 
 export interface CallModelDeps {
   /** Instantiated by the composing caller from Config — never module-level. */
   readonly model: LanguageModel;
+  /**
+   * Per-tier models for routed turns (docs/specs/jev-turn-routing-plan.md).
+   * `model` is the standard tier; a call with no tier, or a tier with no
+   * entry here, runs on it — routing can only ever fall back to today.
+   */
+  readonly models?: Partial<Record<Tier, LanguageModel>>;
+  /**
+   * Effort for a call running on a tier model. `effort` below belongs to the
+   * base model only; a tier model with no entry here gets none (its default).
+   */
+  readonly efforts?: Partial<Record<Tier, ReasoningEffort>>;
   /** The stable cacheable prefix (T32 brings the real one). */
   readonly systemPrompt: string;
   /** Definitions only — no execute: DBOS owns the loop (decision 4). */
@@ -45,6 +59,17 @@ export interface CallModelDeps {
   readonly now?: () => Date;
 }
 
+/** Config's per-tier efforts → CallModelDeps['efforts'], omitting tiers set to `default`. */
+export function tierEfforts(routing: {
+  readonly fastEffort: ReasoningEffort | undefined;
+  readonly deepEffort: ReasoningEffort | undefined;
+}): Partial<Record<Tier, ReasoningEffort>> {
+  return {
+    ...(routing.fastEffort === undefined ? {} : { fast: routing.fastEffort }),
+    ...(routing.deepEffort === undefined ? {} : { deep: routing.deepEffort }),
+  };
+}
+
 /**
  * Build the callModel dep that T22's workflow wraps in DBOS.runStep. The
  * returned AssistantMessage carries the text AND every tool_use id/name/args
@@ -55,8 +80,13 @@ const defaultNow = (): Date => new Date();
 
 export function makeCallModel(deps: CallModelDeps): HandleTurnDeps['callModel'] {
   return async function callModel(messages, options) {
+    const tierModel = options.tier === undefined ? undefined : deps.models?.[options.tier];
+    // `effort` is tuned for the base (standard) model; a tier model gets only
+    // its own configured effort — Haiku 4.5 rejects the parameter outright.
+    const effort =
+      tierModel === undefined ? deps.effort : options.tier === undefined ? undefined : deps.efforts?.[options.tier];
     const result = await generateText({
-      model: deps.model,
+      model: tierModel ?? deps.model,
       // The system prompt travels as a message so cacheControl attaches (T7).
       allowSystemInMessages: true,
       messages: toSdkMessages(
@@ -69,7 +99,7 @@ export function makeCallModel(deps: CallModelDeps): HandleTurnDeps['callModel'] 
       ...(deps.tools === undefined ? {} : { tools: deps.tools }),
       toolChoice: options.forceFinal ? 'none' : 'auto',
       maxOutputTokens: MAX_OUTPUT_TOKENS,
-      ...(deps.effort === undefined ? {} : { providerOptions: { anthropic: { effort: deps.effort } } }),
+      ...(effort === undefined ? {} : { providerOptions: { anthropic: { effort } } }),
     });
 
     deps.onUsage?.({
@@ -77,6 +107,7 @@ export function makeCallModel(deps: CallModelDeps): HandleTurnDeps['callModel'] 
       outputTokens: result.usage.outputTokens,
       cacheReadTokens: result.usage.inputTokenDetails.cacheReadTokens,
       cacheWriteTokens: result.usage.inputTokenDetails.cacheWriteTokens,
+      ...(options.tier === undefined ? {} : { tier: options.tier }),
     });
 
     return {

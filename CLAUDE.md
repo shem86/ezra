@@ -60,6 +60,7 @@ pnpm test:recovery     # kill-mid-flight replay gate (named integration files; C
 pnpm lint              # eslint incl. custom DBOS-determinism rule (CI-failing)
 pnpm check:docs        # doc reference check — links, cited paths, STATUS.md symbols (CI-failing)
 pnpm eval              # model-in-the-loop scenarios — on-demand, never CI
+pnpm eval:route        # turn-routing evals — REQUIRED after any routing change (.claude/rules/testing.md "Routing evals")
 pnpm dev               # scripted-day composition against dev DB, transport+model stubbed
 ```
 

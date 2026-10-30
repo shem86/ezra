@@ -254,3 +254,68 @@ describe('loadProductionConfig (T42)', () => {
     expect(() => loadConfig(validEnv)).not.toThrow();
   });
 });
+
+// Turn routing (docs/specs/jev-turn-routing-plan.md §5/§6): off by default so
+// a deploy without the new vars behaves exactly as before; the staged
+// rollout (§7b) ships standard+deep first.
+describe('loadConfig: turn routing', () => {
+  it('is off by default and needs no TypeSafe key then', () => {
+    const { turnRouting } = loadConfig(validEnv);
+    expect(turnRouting.mode).toBe('off');
+    expect(turnRouting.typesafeApiKey).toBeUndefined();
+  });
+
+  it('defaults the Jev pin, the tier models, and the stage-1 tier set', () => {
+    const { turnRouting } = loadConfig(validEnv);
+    expect(turnRouting.jevModel).toBe('jev-1.14.0');
+    expect(turnRouting.fastModelId).toBe('claude-haiku-5-5');
+    expect(turnRouting.deepModelId).toBe('claude-opus-5-5');
+    // Haiku 5.5 thinks at `medium` by default; a fast tier wants `low`.
+    // Opus 5.5's own default is `medium` — explicit, so it's a visible knob.
+    expect(turnRouting.fastEffort).toBe('low');
+    expect(turnRouting.deepEffort).toBe('medium');
+    expect([...turnRouting.enabledTiers].sort()).toEqual(['deep', 'standard']);
+  });
+
+  it.each(['shadow', 'on'])('requires TYPESAFE_API_KEY when TURN_ROUTING=%s', (mode) => {
+    expect(() => loadConfig({ ...validEnv, TURN_ROUTING: mode })).toThrow(/TYPESAFE_API_KEY/);
+    const config = loadConfig({ ...validEnv, TURN_ROUTING: mode, TYPESAFE_API_KEY: 'apikey_x' });
+    expect(config.turnRouting).toMatchObject({ mode, typesafeApiKey: 'apikey_x' });
+  });
+
+  it('rejects an unknown mode', () => {
+    expect(() => loadConfig({ ...validEnv, TURN_ROUTING: 'yes' })).toThrow(/TURN_ROUTING/);
+  });
+
+  it('parses an explicit tier set, trimmed', () => {
+    const config = loadConfig({ ...validEnv, TURN_ROUTING_TIERS: ' fast , standard,deep ' });
+    expect([...config.turnRouting.enabledTiers].sort()).toEqual(['deep', 'fast', 'standard']);
+  });
+
+  it('rejects a tier set without standard (the fallback must always be runnable) or with an unknown tier', () => {
+    expect(() => loadConfig({ ...validEnv, TURN_ROUTING_TIERS: 'deep' })).toThrow(
+      /TURN_ROUTING_TIERS/,
+    );
+    expect(() => loadConfig({ ...validEnv, TURN_ROUTING_TIERS: 'standard,opus' })).toThrow(
+      /TURN_ROUTING_TIERS/,
+    );
+  });
+
+  it('maps a tier effort of `default` to none (the model decides)', () => {
+    const config = loadConfig({ ...validEnv, FAST_EFFORT: 'default', DEEP_EFFORT: 'high' });
+    expect(config.turnRouting.fastEffort).toBeUndefined();
+    expect(config.turnRouting.deepEffort).toBe('high');
+  });
+
+  it('accepts tier model overrides', () => {
+    const config = loadConfig({
+      ...validEnv,
+      FAST_MODEL_ID: 'claude-haiku-5-5',
+      DEEP_MODEL_ID: 'claude-opus-4-6',
+    });
+    expect(config.turnRouting).toMatchObject({
+      fastModelId: 'claude-haiku-5-5',
+      deepModelId: 'claude-opus-4-6',
+    });
+  });
+});

@@ -963,6 +963,101 @@ saw spine + backoffice up on 2.3.14, no rollback), and the container log shows
 a clean `ezra up` on image `2.3.14`. Not yet observed on a real code-switched
 prod turn.
 
+### 16. Jev turn routing (Haiku / Sonnet / Opus per turn) — Phases 1–4 done; prod shadow (Phase 5) under way
+**Status:** in progress. Plan [`docs/specs/jev-turn-routing-plan.md`](docs/specs/jev-turn-routing-plan.md).
+Builder decisions recorded 2026-10-29: household text to TypeSafe, a new egress host,
+superseding ADR-0007, an Opus tier, the `turn_route_log` migration, a staged rollout
+(`standard`/`deep` before `fast`), eval re-runs as an agent rule (no fingerprint gate), and router
+health in the backoffice rather than Telegram.
+
+**Phase 1 verified** 2026-10-29 by a live probe of `jev-1.14.0` on 45 synthetic cases
+(`spikes/jev-turn-route-probe.ts`): holdout 15/15 tiers exact, Hebrew and code-switched messages at
+parity with English, 0 harder turns sent to `fast`, p95 ≤ 369 ms. The record is in
+[`docs/spike-results.md`](docs/spike-results.md).
+
+**Phase 2 verified** 2026-10-29 by `pnpm build`, `pnpm lint`, and the unit suite (742 green; no
+DB, and nothing DB-touching changed). It adds the pure core:
+`decideTier`, `preRouteTier`, `applyRollout`, and `renderRouteState` in `src/agent/turn-route.ts`,
+with the measured question set. It also adds the zero-dependency `makeJevClient` in
+`src/agent/jev-client.ts`. That client turns every failure
+into a `JevError` and never into an answer, and scrubs the key from errors. The unit tests replay
+all 45 recorded Phase 1 Jev answers through `decideTier`, and an exhaustive combination test proves
+an unsettled answer can never buy `fast` or `deep`. `api.typesafe.ai` joined the egress allowlist
+(category `routing`; two stable Cloudflare A records, TTL 300). It is inert until the code is
+wired and released. Nothing calls the router yet.
+
+**Phase 3 verified** 2026-10-29 by the full `pnpm test` with integration against the dev
+Postgres (936 green), by `pnpm test:recovery` (62 green), and by `pnpm build` and `pnpm lint`.
+- `makeRouteTurn` in `src/agent/route-turn.ts` is the body of the journaled `routeTurn` step. It
+  never throws: a Jev failure becomes a `fallback-error:<kind>` standard decision.
+- `handleTurn` runs it once per turn, before round 0, and every round (including the forced final)
+  runs on that tier. With no `routeTurn` dep the step sequence is unchanged.
+- `makeCallModel` picks the model per tier, falling back to the standard model.
+- The new kill drill in `tests/integration/handle-turn.test.ts` ("turn routing — the routeTurn
+  step") SIGKILLs a routed turn after the step journaled. The replay asks Jev **once** and runs on
+  the journaled tier.
+- A deliberate mutation (calling `routeTurn` outside `DBOS.runStep`) turned that drill red (Jev
+  asked twice), so the test catches the regression it exists for.
+
+**Phase 4 verified** 2026-10-29 by `pnpm build`, `pnpm lint`, the full `pnpm test` with
+integration (976 green), `pnpm test:recovery` (62 green), and the backoffice SPA's own test, build
+and lint (59 green). Routing is now **composed but off by default** (`TURN_ROUTING=off`), so a
+deploy without new env vars behaves exactly as before.
+- **Config:** `TurnRoutingConfig` in `src/ops/config.ts` adds the mode, key, Jev pin, tier models,
+  and the stage-1 tier set (`standard,deep`).
+- **Composition:** `makeTurnRouting` in `src/main.ts`; the same `makeTurnRouting` call in
+  `src/dev/main.ts` mirrors it.
+- **Route log:** migration 0009 adds `turn_route_log`, written by `writeTurnRouteLog` as an
+  idempotent transaction. The kill drill proves exactly one row survives replay.
+- **Tracing:** `onRouteDecision` emits a metadata-only `routeTurn` span, and `callModel` spans are
+  tagged with the tier.
+- **Log lines:** `probeJev` / `createRouteStreakLog` in `src/ops/route-health.ts`.
+- **Backoffice:** `/api/router`, served by `getRouterHealth`, feeds a Router panel on the Status
+  screen. The turn view is the expandable recent-turns list. The full Langfuse + transcript join
+  sketched in plan §5a was not built.
+- **Evals and rule:** `pnpm eval:route` plus the "Routing evals" rule in `.claude/rules/testing.md`.
+
+Live evidence the same day:
+- **`pnpm dev` with `TURN_ROUTING=shadow`:** the probe logged `jev ok` in 211 ms, and all 10
+  scripted turns were routed and logged. The run surfaced a missing intent: recall questions were
+  proposed for `fast` via `list_edit`. Fixed with a `conversation_recall` option and 9 new cases.
+- **`pnpm eval:route`, router suite:** 54/54 tiers exact, holdout 6/6 per language, 0 sent to
+  `fast` wrongly, p95 153 ms, $0.003.
+- **`pnpm eval:route`, per-tier suite:** 6/6 list, reminder and fact effects correct on both Haiku
+  (`fast`) and `claude-opus-5-5` (`deep`). A bogus `DEEP_MODEL_ID` turned the deep run red,
+  proving the deep tier really calls the configured model.
+
+**Merged with main 2026-10-30** (Sonnet 5.5 as the turn model, item 14; the reply-language note,
+item 15). The merge surfaced one real interaction bug, fixed with a reproduction test first:
+`REASONING_EFFORT` (`low`) was sent on **every** tier, and Haiku 4.5 rejects the parameter, so
+every routed fast turn would have returned a 400. `makeCallModel` now sends it to the standard
+model only.
+
+**Tier models updated 2026-10-30** (builder ask):
+- **Fast tier:** `claude-haiku-5-5`, which supports effort and thinks by default, replaces
+  Haiku 4.5.
+- **Per-tier effort:** `tierEfforts` in `src/agent/call-model.ts` applies `FAST_EFFORT` (default
+  `low`) and `DEEP_EFFORT` (default `medium`, Opus 5.5's own default made explicit).
+- **`pnpm eval:route` re-run the same day:**
+  - router 54/54, holdout 6/6/6, 0 sent to `fast` wrongly;
+  - per-tier 6/6 effects on Haiku 5.5 at `low` and Opus 5.5 at `medium`.
+- **Eval test defect fixed:** the eval's fact test shared one "cabin wifi" fact across tiers and
+  runs. The near-duplicate guard then correctly made Opus ask which fact to update instead of
+  saving. The test now clears its own `Cabin-ev…` rows first; the exact-value assertion is
+  unchanged.
+- **Not changed:** `CHEAP_MODEL_ID` (relatedness classifier + compaction summarizer) stays on
+  Haiku 4.5. That is a separate change with its own evals.
+
+**Phase 5 (prod shadow) — started 2026-10-30:**
+- **Config:** `TURN_ROUTING=shadow` and `TYPESAFE_API_KEY` added to the `/hh-assistant/env` SSM
+  parameter (version 3 → 4, verified by reading it back).
+- **Headroom:** that parameter is now 8,184 of the 8,192 characters an advanced-tier parameter
+  allows. The next env var will not fit until something moves out, e.g. its 58 comment lines
+  (~3.6k chars) or a second parameter.
+- **Key rotation:** the builder chose not to rotate the key pasted into the 2026-10-29 session.
+- **Remaining:** release, confirm `[route] mode shadow` and `[route] jev ok` on the host, then read
+  the backoffice Router panel daily for about 2 weeks before deciding Phase 6.
+
 ---
 
 ## Newly unblocked by going public (2026-07-14)

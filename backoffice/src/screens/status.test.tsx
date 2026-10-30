@@ -44,6 +44,27 @@ describe('StatusScreen (live)', () => {
     expect(await screen.findByText('All systems operational')).toBeInTheDocument();
   });
 
+  it('shows the Router panel when the client can read it', async () => {
+    const c: ApiClient = {
+      ...client(data),
+      router: async () => ({ mode: 'shadow', rows: [], recent: [] }),
+    };
+    render(<StatusScreen client={c} />);
+    expect(await screen.findByText(/Turn router/)).toBeInTheDocument();
+  });
+
+  it('keeps the probe list when the Router read fails', async () => {
+    const c: ApiClient = {
+      ...client(data),
+      router: async () => {
+        throw new Error('HTTP 500');
+      },
+    };
+    render(<StatusScreen client={c} />);
+    expect(await screen.findByText(/Turn router: could not load/)).toBeInTheDocument();
+    expect(screen.getByText('Postgres')).toBeInTheDocument();
+  });
+
   it('re-runs the probes when the refresh button is pressed', async () => {
     const status = vi.fn(async () => data);
     const c: ApiClient = { ...client(data), status };

@@ -5,6 +5,7 @@
 # nftables.sh reads this file so the host firewall needs no Node (V2_NOTES §4).
 api.anthropic.com
 api.voyageai.com
+api.typesafe.ai
 oauth2.googleapis.com
 www.googleapis.com
 cloud.langfuse.com
