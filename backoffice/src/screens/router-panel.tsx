@@ -3,12 +3,17 @@
 // standard, so it is a degraded optimization, not an outage. Rows turn amber
 // against the plan's starting thresholds; a recent turn expands into what Jev
 // answered (the turn view — the workflow id joins it to the Logs screen).
+// The router's pick gets its own column even when it matches what ran: in
+// shadow every turn runs standard, and the pick is what is being evaluated.
 import { useState } from 'react';
 import { Badge, Card, Dot, SectionTitle } from '../components/primitives';
 import type { RouterResponse } from '../api/types';
 
+const PAGE = 15;
+
 export function RouterPanel({ data }: { data: RouterResponse }): React.JSX.Element {
   const [open, setOpen] = useState<string | null>(null);
+  const [shown, setShown] = useState(PAGE);
   const amber = data.rows.filter((r) => r.status === 'amber').length;
 
   if (data.mode === null) {
@@ -47,14 +52,15 @@ export function RouterPanel({ data }: { data: RouterResponse }): React.JSX.Eleme
             <thead>
               <tr style={{ textAlign: 'left', color: 'var(--muted)' }}>
                 <th>when</th>
-                <th>ran / proposed</th>
+                <th>ran</th>
+                <th>router picked</th>
                 <th>source</th>
                 <th>ms</th>
                 <th>message</th>
               </tr>
             </thead>
             <tbody>
-              {data.recent.map((t) => (
+              {data.recent.slice(0, shown).map((t) => (
                 <RouteRow
                   key={t.workflowId}
                   turn={t}
@@ -64,6 +70,11 @@ export function RouterPanel({ data }: { data: RouterResponse }): React.JSX.Eleme
               ))}
             </tbody>
           </table>
+          {data.recent.length > shown && (
+            <button className="btn btn-ghost" style={{ marginTop: 10 }} onClick={() => setShown(shown + PAGE)}>
+              Show more ({data.recent.length - shown} older)
+            </button>
+          )}
         </div>
       )}
     </Card>
@@ -85,7 +96,11 @@ function RouteRow({
         <td style={{ fontFamily: 'var(--mono)', whiteSpace: 'nowrap' }}>{turn.createdAt.slice(5, 16).replace('T', ' ')}</td>
         <td>
           <Badge mono>{turn.tier}</Badge>
-          {turn.proposed !== turn.tier && <span style={{ color: 'var(--muted)' }}> / {turn.proposed}</span>}
+        </td>
+        <td>
+          <Badge mono tone={turn.proposed === turn.tier ? 'neutral' : 'accent'}>
+            {turn.proposed}
+          </Badge>
         </td>
         <td style={{ fontFamily: 'var(--mono)' }}>{turn.source}</td>
         <td style={{ fontFamily: 'var(--mono)' }}>{turn.latencyMs ?? '—'}</td>
@@ -95,7 +110,7 @@ function RouteRow({
       </tr>
       {open && (
         <tr>
-          <td colSpan={5} style={{ padding: '8px 0 12px' }}>
+          <td colSpan={6} style={{ padding: '8px 0 12px' }}>
             <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>
               workflow {turn.workflowId} · {turn.conversationId}
             </div>

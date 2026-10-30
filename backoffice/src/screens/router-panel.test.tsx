@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { RouterPanel } from './router-panel';
 import type { RouterResponse } from '../api/types';
@@ -44,6 +44,32 @@ describe('RouterPanel', () => {
     fireEvent.click(turn);
     expect(screen.getByText(/weighsOptions/)).toBeInTheDocument();
     expect(screen.getByText(/wf-1/)).toBeInTheDocument();
+  });
+
+  it("always shows the router's pick in its own column, even when it matches what ran", () => {
+    const same = { ...data.recent[0]!, workflowId: 'wf-2', proposed: 'standard', latestText: 'מאשר' };
+    render(<RouterPanel data={{ ...data, recent: [data.recent[0]!, same] }} />);
+    expect(screen.getByRole('columnheader', { name: 'ran' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'router picked' })).toBeInTheDocument();
+    const [, deepRow, sameRow] = screen.getAllByRole('row');
+    expect(within(deepRow!).getAllByRole('cell')[2]).toHaveTextContent('deep');
+    expect(within(sameRow!).getAllByRole('cell')[2]).toHaveTextContent('standard');
+  });
+
+  it('shows 15 turns and pages through the rest on demand', () => {
+    const recent = Array.from({ length: 40 }, (_, i) => ({
+      ...data.recent[0]!,
+      workflowId: `wf-${i}`,
+      latestText: `turn ${i}`,
+    }));
+    render(<RouterPanel data={{ ...data, recent }} />);
+    expect(screen.getByText('turn 14')).toBeInTheDocument();
+    expect(screen.queryByText('turn 15')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /show more/i }));
+    expect(screen.getByText('turn 29')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /show more/i }));
+    expect(screen.getByText('turn 39')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /show more/i })).not.toBeInTheDocument();
   });
 
   it('says so plainly when the router has never logged a turn', () => {
