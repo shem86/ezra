@@ -80,7 +80,7 @@ export function UsageBars({ rows, height = 150 }: { rows: readonly UsageTypeRow[
           fill: (d: UsageTypeRow) => usageColor(d.name),
         }),
       ],
-      x: { scale: scaleLinear, nice: true, grid: true },
+      x: { scale: scaleLinear, nice: true, grid: true, axis: { ticks: { format: (v: number) => '$' + v.toFixed(2) } } },
       y: { scale: () => scaleBand().padding(0.28) },
     },
     {

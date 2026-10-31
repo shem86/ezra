@@ -1,11 +1,15 @@
 // Status — LIVE service probes grouped by area + static reliability edges
 // (recovery-runbook copy). Fetches /api/status (BO-11).
+//
+// Layout (2026-10-31): each probe group is ONE card of rows, status-page style,
+// in a two-up grid — the old one-card-per-service layout left most groups as a
+// lone half-width card under a heading.
 import { useState } from 'react';
 import { Icon } from '../components/icon';
-import { Badge, Card, Dot } from '../components/primitives';
+import { Badge, Card, Dot, SectionTitle } from '../components/primitives';
 import { api, type ApiClient } from '../api/client';
 import { useAsync } from '../api/use-async';
-import type { RouterResponse, StatusResponse } from '../api/types';
+import type { RouterResponse, ServiceRow, StatusResponse } from '../api/types';
 import { RouterPanel } from './router-panel';
 
 /** Its own fetch, so a router-read failure never blanks the probe list. */
@@ -25,6 +29,32 @@ function RouterSection({ client, reload }: { client: ApiClient; reload: number }
   }
   if (data === null) return null;
   return <RouterPanel data={data} />;
+}
+
+function ServiceLine({ s }: { s: ServiceRow }): React.JSX.Element {
+  const tone = s.status === 'operational' ? 'ok' : s.status === 'degraded' ? 'amber' : 'err';
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', gap: 14, alignItems: 'center', padding: '13px 0' }}>
+      <Dot status={s.status} size={10} pulse={s.status !== 'operational'} />
+      <div style={{ minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 14, fontWeight: 600 }}>{s.name}</span>
+          {s.status !== 'operational' && <Badge tone={tone}>{s.status}</Badge>}
+        </div>
+        {s.detail && <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 2 }}>{s.detail}</div>}
+      </div>
+      <div style={{ textAlign: 'right' }} className="num">
+        <div className="mono" style={{ fontSize: 13 }}>
+          {s.latency}
+        </div>
+        {s.uptime && (
+          <div style={{ fontSize: 11.5, color: 'var(--muted-2)' }} title="uptime">
+            {s.uptime} up
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export function StatusScreen({ client = api }: { client?: ApiClient }): React.JSX.Element {
@@ -47,89 +77,99 @@ export function StatusScreen({ client = api }: { client?: ApiClient }): React.JS
 
   const groups = [...new Set(data.services.map((s) => s.group))];
   const deg = data.services.filter((s) => s.status !== 'operational');
+  const anyDown = deg.some((s) => s.status === 'down');
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <Card
-        style={{
-          background: deg.length
-            ? 'color-mix(in oklch, var(--amber) 8%, var(--surface))'
-            : 'color-mix(in oklch, var(--ok) 8%, var(--surface))',
-          borderColor: deg.length
-            ? 'color-mix(in oklch, var(--amber) 40%, var(--border))'
-            : 'color-mix(in oklch, var(--ok) 40%, var(--border))',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <Dot status={deg.length ? 'degraded' : 'operational'} size={14} pulse />
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 17, fontWeight: 700 }}>
+    <div className="stack stagger">
+      <section className="hero" style={{ padding: '22px 26px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 18, position: 'relative', zIndex: 1 }}>
+          <span
+            style={{
+              width: 48,
+              height: 48,
+              borderRadius: 14,
+              display: 'grid',
+              placeItems: 'center',
+              flex: 'none',
+              background: `color-mix(in oklch, ${deg.length ? (anyDown ? 'var(--err)' : 'var(--amber)') : 'var(--ok)'} 16%, transparent)`,
+              color: deg.length ? (anyDown ? 'var(--err)' : 'var(--amber-ink)') : 'var(--ok-ink)',
+            }}
+          >
+            <Icon name={deg.length ? 'alert' : 'check'} size={24} />
+          </span>
+          <div>
+            <h2 className="hero-hello" style={{ fontSize: 26 }}>
               {deg.length ? `Degraded — ${deg.length} integration${deg.length > 1 ? 's' : ''} slow` : 'All systems operational'}
-            </div>
-            <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 2 }}>
+            </h2>
+            <div style={{ fontSize: 13.5, color: 'var(--muted)', marginTop: 4 }}>
               Agent live · {data.turnsToday} turns today · avg latency {data.avgLatency}
             </div>
           </div>
-          <button
-            className="iconbtn"
-            onClick={() => setReload((n) => n + 1)}
-            disabled={loading}
-            aria-label="Refresh probes"
-            title="Refresh probes"
-          >
-            <Icon name="refresh" size={16} />
-          </button>
         </div>
-      </Card>
-
-      <RouterSection client={client} reload={reload} />
+        <button
+          className="iconbtn spin"
+          style={{ position: 'relative', zIndex: 1 }}
+          onClick={() => setReload((n) => n + 1)}
+          disabled={loading}
+          aria-label="Refresh probes"
+          title="Refresh probes"
+        >
+          <Icon name="refresh" size={16} />
+        </button>
+      </section>
 
       <Card>
-        <div style={{ marginBottom: 14, fontSize: 13, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--muted)' }}>
-          Reliability edges
-        </div>
+        <SectionTitle right={<span className="hint">from the recovery runbook</span>}>Reliability edges</SectionTitle>
         <div className="grid-status-edges">
           {data.edges.map((e) => (
-            <div key={e.name} style={{ padding: 14, background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 10 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8 }}>
-                <Dot status={e.status} />
-                <span style={{ fontSize: 13, fontWeight: 600 }}>{e.name}</span>
+            <div
+              key={e.name}
+              style={{ display: 'flex', gap: 10, padding: '12px 14px', background: 'var(--surface-2)', borderRadius: 12 }}
+            >
+              <span style={{ color: e.status === 'ok' ? 'var(--ok-ink)' : 'var(--amber-ink)', marginTop: 1 }}>
+                <Icon name={e.status === 'ok' ? 'check' : 'alert'} size={15} />
+              </span>
+              <div>
+                <div style={{ fontSize: 13.5, fontWeight: 600 }}>{e.name}</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.45, marginTop: 2 }}>{e.detail}</div>
               </div>
-              <div style={{ fontSize: 11.5, color: 'var(--muted)', lineHeight: 1.45 }}>{e.detail}</div>
             </div>
           ))}
         </div>
       </Card>
 
-      {groups.map((g) => (
-        <div key={g}>
-          <div style={{ marginBottom: 14, fontSize: 13, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--muted)' }}>
-            {g}
-          </div>
-          <div className="grid-status-services">
-            {data.services
-              .filter((s) => s.group === g)
-              .map((s) => (
-                <Card key={s.name} style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                  <Dot status={s.status} size={11} pulse={s.status !== 'operational'} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ fontSize: 14, fontWeight: 600 }}>{s.name}</span>
-                      <Badge tone={s.status === 'operational' ? 'ok' : s.status === 'degraded' ? 'amber' : 'err'}>
-                        {s.status}
-                      </Badge>
-                    </div>
-                    <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 3 }}>{s.detail}</div>
+      <div className="grid-status-services">
+        {groups.map((g) => {
+          const items = data.services.filter((s) => s.group === g);
+          const bad = items.filter((s) => s.status !== 'operational').length;
+          return (
+            <Card key={g} style={{ paddingBottom: 8 }} {...(bad ? { tone: 'amber' as const } : {})}>
+              <SectionTitle
+                right={
+                  bad ? (
+                    <Badge tone="amber">{bad} need attention</Badge>
+                  ) : (
+                    <span className="hint" style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <Dot status="operational" size={6} /> all good
+                    </span>
+                  )
+                }
+              >
+                {g}
+              </SectionTitle>
+              <div>
+                {items.map((s, i) => (
+                  <div key={s.name} style={{ borderTop: i ? '1px solid var(--border)' : 'none' }}>
+                    <ServiceLine s={s} />
                   </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontFamily: 'var(--mono)', fontSize: 13 }}>{s.latency}</div>
-                    <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted-2)' }}>{s.uptime}</div>
-                  </div>
-                </Card>
-              ))}
-          </div>
-        </div>
-      ))}
+                ))}
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+
+      <RouterSection client={client} reload={reload} />
     </div>
   );
 }

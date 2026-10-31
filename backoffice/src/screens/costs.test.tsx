@@ -1,10 +1,21 @@
 import { cleanup, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CostsScreen } from './costs';
 import type { ApiClient } from '../api/client';
 import type { CostsResponse } from '../api/types';
 
-afterEach(cleanup);
+// The projection is MTD ÷ day-of-month × month length, so on a month's LAST day
+// it equals MTD and '$9.17' renders twice — this test failed every month-end
+// (first caught 2026-10-31). Pin a mid-month clock; fake only Date so the
+// async findBy* polling still runs on real timers.
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-10-15T12:00:00'));
+});
+afterEach(() => {
+  vi.useRealTimers();
+  cleanup();
+});
 
 const costs: CostsResponse = {
   estimated: true,

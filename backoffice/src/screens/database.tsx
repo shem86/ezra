@@ -82,11 +82,7 @@ export function DatabaseScreen({ client = api }: { client?: ApiClient }): React.
             <button
               key={t.table}
               onClick={() => setActive(t.table)}
-              className="tablebtn"
-              style={{
-                background: t.table === active ? 'var(--accent-soft)' : 'none',
-                color: t.table === active ? 'var(--accent-ink)' : 'var(--ink)',
-              }}
+              className={'tablebtn' + (t.table === active ? ' on' : '')}
             >
               <Icon name={t.icon as IconName} size={15} />
               <span style={{ flex: 1, textAlign: 'left', fontFamily: 'var(--mono)', fontSize: 12.5 }}>
@@ -99,7 +95,7 @@ export function DatabaseScreen({ client = api }: { client?: ApiClient }): React.
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <h2 style={{ margin: 0, fontFamily: 'var(--mono)', fontSize: 19, fontWeight: 600 }}>
+          <h2 className="display" style={{ margin: 0, fontSize: 24, fontWeight: 500 }}>
             {listing?.label ?? active ?? '—'}
           </h2>
           <Badge mono>
@@ -157,16 +153,10 @@ export function DatabaseScreen({ client = api }: { client?: ApiClient }): React.
               </tbody>
             </table>
           </div>
-          <div
-            style={{
-              padding: '10px 16px',
-              borderTop: '1px solid var(--border)',
-              fontSize: 12,
-              color: 'var(--muted)',
-              display: 'flex',
-              justifyContent: 'space-between',
-            }}
-          >
+          {!loading && rows.length === 0 && (
+            <div className="empty">{q ? `No rows match “${q}”.` : 'This table is empty.'}</div>
+          )}
+          <div className="table-foot">
             <span>{loading ? 'loading…' : `${rows.length} of ${listing?.rows.length ?? 0} rows`}</span>
             <span style={{ fontFamily: 'var(--mono)' }}>
               SELECT * FROM {listing?.table ?? active}

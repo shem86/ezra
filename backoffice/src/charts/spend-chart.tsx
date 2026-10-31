@@ -72,7 +72,7 @@ export function SpendChart({
         crosshair({ x: true, marker: true }),
       ],
       x: { scale: scaleUtc },
-      y: { scale: scaleLinear, nice: true, grid: true },
+      y: { scale: scaleLinear, nice: true, grid: true, axis: { ticks: { format: (v: number) => '$' + v.toFixed(2) } } },
     },
     {
       ...motionOf('morph'),

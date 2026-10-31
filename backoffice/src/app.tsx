@@ -3,7 +3,7 @@
 // one kept (spec Q6). Hash routing means no server-side SPA fallback is needed.
 import { useEffect, useState } from 'react';
 import { signOut, UNAUTHORIZED_EVENT, type UnauthorizedDetail } from './api/client';
-import { Icon } from './components/icon';
+import { Icon, type IconName } from './components/icon';
 import { Badge, Dot } from './components/primitives';
 import { SignIn } from './components/sign-in';
 import { isRoute, NAV, TITLES, type Route } from './routes';
@@ -17,20 +17,68 @@ import { LogsScreen } from './screens/logs';
 import { OverviewScreen } from './screens/overview';
 import { StatusScreen } from './screens/status';
 
+type Theme = 'system' | 'light' | 'dark';
+const THEME_KEY = 'ezra-bo-theme';
+const NEXT_THEME: Record<Theme, Theme> = { system: 'light', light: 'dark', dark: 'system' };
+const THEME_ICON: Record<Theme, IconName> = { system: 'monitor', light: 'sun', dark: 'moon' };
+
+/** Per-viewer convenience only: storage can be blocked, so every access is
+ *  guarded and the console renders correctly (following the OS) without it. */
+function useTheme(): [Theme, () => void] {
+  const [theme, setTheme] = useState<Theme>(() => {
+    try {
+      const v = localStorage.getItem(THEME_KEY);
+      return v === 'light' || v === 'dark' ? v : 'system';
+    } catch {
+      return 'system';
+    }
+  });
+  useEffect(() => {
+    const el = document.documentElement;
+    if (theme === 'system') el.removeAttribute('data-theme');
+    else el.setAttribute('data-theme', theme);
+    try {
+      if (theme === 'system') localStorage.removeItem(THEME_KEY);
+      else localStorage.setItem(THEME_KEY, theme);
+    } catch {
+      /* storage unavailable — theme still applies for this visit */
+    }
+  }, [theme]);
+  return [theme, () => setTheme((t) => NEXT_THEME[t])];
+}
+
+// The household lives on Eastern time (reminders and compaction anchor to it),
+// so the console's clock does too — never the viewer's local zone.
+const HOUSEHOLD_TZ = 'America/New_York';
+function useHouseholdClock(): string {
+  const fmt = (): string =>
+    new Date().toLocaleString('en-US', { timeZone: HOUSEHOLD_TZ, weekday: 'short', hour: 'numeric', minute: '2-digit' });
+  const [now, setNow] = useState(fmt);
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(fmt()), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
+  return now;
+}
+
 function Sidebar({
   route,
   setRoute,
   onSignOut,
+  theme,
+  cycleTheme,
 }: {
   route: Route;
   setRoute: (r: Route) => void;
   onSignOut: () => void;
+  theme: Theme;
+  cycleTheme: () => void;
 }): React.JSX.Element {
   return (
-    <aside className="sidebar" data-tone="warm">
+    <aside className="sidebar">
       <div className="brand">
         <div className="brand-mark">ע</div>
-        <div>
+        <div className="brand-text">
           <div className="brand-name">Ezra</div>
           <div className="brand-sub">backoffice</div>
         </div>
@@ -61,28 +109,40 @@ function Sidebar({
             <span>{HOUSEHOLD.locale}</span>
           </div>
         </div>
-        <button className="signout" type="button" onClick={onSignOut}>
-          Sign out
-        </button>
+        <div className="side-actions">
+          <button className="signout" type="button" onClick={onSignOut}>
+            Sign out
+          </button>
+          <button
+            className="iconbtn sm"
+            type="button"
+            onClick={cycleTheme}
+            aria-label={`Theme: ${theme}`}
+            title={`Theme: ${theme} (click to change)`}
+          >
+            <Icon name={THEME_ICON[theme]} size={15} />
+          </button>
+        </div>
       </div>
     </aside>
   );
 }
 
 function Topbar({ route }: { route: Route }): React.JSX.Element {
+  const now = useHouseholdClock();
   return (
     <header className="topbar">
       <div>
         <div className="crumb">Ezra · WhatsApp household assistant</div>
         <h1 className="page-title">{TITLES[route]}</h1>
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div className="top-right">
+        <span className="clock" title="Household time (Eastern)">
+          {now} ET
+        </span>
         <Badge tone="ok">
-          <Dot status="operational" size={7} /> live
+          <Dot status="operational" size={7} pulse /> live
         </Badge>
-        {/* The console has no per-operator identity; the avatar carries the Ezra
-            brand mark (matches the sidebar) rather than a stray placeholder. */}
-        <div className="avatar" title="Ezra">ע</div>
       </div>
     </header>
   );
@@ -99,6 +159,7 @@ export function App(): React.JSX.Element {
   const [signedOut, setSignedOut] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [session, setSession] = useState(0);
+  const [theme, cycleTheme] = useTheme();
 
   useEffect(() => {
     const onUnauthorized = (e: Event): void => {
@@ -156,6 +217,8 @@ export function App(): React.JSX.Element {
       <Sidebar
         route={route}
         setRoute={setRoute}
+        theme={theme}
+        cycleTheme={cycleTheme}
         onSignOut={() => {
           void signOut().finally(() => {
             setSignedOut(true);
@@ -165,8 +228,9 @@ export function App(): React.JSX.Element {
       />
       <main className="main">
         <Topbar route={route} />
-        <div className="content" key={session}>
-          {screen[route]}
+        {/* Keyed on route too, so each screen gets its settle-in stagger. */}
+        <div className="content" key={`${session}-${route}`}>
+          <div className="content-inner">{screen[route]}</div>
         </div>
       </main>
     </div>

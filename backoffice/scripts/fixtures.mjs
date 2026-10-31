@@ -155,6 +155,38 @@ export const tables = {
   },
 };
 
+// Turn router (docs/specs/jev-turn-routing-plan.md §5b) in shadow mode: every
+// turn RAN standard; the router's pick is what is under evaluation. Without
+// this fixture the mock Status screen showed "could not load (HTTP 404)".
+const ROUTED = [
+  ['2026-07-14T20:41:00.000Z', 'standard', 'jev', 131, 'add oat milk to the list', { intent: 'list_edit', weighsOptions: 0.04 }],
+  ['2026-07-14T19:45:00.000Z', 'deep', 'jev', 148, 'נלך לסבתא בשישי או בשבת?', { intent: 'planning_or_advice', weighsOptions: 0.93 }],
+  ['2026-07-14T19:13:00.000Z', 'standard', 'rule', null, 'מה יש ברשימת קניות?', null],
+  ['2026-07-14T18:56:00.000Z', 'standard', 'jev', 122, 'remind me to call the plumber at 5', { intent: 'reminder', weighsOptions: 0.02 }],
+  ['2026-07-14T18:26:00.000Z', 'deep', 'jev', 163, 'which weekend works better for the trip?', { intent: 'planning_or_advice', weighsOptions: 0.88 }],
+  ['2026-07-14T17:55:00.000Z', 'standard', 'fallback-error:timeout', null, 'תזכיר לי מחר בבוקר', null],
+];
+export const router = {
+  mode: 'shadow',
+  rows: [
+    { name: 'Last routed turn', value: '2026-07-14T20:41:00.000Z', status: 'ok', detail: '31 routed of 38 turn(s) in 24h' },
+    { name: 'Jev latency p95', value: '171ms', status: 'ok', detail: 'budget 400ms' },
+    { name: 'Fallback rate', value: '3% of last 31 · 0 in a row', status: 'ok', detail: 'latest: fallback-error:timeout' },
+  ],
+  recent: ROUTED.map(([createdAt, proposed, source, latencyMs, latestText, answers], i) => ({
+    workflowId: `wf-route-${i + 1}`,
+    conversationId: 'conv-household',
+    createdAt,
+    mode: 'shadow',
+    tier: 'standard',
+    proposed,
+    source,
+    latencyMs,
+    answers,
+    latestText,
+  })),
+};
+
 /**
  * Resolve an /api pathname to a fixture body, or null for 404.
  * Shared so the screenshot interceptor and the HTTP server can never drift.
@@ -164,6 +196,7 @@ export function resolveFixture(pathname) {
   if (pathname === '/api/status') return status;
   if (pathname === '/api/logs') return logs;
   if (pathname === '/api/db') return catalogue;
+  if (pathname === '/api/router') return router;
   const m = pathname.match(/^\/api\/db\/([^/]+)$/);
   if (m) return tables[decodeURIComponent(m[1])] ?? tables.lists;
   return null;
