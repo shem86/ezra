@@ -88,28 +88,26 @@ export function Badge({
   );
 }
 
+/** Surface look (border, shadow, theme) lives in `.card` so dark mode and the
+ *  tone variants are one CSS change, not an edit to every inline style. */
 export function Card({
   children,
   style,
-  pad = 18,
+  pad = 20,
   className,
+  tone,
+  onClick,
 }: {
   children: ReactNode;
   style?: CSSProperties;
   pad?: number;
   className?: string;
+  tone?: 'amber' | 'ok' | 'err';
+  onClick?: () => void;
 }): React.JSX.Element {
+  const cls = ['card', tone ? `tone-${tone}` : '', onClick ? 'lift' : '', className ?? ''].filter(Boolean).join(' ');
   return (
-    <div
-      className={className}
-      style={{
-        background: 'var(--surface)',
-        border: '1px solid var(--border)',
-        borderRadius: 'var(--radius)',
-        padding: pad,
-        ...style,
-      }}
-    >
+    <div className={cls} style={{ padding: pad, ...style }} onClick={onClick}>
       {children}
     </div>
   );
@@ -123,27 +121,19 @@ export function SectionTitle({
   right?: ReactNode;
 }): React.JSX.Element {
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'baseline',
-        justifyContent: 'space-between',
-        marginBottom: 14,
-      }}
-    >
-      <h3
-        style={{
-          margin: 0,
-          fontSize: 13,
-          fontWeight: 700,
-          letterSpacing: '0.04em',
-          textTransform: 'uppercase',
-          color: 'var(--muted)',
-        }}
-      >
-        {children}
-      </h3>
+    <div className="card-head">
+      <h3 className="section-title">{children}</h3>
       {right}
+    </div>
+  );
+}
+
+/** A budget/usage meter. `mark` (0–1) draws a tick — e.g. where the month is. */
+export function Meter({ pct, over = false, mark }: { pct: number; over?: boolean; mark?: number }): React.JSX.Element {
+  return (
+    <div className={'meter' + (over ? ' over' : '')}>
+      <span style={{ width: `${Math.max(0, Math.min(100, pct))}%` }} />
+      {mark !== undefined && <i style={{ left: `calc(${Math.min(1, Math.max(0, mark)) * 100}% - 1px)` }} title="where the month is" />}
     </div>
   );
 }

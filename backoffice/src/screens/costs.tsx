@@ -8,7 +8,7 @@
 // series palette changed with them — the old one reused the UI's semantic
 // tokens and failed CVD separation on the fresh-input/cache-read pair, which is
 // the one comparison this screen exists to make.
-import { Badge, Card, SectionTitle } from '../components/primitives';
+import { Badge, Card, Meter, SectionTitle } from '../components/primitives';
 import { SpendChart } from '../charts/spend-chart';
 import { SplitBar, UsageBars } from '../charts/usage-charts';
 import { usageColor } from '../charts/palette';
@@ -37,6 +37,11 @@ export function projectMonthEnd(monthCostUsd: number, today = new Date()): numbe
   return (monthCostUsd / elapsed) * daysInMonth;
 }
 
+/** How far through the month today is (0–1) — the meter's "you are here" tick. */
+function monthFraction(today = new Date()): number {
+  return today.getDate() / new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+}
+
 export function CostsScreen({ client = api }: { client?: ApiClient }): React.JSX.Element {
   const { data, error, loading } = useAsync<CostsResponse>((signal) => client.costs(signal));
 
@@ -61,8 +66,8 @@ export function CostsScreen({ client = api }: { client?: ApiClient }): React.JSX
   const totalByUsage = c.byUsage.reduce((a, r) => a + r.cost, 0) || 1;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <div style={{ fontSize: 12, color: 'var(--muted-2)' }}>
+    <div className="stack stagger">
+      <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: -6 }}>
         Spend is <strong>estimated</strong> from token volume × Sonnet-class pricing — Langfuse records
         usage but not cost or model for this project. Token counts and the cache split are exact.
       </div>
@@ -71,56 +76,58 @@ export function CostsScreen({ client = api }: { client?: ApiClient }): React.JSX
           <SectionTitle right={<Badge tone={overBudget ? 'amber' : 'ok'}>{overBudget ? 'over budget' : 'under budget'}</Badge>}>
             Month to date (est.)
           </SectionTitle>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-            <span style={{ fontSize: 42, fontWeight: 700, fontFamily: 'var(--mono)', letterSpacing: '-0.03em' }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+            <span className="big" style={{ fontSize: 52 }}>
               ${c.monthCostUsd.toFixed(2)}
             </span>
-            <span style={{ fontSize: 13, color: 'var(--muted)' }}>/ ${c.budgetUsd}</span>
+            <span style={{ fontSize: 13.5, color: 'var(--muted)' }}>of ${c.budgetUsd}</span>
           </div>
-          <div
-            style={{
-              height: 8,
-              background: 'var(--surface-2)',
-              borderRadius: 99,
-              marginTop: 12,
-              overflow: 'hidden',
-              border: '1px solid var(--border)',
-            }}
-          >
-            <div style={{ width: Math.min(100, pct) + '%', height: '100%', background: overBudget ? 'var(--amber)' : 'var(--ok)' }} />
+          <div style={{ marginTop: 16 }}>
+            <Meter pct={pct} over={overBudget} mark={monthFraction()} />
           </div>
-          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>
+          <div className="num" style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 10 }}>
             {pct}% of budget · vs ${c.lastMonthCostUsd.toFixed(2)} last month
           </div>
-          <div style={{ fontSize: 12, color: projectedOver ? 'var(--amber-ink)' : 'var(--muted)', marginTop: 6 }}>
-            Projected month end{' '}
-            <strong style={{ fontFamily: 'var(--mono)' }}>${projected.toFixed(2)}</strong> at this pace
+          <div
+            className="num"
+            style={{
+              fontSize: 12.5,
+              marginTop: 14,
+              padding: '10px 12px',
+              borderRadius: 10,
+              background: projectedOver ? 'color-mix(in oklch, var(--amber) 14%, var(--surface))' : 'var(--surface-2)',
+              color: projectedOver ? 'var(--amber-ink)' : 'var(--muted)',
+            }}
+          >
+            Projected month end <strong style={{ color: 'var(--ink)' }}>${projected.toFixed(2)}</strong> at this pace
+            {projectedOver ? ' — over budget' : ''}
           </div>
         </Card>
         <Card>
           <SectionTitle>Token economics</SectionTitle>
-          <SplitBar split={c.tokenSplit} />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
+          <div style={{ display: 'flex', gap: 28, marginBottom: 16, flexWrap: 'wrap' }}>
+            <div>
+              <div className="big" style={{ fontSize: 30 }}>
+                {fmtTokens(c.tokensMonth)}
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>tokens processed</div>
+            </div>
+            <div>
+              <div className="big" style={{ fontSize: 30, color: 'var(--ok-ink)' }}>
+                {c.cacheReadPct}%
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>input from prompt cache</div>
+            </div>
+          </div>
+          <SplitBar split={c.tokenSplit} height={34} />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 18px', marginTop: 12 }}>
             {c.tokenSplit.map((s) => (
               <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5 }}>
                 <span style={{ width: 9, height: 9, borderRadius: 3, background: usageColor(s.label) }} />
                 <span style={{ flex: 1, color: 'var(--muted)' }}>{s.label}</span>
-                <span style={{ fontFamily: 'var(--mono)' }}>{Math.round(s.pct * 100)}%</span>
+                <span className="num">{Math.round(s.pct * 100)}%</span>
               </div>
             ))}
-          </div>
-        </Card>
-        <Card>
-          <SectionTitle>This month</SectionTitle>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div>
-              <div style={{ fontSize: 26, fontWeight: 700, fontFamily: 'var(--mono)' }}>{fmtTokens(c.tokensMonth)}</div>
-              <div style={{ fontSize: 12, color: 'var(--muted)' }}>tokens processed</div>
-            </div>
-            <div>
-              <div style={{ fontSize: 26, fontWeight: 700, fontFamily: 'var(--mono)' }}>{c.cacheReadPct}%</div>
-              <div style={{ fontSize: 12, color: 'var(--muted)' }}>input from prompt cache</div>
-            </div>
           </div>
         </Card>
       </div>

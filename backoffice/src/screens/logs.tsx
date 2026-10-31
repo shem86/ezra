@@ -38,7 +38,7 @@ export function LogsScreen({ client = api }: { client?: ApiClient }): React.JSX.
   for (const r of turns) counts[r.level]++;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+    <div className="stack stagger" style={{ gap: 16 }}>
       {error !== null && (
         <Card>
           <span style={{ color: 'var(--err)' }}>
@@ -53,30 +53,17 @@ export function LogsScreen({ client = api }: { client?: ApiClient }): React.JSX.
         </div>
       )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-        <div
-          style={{
-            display: 'flex',
-            gap: 4,
-            background: 'var(--surface-2)',
-            padding: 4,
-            borderRadius: 9,
-            border: '1px solid var(--border)',
-          }}
-        >
+        <div className="segwrap" role="group" aria-label="Filter by level">
           {(['all', 'info', 'warn', 'error'] as Level[]).map((l) => (
             <button
               key={l}
               onClick={() => setLvl(l)}
-              className="seg"
-              style={{
-                background: lvl === l ? 'var(--surface)' : 'transparent',
-                boxShadow: lvl === l ? '0 1px 2px rgba(0,0,0,.06)' : 'none',
-                color: lvl === l ? 'var(--ink)' : 'var(--muted)',
-              }}
+              className={'seg' + (lvl === l ? ' on' : '')}
+              aria-pressed={lvl === l}
             >
               {l !== 'all' && <Dot status={l} size={7} />}
               {l}
-              <span style={{ opacity: 0.5, fontFamily: 'var(--mono)', fontSize: 11 }}>{counts[l]}</span>
+              <span className="count">{counts[l]}</span>
             </button>
           ))}
         </div>
@@ -199,7 +186,7 @@ export function LogsScreen({ client = api }: { client?: ApiClient }): React.JSX.
             </tbody>
           </table>
         </div>
-        <div style={{ padding: '10px 16px', borderTop: '1px solid var(--border)', fontSize: 12, color: 'var(--muted)' }}>
+        <div className="table-foot">
           {loading ? 'loading…' : `${rows.length} turns · click a row for details`}
         </div>
       </Card>
