@@ -193,29 +193,11 @@ and a once-a-minute reminder sweep. Both enqueue into a **single
 concurrency-1 lane keyed by the conversation**. Tasks co-exist as durable
 state; they never co-execute.
 
-```mermaid
-flowchart LR
-  IN["📱 WhatsApp message<br/>(incl. ✅ approvals)"] --> ING["Ingestion<br/>allowlist · durable enqueue"]
-  SCHED["⏰ Reminder sweep<br/>every minute"] --> Q
-  ING --> Q["Conversation lane<br/>one at a time · debounced"]
-  Q --> TURN
+<p align="center">
+  <img src="docs/assets/diagrams/how-it-works.png" alt="Message flow: WhatsApp message (incl. approvals) → ingestion → conversation lane ← reminder sweep; lane → handleTurn workflow (load context → Claude ⇄ tools → persist) → WhatsApp reply; lane and turn backed by one Postgres" width="860" />
+</p>
 
-  subgraph TURN["handleTurn workflow"]
-    direction TB
-    CTX["load context"] --> LOOP["Claude ⇄ tools"] --> SAVE["persist"]
-  end
-
-  TURN --> OUT["📤 WhatsApp reply"]
-
-  DB[("One Postgres — journal + state + pgvector")]
-  TURN -.- DB
-  Q -.- DB
-
-  classDef store fill:#f3e6d8,stroke:#c9772f,color:#3a2a1c;
-  classDef turn fill:#e7f0ea,stroke:#4a9e6d,color:#1f3a2c;
-  class DB store;
-  class TURN turn;
-```
+<sub>Source: [`docs/diagrams/how-it-works.mmd`](docs/diagrams/how-it-works.mmd) — re-render with `pnpm docs:diagrams`.</sub>
 
 - **Ingestion** — sender allowlist and echo filter; the message is durably
   enqueued *before* it is acked, so a crash can't lose it.
@@ -243,24 +225,11 @@ A confirm-before tool never auto-executes. It parks, folds the turn closed, and
 only resumes when a household member replies to approve — re-validated right
 before the write and executed exactly once:
 
-```mermaid
-sequenceDiagram
-  autonumber
-  participant U as 👤 Household
-  participant T as handleTurn
-  participant P as pending_actions
-  participant G as Google Calendar
+<p align="center">
+  <img src="docs/assets/diagrams/hitl-calendar-approval.png" alt="Sequence: household asks for a calendar event → handleTurn parks it in pending_actions and asks for ✅ → turn folds closed → ✅ reply binds and re-validates → event created with a deterministic id → confirmation sent" width="860" />
+</p>
 
-  U->>T: "add dentist Thursday 3pm"
-  T->>P: park action (confirm-before)
-  T-->>U: "Reply ✅ to confirm"
-  Note over T,G: turn folds closed — nothing written yet
-  U->>T: ✅ (quoted-reply approval)
-  T->>P: bind approval · re-validate
-  T->>G: create event (deterministic id)
-  G-->>T: 200 — or 409 folds to success
-  T-->>U: "Added to the shared calendar"
-```
+<sub>Source: [`docs/diagrams/hitl-calendar-approval.mmd`](docs/diagrams/hitl-calendar-approval.mmd) — re-render with `pnpm docs:diagrams`.</sub>
 
 ## The operations console
 

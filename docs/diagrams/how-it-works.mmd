@@ -1,0 +1,21 @@
+flowchart LR
+  IN["📱 WhatsApp message<br/>(incl. ✅ approvals)"] --> ING["Ingestion<br/>allowlist · durable enqueue"]
+  SCHED["⏰ Reminder sweep<br/>every minute"] --> Q
+  ING --> Q["Conversation lane<br/>one at a time · debounced"]
+  Q --> TURN
+
+  subgraph TURN["handleTurn workflow"]
+    direction TB
+    CTX["load context"] --> LOOP["Claude ⇄ tools"] --> SAVE["persist"]
+  end
+
+  TURN --> OUT["📤 WhatsApp reply"]
+
+  DB[("One Postgres — journal + state + pgvector")]
+  TURN -.- DB
+  Q -.- DB
+
+  classDef store fill:#f3e6d8,stroke:#c9772f,color:#3a2a1c;
+  classDef turn fill:#e7f0ea,stroke:#4a9e6d,color:#1f3a2c;
+  class DB store;
+  class TURN turn;
