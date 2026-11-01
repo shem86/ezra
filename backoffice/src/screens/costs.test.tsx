@@ -61,4 +61,13 @@ describe('CostsScreen (live)', () => {
     render(<CostsScreen client={stubClient({ costs: async () => ({ ...costs, monthCostUsd: 75 }) })} />);
     expect(await screen.findByText('over budget')).toBeInTheDocument();
   });
+
+  it('lists usage types by cost, highest first — the same order as the bar chart', async () => {
+    render(<CostsScreen client={stubClient({})} />);
+    await screen.findByText('$9.17');
+    const names = Array.from(document.querySelectorAll('table.grid tbody tr td:first-child')).map(
+      (td) => td.textContent,
+    );
+    expect(names).toEqual(['Fresh input', 'Cache read']);
+  });
 });

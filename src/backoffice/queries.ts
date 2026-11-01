@@ -89,6 +89,11 @@ export interface TableDef {
   readonly schema: z.ZodType<BackofficeRow>;
 }
 
+// Default orders are task-first, not storage-first: what needs attention
+// leads (the next reminder to fire, the approval still waiting), then history
+// newest-first. Every ORDER BY ends in a unique column so equal timestamps
+// can't reshuffle between refreshes. The SPA can re-sort per column on top.
+//
 // Note: the table key is a fixed registry lookup (below), never user-supplied
 // SQL — there is no place to inject a table name.
 export const TABLES: Record<TableKey, TableDef> = {
@@ -97,7 +102,11 @@ export const TABLES: Record<TableKey, TableDef> = {
     icon: 'bell',
     columns: ['id', 'body', 'created_by', 'due_at', 'status', 'conversation_id'],
     sql: `SELECT id::text AS id, body, created_by, due_at::text AS due_at, status, conversation_id
-          FROM reminders ORDER BY due_at DESC LIMIT $1`,
+          FROM reminders
+          ORDER BY (status = 'scheduled') DESC,
+                   CASE WHEN status = 'scheduled' THEN due_at END ASC,
+                   due_at DESC, id DESC
+          LIMIT $1`,
     schema: schemas.reminders,
   },
   lists: {
@@ -105,7 +114,7 @@ export const TABLES: Record<TableKey, TableDef> = {
     icon: 'cart',
     columns: ['id', 'list', 'item', 'added_by', 'done', 'created_at'],
     sql: `SELECT id::text AS id, list, item, added_by, done, created_at::text AS created_at
-          FROM lists ORDER BY created_at DESC LIMIT $1`,
+          FROM lists ORDER BY done ASC, created_at DESC, id DESC LIMIT $1`,
     schema: schemas.lists,
   },
   household_facts: {
@@ -117,7 +126,7 @@ export const TABLES: Record<TableKey, TableDef> = {
     // today means operational secrets (API keys, OAuth, Baileys state) which
     // never reach the DB or this console by construction (SPEC "Never").
     sql: `SELECT key, value, updated_at::text AS updated_at
-          FROM household_facts ORDER BY updated_at DESC LIMIT $1`,
+          FROM household_facts ORDER BY updated_at DESC, key ASC LIMIT $1`,
     schema: schemas.household_facts,
   },
   pending_actions: {
@@ -126,7 +135,9 @@ export const TABLES: Record<TableKey, TableDef> = {
     columns: ['action_id', 'tool', 'status', 'conversation_id', 'created_at', 'expires_at'],
     sql: `SELECT action_id, tool_call->>'name' AS tool, status, conversation_id,
                  created_at::text AS created_at, expires_at::text AS expires_at
-          FROM pending_actions ORDER BY created_at DESC LIMIT $1`,
+          FROM pending_actions
+          ORDER BY (status = 'pending') DESC, created_at DESC, action_id DESC
+          LIMIT $1`,
     schema: schemas.pending_actions,
   },
   sent_log: {
@@ -135,7 +146,7 @@ export const TABLES: Record<TableKey, TableDef> = {
     columns: ['idempotency_key', 'conversation_id', 'delivery_class', 'body', 'created_at'],
     sql: `SELECT idempotency_key, conversation_id, delivery_class, body->>'text' AS body,
                  created_at::text AS created_at
-          FROM sent_log ORDER BY created_at DESC LIMIT $1`,
+          FROM sent_log ORDER BY created_at DESC, idempotency_key DESC LIMIT $1`,
     schema: schemas.sent_log,
   },
   conversation_inbox: {
@@ -154,7 +165,7 @@ export const TABLES: Record<TableKey, TableDef> = {
     columns: ['conversation_id', 'messages', 'updated_at'],
     sql: `SELECT conversation_id, jsonb_array_length(messages) AS messages,
                  updated_at::text AS updated_at
-          FROM conversation_context ORDER BY updated_at DESC LIMIT $1`,
+          FROM conversation_context ORDER BY updated_at DESC, conversation_id ASC LIMIT $1`,
     schema: schemas.conversation_context,
   },
 };
