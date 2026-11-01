@@ -81,7 +81,7 @@ an agent that fails silently is worse than one that crashes loudly.
 <br />
 
 - **A harness, not a framework.** The agent loop is owned by durable workflow
-  code, *not the AI SDK* — tools run as journaled steps, not SDK-driven calls —
+  code, *not the Vercel AI SDK* — tools run as journaled steps, not SDK-driven calls —
   so the orchestration is mine to reason about and recover. Tools are defined
   through one typed registry (Zod schema, risk tier, idempotency key,
   revalidation hook), and the loop guarantees every `tool_use` is answered and
@@ -217,7 +217,7 @@ flowchart TB
   Q["Conversation queue<br/>concurrency 1 · per-conversation<br/>consumer-side debounce"]
   TURN["handleTurn workflow<br/>loadContext → routeTurn → model loop → persist"]
   JEV["Jev (TypeSafe)<br/>typed judgments → code picks tier<br/>fast · standard · deep"]
-  MODEL["Claude · AI SDK Core<br/>prompt caching on the stable prefix"]
+  MODEL["Claude via Vercel AI SDK Core<br/>(ai + @ai-sdk/anthropic)<br/>prompt caching on the stable prefix"]
   TOOLS["Typed tools<br/>Zod · risk tier · idempotency · revalidation"]
   REPLY["Reply · send step<br/>declared delivery class vs sent_log"]
   DB[("ONE Postgres<br/>DBOS journal + structured state + pgvector<br/>co-located on purpose")]
@@ -418,5 +418,5 @@ Langfuse · Vitest · ESLint (flat config + custom determinism rule) ·
 GitHub Actions · age-encrypted PITR to S3 · host nftables egress allowlist.
 Operations console: Vite · React · TypeScript, exposed over Tailscale.
 
-All dependency versions are pinned exact; the DBOS and AI SDK pins are the
+All dependency versions are pinned exact; the DBOS and Vercel AI SDK pins are the
 versions the M1 spikes validated — bumps require re-running those suites.
