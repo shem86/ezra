@@ -5,7 +5,51 @@ import { useEffect, useMemo, useState } from 'react';
 import { Icon, type IconName } from '../components/icon';
 import { Badge, Card, Cell } from '../components/primitives';
 import { api, type ApiClient } from '../api/client';
-import type { Row, TableListing, TableMeta } from '../api/types';
+import type { CellValue, Row, TableListing, TableMeta } from '../api/types';
+
+export interface SortState {
+  col: string;
+  dir: 'asc' | 'desc';
+}
+
+const NUMERIC = /^-?\d+(\.\d+)?$/;
+// Postgres `timestamptz::text` ("2026-11-01 09:00:00.5+00"): every row shares
+// the session offset, so plain code-point order IS chronological — locale
+// collation with numeric runs would misread ".5" vs ".123" fractions.
+const TIMESTAMP = /^\d{4}-\d{2}-\d{2}[ T]\d/;
+const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
+function compareValues(a: CellValue, b: CellValue): number {
+  if (typeof a === 'number' && typeof b === 'number') return a - b;
+  if (typeof a === 'boolean' && typeof b === 'boolean') return Number(a) - Number(b);
+  const x = String(a);
+  const y = String(b);
+  if (NUMERIC.test(x) && NUMERIC.test(y)) return Number(x) - Number(y);
+  if (TIMESTAMP.test(x) && TIMESTAMP.test(y)) return x < y ? -1 : x > y ? 1 : 0;
+  return collator.compare(x, y);
+}
+
+const isEmpty = (v: CellValue | undefined): boolean => v === null || v === undefined || v === '';
+
+/** Stable client-side sort; empty cells stay last in either direction. */
+export function sortRows<R extends Row>(rows: readonly R[], sort: SortState): R[] {
+  const sign = sort.dir === 'asc' ? 1 : -1;
+  return rows
+    .map((row, i) => ({ row, i }))
+    .sort((p, q) => {
+      const a = p.row[sort.col];
+      const b = q.row[sort.col];
+      if (isEmpty(a) || isEmpty(b)) return isEmpty(a) === isEmpty(b) ? p.i - q.i : isEmpty(a) ? 1 : -1;
+      return sign * compareValues(a as CellValue, b as CellValue) || p.i - q.i;
+    })
+    .map((x) => x.row);
+}
+
+// asc → desc → back to the server's task-first default order.
+function nextSort(cur: SortState | null, col: string): SortState | null {
+  if (cur?.col !== col) return { col, dir: 'asc' };
+  return cur.dir === 'asc' ? { col, dir: 'desc' } : null;
+}
 
 export function DatabaseScreen({ client = api }: { client?: ApiClient }): React.JSX.Element {
   const [tables, setTables] = useState<TableMeta[]>([]);
@@ -13,6 +57,7 @@ export function DatabaseScreen({ client = api }: { client?: ApiClient }): React.
   const [listing, setListing] = useState<TableListing | null>(null);
   const [q, setQ] = useState('');
   const [sel, setSel] = useState<Row | null>(null);
+  const [sort, setSort] = useState<SortState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -37,6 +82,7 @@ export function DatabaseScreen({ client = api }: { client?: ApiClient }): React.
     setLoading(true);
     setSel(null);
     setQ('');
+    setSort(null);
     client
       .table(active, 200, ac.signal)
       .then((l) => {
@@ -57,10 +103,12 @@ export function DatabaseScreen({ client = api }: { client?: ApiClient }): React.
 
   const rows = useMemo(() => {
     if (listing === null) return [];
-    if (!q.trim()) return listing.rows;
-    const s = q.toLowerCase();
-    return listing.rows.filter((r) => Object.values(r).some((v) => String(v).toLowerCase().includes(s)));
-  }, [listing, q]);
+    const s = q.trim().toLowerCase();
+    const filtered = s
+      ? listing.rows.filter((r) => Object.values(r).some((v) => String(v).toLowerCase().includes(s)))
+      : listing.rows;
+    return sort ? sortRows(filtered, sort) : filtered;
+  }, [listing, q, sort]);
 
   return (
     <div className="grid-db">
@@ -131,9 +179,27 @@ export function DatabaseScreen({ client = api }: { client?: ApiClient }): React.
             <table className="grid">
               <thead>
                 <tr>
-                  {(listing?.columns ?? []).map((c) => (
-                    <th key={c}>{c}</th>
-                  ))}
+                  {(listing?.columns ?? []).map((c) => {
+                    const dir = sort?.col === c ? sort.dir : null;
+                    return (
+                      <th
+                        key={c}
+                        aria-sort={dir === null ? undefined : dir === 'asc' ? 'ascending' : 'descending'}
+                      >
+                        <button
+                          type="button"
+                          className={'sorthead' + (dir ? ' on' : '')}
+                          onClick={() => setSort((cur) => nextSort(cur, c))}
+                          title={dir === 'desc' ? 'Back to default order' : `Sort by ${c}`}
+                        >
+                          {c}
+                          <span className="sortarrow" aria-hidden>
+                            {dir === 'asc' ? '▲' : dir === 'desc' ? '▼' : '↕'}
+                          </span>
+                        </button>
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>
@@ -161,6 +227,7 @@ export function DatabaseScreen({ client = api }: { client?: ApiClient }): React.
             <span style={{ fontFamily: 'var(--mono)' }}>
               SELECT * FROM {listing?.table ?? active}
               {q ? ` WHERE … '${q}'` : ''}
+              {sort ? ` ORDER BY ${sort.col} ${sort.dir.toUpperCase()}` : ''}
             </span>
           </div>
         </Card>

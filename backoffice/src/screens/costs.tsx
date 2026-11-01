@@ -160,7 +160,8 @@ export function CostsScreen({ client = api }: { client?: ApiClient }): React.JSX
             </tr>
           </thead>
           <tbody>
-            {c.byUsage.map((r) => (
+            {/* Same cost-desc order as the UsageBars chart above, so table and chart read row-for-row. */}
+            {[...c.byUsage].sort((a, b) => b.cost - a.cost).map((r) => (
               <tr key={r.name}>
                 <td style={{ fontFamily: 'var(--mono)', fontSize: 12.5, fontWeight: 600 }}>
                   <span
