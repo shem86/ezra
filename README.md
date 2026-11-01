@@ -97,6 +97,19 @@ an agent that fails silently is worse than one that crashes loudly.
   appends strictly after it. Long transcripts compact into an embedded summary
   that keeps open commitments verbatim, and history is recalled pull-only through
   a vector-search tool.
+- **Per-turn model routing via Jev, in shadow.** Before round 0, a journaled
+  `routeTurn` step sends typed questions about the incoming batch to TypeSafe's
+  [Jev](docs/specs/jev-turn-routing-plan.md), a System One model that returns
+  calibrated probabilities. It asks things like *is this a single-intent list
+  edit?* or *does this weigh options?*, never *which model?*. A **code truth
+  table** turns those answers into a tier: `fast` (Haiku), `standard` (Sonnet)
+  or `deep` (Opus). The tier is chosen once per turn and every round runs on it,
+  so no mid-turn switch breaks the prompt cache. HITL turns and anything unsure
+  stay on `standard`, and a Jev outage falls back to `standard` instead of
+  failing the turn. Every decision lands in `turn_route_log` and shows in the
+  console. The router is live in **shadow mode**: Jev routes and logs every
+  turn, but each turn still runs on Sonnet until the shadow data earns the
+  switch.
 - **Engineering discipline.** Strict TypeScript, Zod at every boundary,
   dependency injection over singletons, exact-pinned dependencies, and a custom
   lint rule that fails CI on nondeterminism inside a workflow body.
@@ -149,7 +162,9 @@ Testing a nondeterministic agent needs more than unit tests:
   cache reads**, re-checked against live traffic. Measurement drove design:
   [one decision](docs/adr-0003-remove-turn-router.md) *removed* a cheap/expensive
   model router once the numbers showed it forfeited the prompt cache for no real
-  saving.
+  saving. Its successor, the [Jev router](docs/specs/jev-turn-routing-plan.md),
+  answers each of those objections point by point, and runs in shadow before it
+  is allowed to pick a model.
 
 </details>
 
@@ -200,7 +215,8 @@ flowchart TB
 
   ING["Ingestion<br/>allowlist · echo-filter<br/><b>durable enqueue before ack</b>"]
   Q["Conversation queue<br/>concurrency 1 · per-conversation<br/>consumer-side debounce"]
-  TURN["handleTurn workflow<br/>loadContext → model loop → persist"]
+  TURN["handleTurn workflow<br/>loadContext → routeTurn → model loop → persist"]
+  JEV["Jev (TypeSafe)<br/>typed judgments → code picks tier<br/>fast · standard · deep"]
   MODEL["Claude · AI SDK Core<br/>prompt caching on the stable prefix"]
   TOOLS["Typed tools<br/>Zod · risk tier · idempotency · revalidation"]
   REPLY["Reply · send step<br/>declared delivery class vs sent_log"]
@@ -211,6 +227,7 @@ flowchart TB
   APPR --> Q
   Q --> TURN
   TURN <--> MODEL
+  TURN -. "routeTurn step<br/>(shadow)" .-> JEV
   TURN <--> TOOLS
   TURN --> REPLY --> WA
   TOOLS <--> DB
@@ -294,6 +311,11 @@ with evidence.
 | M5.5 — Calendar | real-wire round-trip gate | ✅ done |
 | M6 — Wire-up and launch | SPEC success checklist swept | ✅ **live** |
 
+**Since v1:** Jev turn routing (Haiku / Sonnet / Opus per turn) shipped in
+`v2.4.0` and runs in **shadow mode** in production. The decision to turn it on
+waits on about two weeks of shadow data
+([`STATUS.md`](STATUS.md) item 16).
+
 Live on a hardened AWS EC2 host with continuous PITR backups; ~7k lines of
 strict TypeScript, 57 test files (598 unit + integration, plus a dedicated
 recovery gate). Task-level history: [`TASKS.md`](TASKS.md). Spike verdicts and
@@ -370,7 +392,8 @@ docs/               ADRs, spike results, runbooks, drill logs, launch checklist
 | [`SPEC.md`](SPEC.md) | **What/how** — scope, conventions, boundaries, success criteria |
 | [`docs/adr-0001-remove-secret-fact-class.md`](docs/adr-0001-remove-secret-fact-class.md) | Why the user-facing secret-fact class was dropped |
 | [`docs/adr-0002-voyage-embeddings.md`](docs/adr-0002-voyage-embeddings.md) | Why Voyage + a zero-dependency fetch client for embeddings |
-| [`docs/adr-0003-remove-turn-router.md`](docs/adr-0003-remove-turn-router.md) | Why the tiered cheap/reasoning turn router was removed |
+| [`docs/adr-0003-remove-turn-router.md`](docs/adr-0003-remove-turn-router.md) | Why the tiered cheap/reasoning turn router was removed *(partly reversed by Jev routing)* |
+| [`docs/specs/jev-turn-routing-plan.md`](docs/specs/jev-turn-routing-plan.md) | Jev-routed per-turn model selection — truth table, fallbacks, shadow rollout |
 | [`docs/adr-0004-service-account-calendar.md`](docs/adr-0004-service-account-calendar.md) | Why a shared-calendar service account over OAuth consent |
 | [`docs/specs/archive/backoffice-spec.md`](docs/specs/archive/backoffice-spec.md) | The read-only operations console — scope, exposure, screens *(archived; shipped)* |
 | [`docs/launch-checklist.md`](docs/launch-checklist.md) | SPEC success criteria, each box closed with evidence |
@@ -389,7 +412,8 @@ done-notes).
 
 Node 22 · TypeScript (strict) · pnpm (exact pins) · DBOS 4.19.8 ·
 Postgres + pgvector · Vercel AI SDK Core + Claude (Sonnet-class reasoning,
-Haiku-class classification) · Voyage embeddings (voyage-4-lite) · Baileys ·
+Haiku-class classification) · TypeSafe Jev (per-turn model routing,
+shadow) · Voyage embeddings (voyage-4-lite) · Baileys ·
 Langfuse · Vitest · ESLint (flat config + custom determinism rule) ·
 GitHub Actions · age-encrypted PITR to S3 · host nftables egress allowlist.
 Operations console: Vite · React · TypeScript, exposed over Tailscale.
