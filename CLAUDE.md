@@ -50,6 +50,14 @@ PRs (`ci.yml`) and link rot by **doc** PRs (`docs.yml`, which covers the
 `'**.md'`/`'docs/**'` paths `ci.yml` ignores). The other half — whether a claim
 matches reality — no grep can reach, and stays a periodic human reconcile.
 
+**README diagrams are images, not Mermaid blocks.** The GitHub mobile app never
+renders Mermaid, and the README is what an interviewer opens from a link on
+their phone. Sources live in `docs/diagrams/*.mmd`; **after any change there,
+run `pnpm docs:diagrams` and commit the regenerated PNG + `manifest.json` in
+the same commit.** Never put a ```` ```mermaid ```` block back in the README.
+`pnpm check:docs` (assertion F) fails on a source whose hash no longer matches
+its render.
+
 ## Commands
 
 ```
@@ -58,7 +66,8 @@ pnpm build             # tsc, strict
 pnpm test              # vitest run; integration suite only runs when DATABASE_URL is set
 pnpm test:recovery     # kill-mid-flight replay gate (named integration files; CI runs it after test)
 pnpm lint              # eslint incl. custom DBOS-determinism rule (CI-failing)
-pnpm check:docs        # doc reference check — links, cited paths, STATUS.md symbols (CI-failing)
+pnpm check:docs        # doc reference check — links, cited paths, STATUS.md symbols, diagram renders (CI-failing)
+pnpm docs:diagrams     # re-render docs/diagrams/*.mmd → README PNGs + hash manifest (needs network; never CI)
 pnpm eval              # model-in-the-loop scenarios — on-demand, never CI
 pnpm eval:route        # turn-routing evals — REQUIRED after any routing change (.claude/rules/testing.md "Routing evals")
 pnpm dev               # scripted-day composition against dev DB, transport+model stubbed
