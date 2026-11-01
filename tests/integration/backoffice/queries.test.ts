@@ -22,6 +22,15 @@ beforeAll(async () => {
     `INSERT INTO reminders (conversation_id, body, due_at, created_by) VALUES ($1, 'Pay water bill', now() + interval '1 day', 'Noa')`,
     [convo],
   );
+  // Ordering fixtures: a later scheduled, a fired, and a cancelled reminder, so
+  // the default order has every status to arrange.
+  await db.query(
+    `INSERT INTO reminders (conversation_id, body, due_at, created_by, status) VALUES
+       ($1, 'Later thing', now() + interval '5 days', 'Noa', 'scheduled'),
+       ($1, 'Old fired', now() - interval '2 days', 'Noa', 'fired'),
+       ($1, 'Old cancelled', now() - interval '1 day', 'Noa', 'cancelled')`,
+    [convo],
+  );
   await db.query(`INSERT INTO household_facts (key, value) VALUES ($1, 'Mazda CX-5')`, [
     `car-${runId}`,
   ]);
@@ -29,6 +38,11 @@ beforeAll(async () => {
     `INSERT INTO pending_actions (action_id, conversation_id, tool_call, expires_at)
      VALUES ($1, $2, $3::jsonb, now() + interval '3 hours')`,
     [`pnd-${runId}`, convo, JSON.stringify({ name: 'calendar.create', args: { title: 'Dinner' } })],
+  );
+  await db.query(
+    `INSERT INTO pending_actions (action_id, conversation_id, tool_call, expires_at, status)
+     VALUES ($1, $2, $3::jsonb, now() + interval '3 hours', 'executed')`,
+    [`pnd-done-${runId}`, convo, JSON.stringify({ name: 'calendar.create', args: { title: 'Lunch' } })],
   );
   await db.query(
     `INSERT INTO sent_log (idempotency_key, conversation_id, delivery_class, body)
@@ -89,5 +103,28 @@ describe('queryTable', () => {
     const mine = listing.rows.find((r) => r['key'] === `car-${runId}`);
     expect(mine).toMatchObject({ value: 'Mazda CX-5' });
     expect(Object.keys(mine!).sort()).toEqual(['key', 'updated_at', 'value']);
+  });
+
+  // Default orders are task-first (what needs attention leads), asserted as
+  // properties over the whole listing so residue in the shared `_test` DB
+  // can't break them. node-pg `::text` timestamps share one session offset, so
+  // they compare correctly as strings.
+  it('orders reminders: scheduled soonest-first, then the rest newest-first', async () => {
+    const { rows } = await queryTable(db, 'reminders', { limit: 500 });
+    const firstDone = rows.findIndex((r) => r['status'] !== 'scheduled');
+    const scheduled = firstDone === -1 ? rows : rows.slice(0, firstDone);
+    const rest = firstDone === -1 ? [] : rows.slice(firstDone);
+    expect(rest.every((r) => r['status'] !== 'scheduled')).toBe(true);
+    const due = (r: (typeof rows)[number]): string => String(r['due_at']);
+    expect(scheduled.map(due)).toEqual([...scheduled.map(due)].sort());
+    expect(rest.map(due)).toEqual([...rest.map(due)].sort().reverse());
+  });
+
+  it('orders pending_actions: open approvals first, then newest-first', async () => {
+    const { rows } = await queryTable(db, 'pending_actions', { limit: 500 });
+    const firstClosed = rows.findIndex((r) => r['status'] !== 'pending');
+    if (firstClosed !== -1) {
+      expect(rows.slice(firstClosed).every((r) => r['status'] !== 'pending')).toBe(true);
+    }
   });
 });

@@ -6,7 +6,7 @@ flowchart LR
 
   subgraph TURN["handleTurn workflow"]
     direction TB
-    CTX["load context"] --> LOOP["Claude ⇄ tools"] --> SAVE["persist"]
+    CTX["load context"] --> ROUTE["route turn<br/>Jev · shadow"] --> LOOP["Claude ⇄ tools"] --> SAVE["persist"]
   end
 
   TURN --> OUT["📤 WhatsApp reply"]
