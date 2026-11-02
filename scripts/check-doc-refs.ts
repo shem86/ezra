@@ -27,6 +27,8 @@
  *      and that symbol still greps in that file                 (STATUS.md)
  *   D. no bare `file.ts:NNN` citations                          (STATE_DOCS)
  *   E. refcheck:off/on markers are balanced                     (all *.md)
+ *   F. every docs/diagrams/*.mmd has a rendered PNG whose recorded
+ *      source hash still matches                                (diagrams)
  *
  * C is the anti-silent-degradation rule. A check that quietly stops checking
  * when prose is rephrased is worse than no check — that is precisely how the
@@ -46,7 +48,8 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { readFileSync, existsSync, statSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { readFileSync, existsSync, statSync, readdirSync } from 'node:fs'
 import { resolve, dirname, join } from 'node:path'
 
 /** Docs that assert current state. History (V2_NOTES, TASKS, ADRs) is exempt:
@@ -77,7 +80,7 @@ const trackedMarkdown = execFileSync('git', ['ls-files', '*.md'], {
   .filter(Boolean)
 
 const failures: string[] = []
-const counts = { links: 0, paths: 0, symbols: 0, files: 0 }
+const counts = { links: 0, paths: 0, symbols: 0, files: 0, diagrams: 0 }
 
 const fail = (file: string, line: number, message: string): void => {
   failures.push(`${file}:${line}  ${message}`)
@@ -289,6 +292,43 @@ const checkMarkers = (file: string, raw: string): void => {
   }
 }
 
+// ── F. rendered diagrams match their sources ─────────────────────────────────
+// The README embeds PNGs, not ```mermaid blocks, because the GitHub mobile
+// app never renders Mermaid. A PNG silently drifts from its .mmd unless
+// something ties them: `pnpm docs:diagrams` writes each source's sha256 into
+// the manifest, and this compares — CI never renders, it only hashes.
+const DIAGRAM_SRC = 'docs/diagrams'
+const DIAGRAM_OUT = 'docs/assets/diagrams'
+const RERENDER = 'run `pnpm docs:diagrams` and commit the result'
+
+const checkDiagrams = (): void => {
+  const srcDir = resolve(repoRoot, DIAGRAM_SRC)
+  const sources = existsSync(srcDir)
+    ? readdirSync(srcDir)
+        .filter((f) => f.endsWith('.mmd'))
+        .map((f) => f.replace(/\.mmd$/, ''))
+    : []
+  const manifestPath = resolve(repoRoot, DIAGRAM_OUT, 'manifest.json')
+  const manifest = existsSync(manifestPath)
+    ? (JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, string>)
+    : {}
+  for (const name of sources) {
+    counts.diagrams++
+    const src = `${DIAGRAM_SRC}/${name}.mmd`
+    const hash = createHash('sha256').update(readFileSync(resolve(repoRoot, src))).digest('hex')
+    if (!isFile(resolve(repoRoot, DIAGRAM_OUT, `${name}.png`))) {
+      fail(src, 1, `no rendered ${DIAGRAM_OUT}/${name}.png — ${RERENDER}`)
+    } else if (manifest[name] !== hash) {
+      fail(src, 1, `edited since its PNG was rendered — ${RERENDER}`)
+    }
+  }
+  for (const name of Object.keys(manifest)) {
+    if (!sources.includes(name)) {
+      fail(`${DIAGRAM_OUT}/manifest.json`, 1, `'${name}' has no ${DIAGRAM_SRC}/${name}.mmd — ${RERENDER}`)
+    }
+  }
+}
+
 // ── run ──────────────────────────────────────────────────────────────────────
 for (const file of trackedMarkdown) {
   const raw = readFileSync(resolve(repoRoot, file), 'utf8')
@@ -302,13 +342,14 @@ for (const file of trackedMarkdown) {
   }
   if (file === SYMBOL_DOC) checkSymbolBindings(file, text)
 }
+checkDiagrams()
 
 // Counts are printed on success too: a check that silently stops checking is
 // the failure mode this replaces. If `symbols` drops to 0, something is wrong
 // with the check, not with the docs.
 console.log(
   `doc refs: ${counts.files} files · ${counts.links} links · ` +
-    `${counts.paths} paths · ${counts.symbols} symbols`,
+    `${counts.paths} paths · ${counts.symbols} symbols · ${counts.diagrams} diagrams`,
 )
 
 if (failures.length > 0) {

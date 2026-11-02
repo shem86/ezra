@@ -203,41 +203,33 @@ host.
 
 ## How it works
 
-Three event sources — human messages (debounced), scheduled reminders, and
-approval events — all enqueue into a **single concurrency-1 lane keyed by the
-conversation**. Tasks co-exist as durable state; they never co-execute.
+Two sources feed the system: WhatsApp messages (including ✅ approval replies)
+and a once-a-minute reminder sweep. Both enqueue into a **single
+concurrency-1 lane keyed by the conversation**. Tasks co-exist as durable
+state; they never co-execute.
 
-```mermaid
-flowchart TB
-  WA["📱 WhatsApp inbound<br/>(Baileys)"]
-  SCHED["⏰ Scheduled reminders"]
-  APPR["✅ Approval events"]
+<p align="center">
+  <img src="docs/assets/diagrams/how-it-works.png" alt="Message flow: WhatsApp message (incl. approvals) → ingestion → conversation lane ← reminder sweep; lane → handleTurn workflow (load context → route turn via Jev, shadow → Claude ⇄ tools → persist) → WhatsApp reply; lane and turn backed by one Postgres" width="860" />
+</p>
 
-  ING["Ingestion<br/>allowlist · echo-filter<br/><b>durable enqueue before ack</b>"]
-  Q["Conversation queue<br/>concurrency 1 · per-conversation<br/>consumer-side debounce"]
-  TURN["handleTurn workflow<br/>loadContext → routeTurn → model loop → persist"]
-  JEV["Jev (TypeSafe)<br/>typed judgments → code picks tier<br/>fast · standard · deep"]
-  MODEL["Claude via Vercel AI SDK Core<br/>(ai + @ai-sdk/anthropic)<br/>prompt caching on the stable prefix"]
-  TOOLS["Typed tools<br/>Zod · risk tier · idempotency · revalidation"]
-  REPLY["Reply · send step<br/>declared delivery class vs sent_log"]
-  DB[("ONE Postgres<br/>DBOS journal + structured state + pgvector<br/>co-located on purpose")]
+<sub>Source: [`docs/diagrams/how-it-works.mmd`](docs/diagrams/how-it-works.mmd) — re-render with `pnpm docs:diagrams`.</sub>
 
-  WA --> ING --> Q
-  SCHED --> Q
-  APPR --> Q
-  Q --> TURN
-  TURN <--> MODEL
-  TURN -. "routeTurn step<br/>(shadow)" .-> JEV
-  TURN <--> TOOLS
-  TURN --> REPLY --> WA
-  TOOLS <--> DB
-  TURN <--> DB
-
-  classDef store fill:#f3e6d8,stroke:#c9772f,color:#3a2a1c;
-  classDef turn fill:#e7f0ea,stroke:#4a9e6d,color:#1f3a2c;
-  class DB store;
-  class TURN turn;
-```
+- **Ingestion** — sender allowlist and echo filter; the message is durably
+  enqueued *before* it is acked, so a crash can't lose it.
+- **Conversation lane** — one partition per conversation, concurrency 1;
+  consumer-side debounce folds a burst of messages into one turn.
+- **handleTurn** — a DBOS workflow: load context → a journaled `routeTurn` step
+  asks [Jev](docs/specs/jev-turn-routing-plan.md) (TypeSafe) typed questions and
+  code picks a tier (fast · standard · deep; in **shadow**, logged but every
+  turn still runs on Sonnet) → Claude via the Vercel AI SDK Core
+  (`ai` + `@ai-sdk/anthropic`, prompt caching on the stable prefix) calling
+  typed tools (Zod schema · risk tier · idempotency · revalidation) → persist.
+  An approval reply is resolved here, against the parked action.
+- **Reply** — a send step with a declared delivery class, checked against
+  `sent_log` so replay never double-sends.
+- **One Postgres** — the DBOS journal, structured state, and pgvector live in
+  one database on purpose: an app write and its step checkpoint commit in the
+  same transaction.
 
 Memory is split: a structured store (lists, reminders, facts, pending actions)
 and a pull-only **pgvector** semantic recall tool
@@ -251,24 +243,11 @@ A confirm-before tool never auto-executes. It parks, folds the turn closed, and
 only resumes when a household member replies to approve — re-validated right
 before the write and executed exactly once:
 
-```mermaid
-sequenceDiagram
-  autonumber
-  participant U as 👤 Household
-  participant T as handleTurn
-  participant P as pending_actions
-  participant G as Google Calendar
+<p align="center">
+  <img src="docs/assets/diagrams/hitl-calendar-approval.png" alt="Sequence: household asks for a calendar event → handleTurn parks it in pending_actions and asks for ✅ → turn folds closed → ✅ reply binds and re-validates → event created with a deterministic id → confirmation sent" width="860" />
+</p>
 
-  U->>T: "add dentist Thursday 3pm"
-  T->>P: park action (confirm-before)
-  T-->>U: "Reply ✅ to confirm"
-  Note over T,G: turn folds closed — nothing written yet
-  U->>T: ✅ (quoted-reply approval)
-  T->>P: bind approval · re-validate
-  T->>G: create event (deterministic id)
-  G-->>T: 200 — or 409 folds to success
-  T-->>U: "Added to the shared calendar"
-```
+<sub>Source: [`docs/diagrams/hitl-calendar-approval.mmd`](docs/diagrams/hitl-calendar-approval.mmd) — re-render with `pnpm docs:diagrams`.</sub>
 
 ## The operations console
 

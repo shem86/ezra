@@ -1,0 +1,16 @@
+sequenceDiagram
+  autonumber
+  participant U as 👤 Household
+  participant T as handleTurn
+  participant P as pending_actions
+  participant G as Google Calendar
+
+  U->>T: "add dentist Thursday 3pm"
+  T->>P: park action (confirm-before)
+  T-->>U: "Reply ✅ to confirm"
+  Note over T,G: turn folds closed — nothing written yet
+  U->>T: ✅ (quoted-reply approval)
+  T->>P: bind approval · re-validate
+  T->>G: create event (deterministic id)
+  G-->>T: 200 — or 409 folds to success
+  T-->>U: "Added to the shared calendar"
