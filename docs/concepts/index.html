@@ -1,0 +1,667 @@
+<title>Ezra System Concepts</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Tokens are the backoffice "warm paper" system (backoffice/src/styles.css).
+   Layout: a reference manual. The message-flow map on top, an index rail on
+   wide screens, and one card per concept. */
+:root {
+  --bg: oklch(0.972 0.009 78);
+  --surface: oklch(0.996 0.004 85);
+  --surface-2: oklch(0.968 0.008 78);
+  --border: oklch(0.912 0.009 75);
+  --border-strong: oklch(0.85 0.012 72);
+  --ink: oklch(0.255 0.016 52);
+  --muted: oklch(0.5 0.013 60);
+  --accent: #b5613b;
+  --accent-soft: oklch(0.935 0.032 55);
+  --accent-ink: oklch(0.47 0.12 45);
+  --ok-ink: oklch(0.45 0.10 155);
+  --ok-soft: oklch(0.94 0.04 155);
+  --amber-ink: oklch(0.5 0.115 68);
+  --amber-soft: oklch(0.945 0.05 80);
+  --shadow: 0 1px 2px oklch(0.3 0.03 55 / 0.05), 0 6px 20px -6px oklch(0.3 0.03 55 / 0.09);
+  --radius: 16px;
+  --radius-sm: 10px;
+  --mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+  --display: 'Fraunces', 'Iowan Old Style', Georgia, serif;
+  --sans: 'Hanken Grotesk', system-ui, -apple-system, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: oklch(0.195 0.012 55);
+    --surface: oklch(0.232 0.014 55);
+    --surface-2: oklch(0.268 0.015 55);
+    --border: oklch(0.31 0.015 55);
+    --border-strong: oklch(0.39 0.017 55);
+    --ink: oklch(0.945 0.01 78);
+    --muted: oklch(0.74 0.012 70);
+    --accent: #cf7550;
+    --accent-soft: oklch(0.32 0.05 45);
+    --accent-ink: oklch(0.8 0.1 52);
+    --ok-ink: oklch(0.8 0.11 155);
+    --ok-soft: oklch(0.31 0.05 155);
+    --amber-ink: oklch(0.84 0.12 80);
+    --amber-soft: oklch(0.33 0.05 75);
+    --shadow: 0 1px 2px oklch(0 0 0 / 0.35), 0 8px 24px -8px oklch(0 0 0 / 0.5);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: oklch(0.195 0.012 55);
+  --surface: oklch(0.232 0.014 55);
+  --surface-2: oklch(0.268 0.015 55);
+  --border: oklch(0.31 0.015 55);
+  --border-strong: oklch(0.39 0.017 55);
+  --ink: oklch(0.945 0.01 78);
+  --muted: oklch(0.74 0.012 70);
+  --accent: #cf7550;
+  --accent-soft: oklch(0.32 0.05 45);
+  --accent-ink: oklch(0.8 0.1 52);
+  --ok-ink: oklch(0.8 0.11 155);
+  --ok-soft: oklch(0.31 0.05 155);
+  --amber-ink: oklch(0.84 0.12 80);
+  --amber-soft: oklch(0.33 0.05 75);
+  --shadow: 0 1px 2px oklch(0 0 0 / 0.35), 0 8px 24px -8px oklch(0 0 0 / 0.5);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.55;
+}
+button, input { font: inherit; color: inherit; }
+a { color: var(--accent-ink); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.page {
+  max-width: 1160px;
+  margin-inline: auto;
+  padding-block: 32px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid;
+  gap: 28px;
+}
+.eyebrow {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+header { display: grid; gap: 6px; }
+h1 {
+  font-family: var(--display);
+  font-weight: 500;
+  font-size: clamp(32px, 6vw, 46px);
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+  margin: 0;
+  text-wrap: balance;
+}
+.lede { margin: 4px 0 0; max-width: 62ch; color: var(--muted); }
+
+/* Message-flow map */
+.map { display: grid; gap: 10px; }
+.map-title { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+.map-title h2 { font-size: 15px; font-weight: 600; margin: 0; }
+.map-title p { margin: 0; font-size: 14px; color: var(--muted); }
+.flow { display: flex; flex-wrap: wrap; align-items: stretch; gap: 6px; }
+.flow-arrow { align-self: center; color: var(--muted); font-size: 14px; }
+.stage {
+  flex: 1 1 110px;
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+  text-align: left;
+  padding: 9px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.stage:hover:not(:disabled) { border-color: var(--border-strong); }
+.stage:disabled { cursor: default; color: var(--muted); background: transparent; }
+.stage[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
+.stage b { font-size: 14px; font-weight: 600; }
+.stage small { font-size: 12px; color: var(--muted); }
+.ground { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 6px; }
+
+/* Controls */
+.controls { display: grid; gap: 10px; }
+.search-row { display: flex; flex-wrap: wrap; gap: 8px; }
+#search {
+  flex: 1 1 240px;
+  min-width: 0;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+#recall {
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  font-weight: 600;
+  cursor: pointer;
+}
+#recall[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+.filters { display: grid; gap: 6px; }
+.filter-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.filter-row > span { font-size: 13px; color: var(--muted); min-width: 64px; }
+.chip {
+  padding: 4px 10px;
+  font-size: 13px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+.chip:hover:not(:disabled) { border-color: var(--border-strong); }
+.chip:disabled { color: var(--muted); opacity: 0.65; cursor: default; }
+.chip[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.summary { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 14px; color: var(--muted); }
+.link-button { padding: 0; border: 0; background: none; color: var(--accent-ink); text-decoration: underline; cursor: pointer; }
+
+/* Index rail + cards */
+.body { display: grid; gap: 28px; align-items: start; }
+.rail { display: none; }
+@media (min-width: 1000px) {
+  .body { grid-template-columns: 220px minmax(0, 1fr); }
+  .rail {
+    display: grid;
+    gap: 14px;
+    position: sticky;
+    top: calc(16px + env(safe-area-inset-top, 0px));
+    font-size: 14px;
+  }
+  .rail h3 { margin: 0 0 3px; font-size: 13px; font-weight: 600; color: var(--muted); }
+  .rail ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+  .rail a { color: var(--ink); text-decoration: none; }
+  .rail a:hover { color: var(--accent-ink); text-decoration: underline; }
+}
+.cards { display: grid; gap: 20px; min-width: 0; }
+.card {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  padding: 22px clamp(16px, 3vw, 28px);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  scroll-margin-top: 16px;
+}
+.card.is-target { border-color: var(--accent); }
+.card-head { display: grid; gap: 8px; }
+.card h2 { margin: 0; font-size: 14px; font-weight: 600; }
+.card h2 a { color: var(--muted); text-decoration: none; }
+.card h2 a:hover { color: var(--accent-ink); text-decoration: underline; }
+.reminder {
+  margin: 0;
+  font-family: var(--display);
+  font-weight: 500;
+  font-size: clamp(22px, 3.4vw, 27px);
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+.tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag {
+  padding: 2px 9px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  background: var(--surface-2);
+  border-radius: 999px;
+}
+.tag.m-live { color: var(--ok-ink); background: var(--ok-soft); }
+.tag.m-drilled { color: var(--accent-ink); background: var(--accent-soft); }
+.tag.m-built, .tag.m-design { color: var(--amber-ink); background: var(--amber-soft); }
+.fields { margin: 0; display: grid; gap: 12px; }
+.field { display: grid; gap: 2px; min-width: 0; }
+@media (min-width: 640px) {
+  .field { grid-template-columns: 130px minmax(0, 1fr); gap: 16px; }
+}
+.field dt { font-size: 13px; font-weight: 600; color: var(--muted); padding-top: 2px; }
+.field dd { margin: 0; max-width: 66ch; min-width: 0; overflow-wrap: anywhere; }
+code, .ref {
+  font-family: var(--mono);
+  font-size: 0.86em;
+  overflow-wrap: anywhere;
+}
+dd code { padding: 1px 4px; background: var(--surface-2); border-radius: 4px; }
+.refs { margin: 0; padding: 0; list-style: none; display: grid; gap: 3px; }
+.ref-symbol { color: var(--muted); }
+.reveal {
+  justify-self: start;
+  padding: 9px 16px;
+  font-weight: 600;
+  color: var(--surface);
+  background: var(--accent);
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.empty {
+  padding: 28px;
+  text-align: center;
+  color: var(--muted);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+}
+footer { font-size: 14px; color: var(--muted); max-width: 72ch; }
+footer p { margin: 0; }
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+}
+</style>
+
+<div class="page">
+  <header>
+    <div class="eyebrow">Ezra · household WhatsApp assistant</div>
+    <h1>System concepts</h1>
+    <p class="lede">Each card starts from a real problem in the product, shows why the obvious fix fails, and then covers what we built. Use recall mode to test yourself.</p>
+  </header>
+
+  <section class="map" aria-labelledby="map-heading">
+    <div class="map-title">
+      <h2 id="map-heading">Follow a message through the system</h2>
+      <p>Select a stage to see the concepts that apply there.</p>
+    </div>
+    <div class="flow" id="flow"></div>
+    <div class="ground" id="ground"></div>
+  </section>
+
+  <section class="controls" aria-label="Find a concept">
+    <div class="search-row">
+      <input id="search" type="search" placeholder="Search concepts, symbols, incidents" aria-label="Search concepts">
+      <button id="recall" type="button" aria-pressed="false">Recall mode</button>
+    </div>
+    <div class="filters" id="filters"></div>
+    <div class="summary" id="summary" aria-live="polite"></div>
+  </section>
+
+  <div class="body">
+    <nav class="rail" id="rail" aria-label="Concept index"></nav>
+    <main class="cards" id="cards"></main>
+  </div>
+
+  <footer>
+    <p>Pilot version with 3 of about 50 planned cards. Facts were checked against the code on 2026-11-05. Code links open the current <code>main</code> branch.</p>
+  </footer>
+</div>
+
+<!-- Card data. `code` entries are {path, symbol} pairs so `pnpm check:docs` can
+     verify each file exists and still contains the symbol. Cite symbols, never
+     line numbers. -->
+<script type="application/json" id="concept-data">
+{
+  "groups": [
+    { "id": "agent", "label": "Building the agent" },
+    { "id": "guardrails", "label": "Guardrails" },
+    { "id": "measurement", "label": "Measurement and evaluation" },
+    { "id": "reliability", "label": "Keeping it reliable" },
+    { "id": "security", "label": "Security and operations" }
+  ],
+  "sources": [
+    { "id": "readme", "label": "README" },
+    { "id": "incident", "label": "Incident" },
+    { "id": "adr", "label": "ADR" },
+    { "id": "ops", "label": "Ops" }
+  ],
+  "maturity": [
+    { "id": "live", "label": "Proven live", "hint": "Has handled a real event in production" },
+    { "id": "drilled", "label": "Drilled", "hint": "Deliberately failed in a test or drill" },
+    { "id": "built", "label": "Built", "hint": "Implemented but never put under failure" },
+    { "id": "design", "label": "Design only", "hint": "Decided but not implemented" }
+  ],
+  "stages": [
+    { "id": "ingestion", "label": "Ingestion", "note": "Allowlist, echo filter" },
+    { "id": "queue", "label": "Queue", "note": "One lane, debounced" },
+    { "id": "turn", "label": "handleTurn", "note": "Model loop" },
+    { "id": "tools", "label": "Tools", "note": "Typed, risk-tiered" },
+    { "id": "reply", "label": "Reply", "note": "Delivery classes" }
+  ],
+  "ground": [
+    { "id": "postgres", "label": "One Postgres", "note": "Journal, state and vectors together" },
+    { "id": "outside", "label": "Outside the host", "note": "Monitoring, backups, deploys" }
+  ],
+  "concepts": [
+    {
+      "id": "fire-and-fold",
+      "title": "Fire-and-fold approvals",
+      "reminder": "Never hold the only queue slot while waiting for a person.",
+      "group": "agent",
+      "source": "readme",
+      "maturity": "drilled",
+      "stage": "turn",
+      "problem": "Ezra proposes a calendar event while one of you is asleep. Each conversation has a single processing slot, and reminders and the other person's messages still need to get through it.",
+      "obvious": "Block the workflow on `DBOS.recv()` until someone replies. That holds the slot, so the whole conversation and every reminder freeze behind an approval nobody may ever answer.",
+      "solution": "A confirm-before tool never runs when proposed. `makePark` saves a `pending_actions` row and answers the tool call with a synthetic \"pending approval\" result, and the turn ends. The reply arrives later as an ordinary message, and a fresh turn re-checks the action and runs it exactly once.",
+      "tradeoff": "The model loses continuity. A `tool_use` can't be answered twice, so the real result enters the later turn as new context. Because time passes, the design also needs revalidation at execution and a classifier for messages that arrive while an action is pending.",
+      "concept": "Move work that needs a human out of the worker, and rejoin it later through a stable key. Here that key is the action ID.",
+      "elsewhere": "AWS Step Functions' wait-for-task-token pattern pauses on a token until an outside caller returns it.",
+      "code": [
+        { "path": "src/hitl/park.ts", "symbol": "makePark" },
+        { "path": "src/agent/handle-turn.ts", "symbol": "parkedCalls" },
+        { "path": "src/hitl/resolve-approval.ts", "symbol": "makeResolveApprovalReply" },
+        { "path": "src/hitl/pending-actions.ts", "symbol": "claimForExecution" }
+      ],
+      "proof": "Covered by `tests/integration/park-recovery.test.ts` and `tests/integration/calendar-approval.test.ts`, plus the approval evals. `STATUS.md` still lists this path as unexercised in production."
+    },
+    {
+      "id": "co-commit",
+      "title": "Exactly-once writes by co-commit",
+      "reminder": "Commit the state change and the record that it happened in one transaction.",
+      "group": "reliability",
+      "source": "readme",
+      "maturity": "drilled",
+      "stage": "postgres",
+      "problem": "You ask for milk on the list. The process dies just after the insert and before the step is recorded, so recovery runs the step again and milk appears twice. Record first instead, and a crash loses the item.",
+      "obvious": "Keep the workflow journal and app data in separate databases, and order the two writes carefully. No ordering closes the gap, because a transaction can't span two databases.",
+      "solution": "Every structured write goes through `registerTransactionalStep`, a DBOS datasource transaction. The app write and the step checkpoint commit together, so both land or neither does. A replay of a committed step returns the recorded output without writing again.",
+      "tradeoff": "The journal, state and pgvector must share one Postgres, so we run our own backups rather than using a managed split. The guarantee also stops at the database: WhatsApp sends and calendar writes need idempotency keys or delivery classes.",
+      "concept": "Atomic commit of an effect and its progress marker. If both live in one transactional store, you get exactly-once for that store.",
+      "elsewhere": "The transactional outbox uses the same move, writing the business row and the outgoing event in one transaction.",
+      "code": [
+        { "path": "src/orchestration/steps.ts", "symbol": "registerTransactionalStep" },
+        { "path": "tests/integration/dbos-spike.test.ts", "symbol": "never re-applies the state write" }
+      ],
+      "proof": "The T8 spike showed that re-running a workflow ID returns the same output without reapplying the write. Kill-mid-flight tests SIGKILL a run, recover it, and assert identical output with each effect once."
+    },
+    {
+      "id": "dead-man",
+      "title": "External dead-man's switch",
+      "reminder": "A monitor can't report its own death, so something outside must notice the silence.",
+      "group": "reliability",
+      "source": "ops",
+      "maturity": "live",
+      "stage": "outside",
+      "problem": "The host dies at 3am. Reminders stop firing, nobody gets a message, and the in-process health monitor died with everything else.",
+      "obvious": "Have the app check itself and alert on Telegram. Telegram does keep alerts off the WhatsApp socket, but a dead process sends nothing, and a network cut makes the send itself fail.",
+      "solution": "`createDeadmanPinger` pings healthchecks.io every 60 seconds, and that service raises the alert from outside when pings stop. A failed ping is logged through `onPingError` and never thrown, because a missed ping is the signal the service exists to catch.",
+      "tradeoff": "A ping proves the process is alive, nothing more. It also needs its own network path, so a broken ping route looks the same as a dead host and can raise a false alarm.",
+      "concept": "Invert the alarm: require a regular proof of life, and treat silence as the failure.",
+      "elsewhere": "Prometheus setups often run an always-firing Watchdog alert for the same reason, so an outside service can detect when alerting itself has died.",
+      "code": [
+        { "path": "src/ops/deadman.ts", "symbol": "createDeadmanPinger" },
+        { "path": "src/main.ts", "symbol": "onPingError" },
+        { "path": "src/ops/health.ts", "symbol": "createHealthMonitor" }
+      ],
+      "proof": "`kill -9` raised the alert in about 2 minutes (T14), and the drill passed again from the real host at T45.",
+      "scar": "From 2026-07-28 to 2026-08-10 WhatsApp was down for 12 days 19 hours while the ping stayed green. The process was healthy and the socket wasn't, which is why liveness and connectivity need separate checks."
+    }
+  ]
+}
+</script>
+
+<script>
+(function () {
+  var data = JSON.parse(document.getElementById('concept-data').textContent);
+  var REPO = 'https://github.com/shem86/ezra/blob/main/';
+  var RECALL_KEY = 'ezra-concepts-recall';
+  var byId = function (list, id) { return list.filter(function (x) { return x.id === id; })[0]; };
+  var state = { query: '', group: null, source: null, maturity: null, stage: null, recall: false, revealed: {} };
+
+  try { state.recall = localStorage.getItem(RECALL_KEY) === '1'; } catch (e) { /* storage is optional */ }
+
+  function el(tag, className, text) {
+    var node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+
+  // Backticks in card copy become <code>. Built with DOM nodes, so card text
+  // is never parsed as HTML.
+  function rich(parent, text) {
+    text.split('`').forEach(function (part, i) {
+      if (part === '') return;
+      parent.appendChild(i % 2 ? el('code', '', part) : document.createTextNode(part));
+    });
+    return parent;
+  }
+
+  function searchText(c) {
+    return [c.title, c.reminder, c.problem, c.obvious, c.solution, c.tradeoff, c.concept, c.elsewhere, c.proof, c.scar || '']
+      .concat(c.code.map(function (r) { return r.path + ' ' + r.symbol; }))
+      .join(' ').toLowerCase();
+  }
+
+  function matches(c, ignore) {
+    var words = state.query.toLowerCase().split(/\s+/).filter(Boolean);
+    var text = searchText(c);
+    return words.every(function (w) { return text.indexOf(w) !== -1; }) &&
+      ['group', 'source', 'maturity', 'stage'].every(function (key) {
+        return key === ignore || !state[key] || c[key] === state[key];
+      });
+  }
+
+  function count(key, id) {
+    return data.concepts.filter(function (c) { return c[key] === id && matches(c, key); }).length;
+  }
+
+  function toggle(key, id) {
+    state[key] = state[key] === id ? null : id;
+    render();
+  }
+
+  function renderMap() {
+    var flow = document.getElementById('flow');
+    var ground = document.getElementById('ground');
+    flow.textContent = '';
+    ground.textContent = '';
+    function stage(s) {
+      var n = count('stage', s.id);
+      var button = el('button', 'stage');
+      button.type = 'button';
+      button.disabled = n === 0 && state.stage !== s.id;
+      button.setAttribute('aria-pressed', String(state.stage === s.id));
+      button.appendChild(el('b', '', s.label));
+      button.appendChild(el('small', '', s.note + (n ? ' · ' + n : '')));
+      button.addEventListener('click', function () { toggle('stage', s.id); });
+      return button;
+    }
+    data.stages.forEach(function (s, i) {
+      if (i) {
+        var arrow = el('span', 'flow-arrow', '→');
+        arrow.setAttribute('aria-hidden', 'true');
+        flow.appendChild(arrow);
+      }
+      flow.appendChild(stage(s));
+    });
+    data.ground.forEach(function (s) { ground.appendChild(stage(s)); });
+  }
+
+  function renderFilters() {
+    var box = document.getElementById('filters');
+    box.textContent = '';
+    [['Group', 'group', data.groups], ['Source', 'source', data.sources], ['Maturity', 'maturity', data.maturity]]
+      .forEach(function (row) {
+        var line = el('div', 'filter-row');
+        line.appendChild(el('span', '', row[0]));
+        row[2].forEach(function (item) {
+          var n = count(row[1], item.id);
+          var chip = el('button', 'chip', item.label + ' ' + n);
+          chip.type = 'button';
+          chip.disabled = n === 0 && state[row[1]] !== item.id;
+          chip.setAttribute('aria-pressed', String(state[row[1]] === item.id));
+          if (item.hint) chip.title = item.hint;
+          chip.addEventListener('click', function () { toggle(row[1], item.id); });
+          line.appendChild(chip);
+        });
+        box.appendChild(line);
+      });
+  }
+
+  function field(list, label, text) {
+    var row = el('div', 'field');
+    row.appendChild(el('dt', '', label));
+    list.appendChild(row).appendChild(rich(el('dd'), text));
+  }
+
+  function renderCard(c) {
+    var hidden = state.recall && !state.revealed[c.id];
+    var card = el('article', 'card');
+    card.id = c.id;
+    var fields = el('dl', 'fields');
+
+    if (hidden) {
+      card.appendChild(el('div', 'eyebrow', byId(data.groups, c.group).label));
+      field(fields, 'The problem', c.problem);
+      card.appendChild(fields);
+      var reveal = el('button', 'reveal', 'Reveal the answer');
+      reveal.type = 'button';
+      reveal.addEventListener('click', function () {
+        state.revealed[c.id] = true;
+        render();
+      });
+      card.appendChild(reveal);
+      return card;
+    }
+
+    var head = el('div', 'card-head');
+    var h2 = el('h2');
+    var link = el('a', '', c.title);
+    link.href = '#' + c.id;
+    h2.appendChild(link);
+    head.appendChild(h2);
+    head.appendChild(el('p', 'reminder', c.reminder));
+    var tags = el('div', 'tags');
+    var maturity = byId(data.maturity, c.maturity);
+    var mTag = el('span', 'tag m-' + c.maturity, maturity.label);
+    mTag.title = maturity.hint;
+    tags.appendChild(mTag);
+    tags.appendChild(el('span', 'tag', byId(data.groups, c.group).label));
+    tags.appendChild(el('span', 'tag', byId(data.sources, c.source).label));
+    head.appendChild(tags);
+    card.appendChild(head);
+
+    field(fields, 'The problem', c.problem);
+    field(fields, 'Obvious fix', c.obvious);
+    field(fields, 'How we solve it', c.solution);
+    field(fields, 'Trade-off', c.tradeoff);
+    field(fields, 'General concept', c.concept);
+    field(fields, 'Elsewhere', c.elsewhere);
+
+    var codeRow = el('div', 'field');
+    codeRow.appendChild(el('dt', '', 'In the code'));
+    var dd = el('dd');
+    var refs = el('ul', 'refs');
+    c.code.forEach(function (r) {
+      var li = el('li');
+      var a = el('a', 'ref', r.path);
+      a.href = REPO + r.path;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      li.appendChild(a);
+      li.appendChild(el('span', 'ref ref-symbol', ' ' + r.symbol));
+      refs.appendChild(li);
+    });
+    dd.appendChild(refs);
+    codeRow.appendChild(dd);
+    fields.appendChild(codeRow);
+
+    field(fields, 'Proof', c.proof);
+    if (c.scar) field(fields, 'Scar', c.scar);
+    card.appendChild(fields);
+    return card;
+  }
+
+  function renderRail(list) {
+    var rail = document.getElementById('rail');
+    rail.textContent = '';
+    rail.hidden = state.recall;
+    data.groups.forEach(function (g) {
+      var items = list.filter(function (c) { return c.group === g.id; });
+      if (!items.length) return;
+      var block = el('div');
+      block.appendChild(el('h3', '', g.label));
+      var ul = el('ul');
+      items.forEach(function (c) {
+        var li = el('li');
+        var a = el('a', '', c.title);
+        a.href = '#' + c.id;
+        li.appendChild(a);
+        ul.appendChild(li);
+      });
+      block.appendChild(ul);
+      rail.appendChild(block);
+    });
+  }
+
+  function clearAll() {
+    state.query = '';
+    state.group = state.source = state.maturity = state.stage = null;
+    document.getElementById('search').value = '';
+    render();
+  }
+
+  function render() {
+    var list = data.concepts.filter(function (c) { return matches(c); });
+    renderMap();
+    renderFilters();
+    renderRail(list);
+
+    var cards = document.getElementById('cards');
+    cards.textContent = '';
+    if (list.length) {
+      list.forEach(function (c) { cards.appendChild(renderCard(c)); });
+    } else {
+      cards.appendChild(el('div', 'empty', 'No concepts match this search and filter combination.'));
+    }
+
+    var summary = document.getElementById('summary');
+    summary.textContent = '';
+    summary.appendChild(el('span', '', 'Showing ' + list.length + ' of ' + data.concepts.length));
+    if (state.query || state.group || state.source || state.maturity || state.stage) {
+      var clear = el('button', 'link-button', 'Clear filters');
+      clear.type = 'button';
+      clear.addEventListener('click', clearAll);
+      summary.appendChild(clear);
+    }
+
+    var recall = document.getElementById('recall');
+    recall.setAttribute('aria-pressed', String(state.recall));
+    recall.textContent = state.recall ? 'Recall mode on' : 'Recall mode';
+  }
+
+  function openFromHash() {
+    var id = location.hash.slice(1);
+    if (!byId(data.concepts, id)) return;
+    state.query = '';
+    state.group = state.source = state.maturity = state.stage = null;
+    document.getElementById('search').value = '';
+    state.revealed[id] = true;
+    render();
+    var target = document.getElementById(id);
+    target.classList.add('is-target');
+    target.scrollIntoView({ block: 'start' });
+  }
+
+  document.getElementById('search').addEventListener('input', function (event) {
+    state.query = event.target.value;
+    render();
+  });
+  document.getElementById('recall').addEventListener('click', function () {
+    state.recall = !state.recall;
+    state.revealed = {};
+    try { localStorage.setItem(RECALL_KEY, state.recall ? '1' : '0'); } catch (e) { /* storage is optional */ }
+    render();
+  });
+  window.addEventListener('hashchange', openFromHash);
+
+  render();
+  openFromHash();
+})();
+</script>
