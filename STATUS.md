@@ -280,9 +280,10 @@ marker, web/Q&A fencing, and forwarded-message provenance. No urgency — ADR-00
 rules the current posture acceptable.
 
 Also flagged-and-accepted in §12: no output moderation before send; the
-relatedness classifier is guarded only by offline eval; the HITL park/resume
-machinery is built but **unexercised in production** (soak it during the
-calendar rollout).
+relatedness classifier is guarded only by offline eval. The HITL park/resume
+path **has now run in production**: real calendar approvals have happened
+(builder-reported 2026-11-05, not re-checked against `pending_actions`). Double
+approvals, TTL expiry and stale-at-execution remain proven by tests only.
 
 ### 6. ✅ RESOLVED 2026-08-10 — backoffice auth locked the operator out
 **Status:** **resolved**, shipped in `v2.3.1` (lockout) + the self-service

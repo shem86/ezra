@@ -115,6 +115,7 @@ h1 {
 .map-title p { margin: 0; font-size: 14px; color: var(--muted); }
 .flow { display: flex; flex-wrap: wrap; align-items: stretch; gap: 6px; }
 .flow-arrow { align-self: center; color: var(--muted); font-size: 14px; }
+@media (max-width: 640px) { .flow-arrow { display: none; } }
 .stage {
   flex: 1 1 110px;
   min-width: 0;
@@ -173,11 +174,13 @@ h1 {
 .link-button { padding: 0; border: 0; background: none; color: var(--accent-ink); text-decoration: underline; cursor: pointer; }
 
 /* Index rail + cards */
-.body { display: grid; gap: 28px; align-items: start; }
+.body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; align-items: start; }
 .rail { display: none; }
 @media (min-width: 1000px) {
-  .body { grid-template-columns: 220px minmax(0, 1fr); }
-  .rail {
+  /* Two columns only while the rail exists. A hidden rail leaves the grid, and
+     the cards would otherwise drop into its 220px column. */
+  .body:not(.is-recall) { grid-template-columns: 220px minmax(0, 1fr); }
+  .body:not(.is-recall) .rail {
     display: grid;
     gap: 14px;
     position: sticky;
@@ -203,6 +206,8 @@ h1 {
 }
 .card.is-target { border-color: var(--accent); }
 .card-head { display: grid; gap: 8px; }
+.aka { margin: 0; font-size: 14px; color: var(--muted); }
+.hide-answer { justify-self: start; font-size: 14px; }
 .card h2 { margin: 0; font-size: 14px; font-weight: 600; }
 .card h2 a { color: var(--muted); text-decoration: none; }
 .card h2 a:hover { color: var(--accent-ink); text-decoration: underline; }
@@ -297,7 +302,7 @@ footer p { margin: 0; }
   </div>
 
   <footer>
-    <p>Pilot version with 3 of about 50 planned cards. Facts were checked against the code on 2026-11-05. Code links open the current <code>main</code> branch.</p>
+    <p>Pilot version with 3 of about 50 planned cards. Facts were checked against the code and pinned library source on 2026-11-05. Code links open the current <code>main</code> branch.</p>
   </footer>
 </div>
 
@@ -338,50 +343,64 @@ footer p { margin: 0; }
   ],
   "concepts": [
     {
-      "id": "fire-and-fold",
-      "title": "Fire-and-fold approvals",
+      "id": "async-human-in-the-loop",
+      "title": "Asynchronous human-in-the-loop approval",
+      "aka": ["Fire-and-fold (project term)", "Out-of-band approval"],
       "reminder": "Never hold the only queue slot while waiting for a person.",
       "group": "agent",
       "source": "readme",
-      "maturity": "drilled",
+      "maturity": "live",
       "stage": "turn",
       "problem": "Ezra proposes a calendar event while one of you is asleep. Each conversation has a single processing slot, and reminders and the other person's messages still need to get through it.",
-      "obvious": "Block the workflow on `DBOS.recv()` until someone replies. That holds the slot, so the whole conversation and every reminder freeze behind an approval nobody may ever answer.",
-      "solution": "A confirm-before tool never runs when proposed. `makePark` saves a `pending_actions` row and answers the tool call with a synthetic \"pending approval\" result, and the turn ends. The reply arrives later as an ordinary message, and a fresh turn re-checks the action and runs it exactly once.",
-      "tradeoff": "The model loses continuity. A `tool_use` can't be answered twice, so the real result enters the later turn as new context. Because time passes, the design also needs revalidation at execution and a classifier for messages that arrive while an action is pending.",
-      "concept": "Move work that needs a human out of the worker, and rejoin it later through a stable key. Here that key is the action ID.",
-      "elsewhere": "AWS Step Functions' wait-for-task-token pattern pauses on a token until an outside caller returns it.",
+      "obvious": "Wait inside the workflow with `DBOS.recv()`. DBOS supports durable waits like this, but here the workflow would hold the conversation's only queue slot, so everything behind it freezes until someone answers.",
+      "solution": "A confirm-before tool never runs when proposed. `makePark` saves a `pending_actions` row and answers the tool call with a synthetic \"pending approval\" result, then the turn ends and frees the slot. The reply arrives later as an ordinary message. A fresh turn matches it to the action, re-checks it, and runs the tool. Guarded status updates let only one approval win.",
+      "tradeoff": "The model loses continuity. A `tool_use` is answered only once, so the real result enters the later turn as new context. Because time passes, the design also needs revalidation at execution and a classifier for messages that arrive while an action is pending.",
+      "concept": "Correlation identifier: a reply carries a key that ties it to the original request. Here a quoted reply is matched to its action through the approval prompt's WhatsApp message ID.",
+      "elsewhere": "AWS Step Functions' `.waitForTaskToken` and LangGraph's `interrupt()` pause a run until a token or thread ID resumes it. We end the run and start a fresh turn instead.",
       "code": [
         { "path": "src/hitl/park.ts", "symbol": "makePark" },
         { "path": "src/agent/handle-turn.ts", "symbol": "parkedCalls" },
+        { "path": "src/memory/store.ts", "symbol": "getActionByPromptMessageId" },
         { "path": "src/hitl/resolve-approval.ts", "symbol": "makeResolveApprovalReply" },
         { "path": "src/hitl/pending-actions.ts", "symbol": "claimForExecution" }
       ],
-      "proof": "Covered by `tests/integration/park-recovery.test.ts` and `tests/integration/calendar-approval.test.ts`, plus the approval evals. `STATUS.md` still lists this path as unexercised in production."
+      "proof": "Real calendar approvals have run in production (reported by the builder, 2026-11-05). Double approvals and crashes mid-approval are proven in `tests/integration/resolve-approval.test.ts` and `tests/integration/park-recovery.test.ts`, not on live traffic.",
+      "refs": [
+        { "label": "Correlation Identifier (Enterprise Integration Patterns)", "url": "https://enterpriseintegrationpatterns.com/CorrelationIdentifier.html" },
+        { "label": "Interrupts (LangGraph docs)", "url": "https://docs.langchain.com/oss/python/langgraph/interrupts" },
+        { "label": "Service integration patterns (AWS Step Functions docs)", "url": "https://docs.aws.amazon.com/step-functions/latest/dg/connect-to-resource.html" },
+        { "label": "Human-in-the-loop (DBOS docs)", "url": "https://docs.dbos.dev/ai/hitl" }
+      ]
     },
     {
-      "id": "co-commit",
-      "title": "Exactly-once writes by co-commit",
-      "reminder": "Commit the state change and the record that it happened in one transaction.",
+      "id": "exactly-once-state-writes",
+      "title": "Exactly-once state writes",
+      "aka": ["Co-commit (project term)", "Effectively-once"],
+      "reminder": "Commit the state change and the record that it ran in one transaction.",
       "group": "reliability",
       "source": "readme",
       "maturity": "drilled",
       "stage": "postgres",
-      "problem": "You ask for milk on the list. The process dies just after the insert and before the step is recorded, so recovery runs the step again and milk appears twice. Record first instead, and a crash loses the item.",
-      "obvious": "Keep the workflow journal and app data in separate databases, and order the two writes carefully. No ordering closes the gap, because a transaction can't span two databases.",
-      "solution": "Every structured write goes through `registerTransactionalStep`, a DBOS datasource transaction. The app write and the step checkpoint commit together, so both land or neither does. A replay of a committed step returns the recorded output without writing again.",
-      "tradeoff": "The journal, state and pgvector must share one Postgres, so we run our own backups rather than using a managed split. The guarantee also stops at the database: WhatsApp sends and calendar writes need idempotency keys or delivery classes.",
-      "concept": "Atomic commit of an effect and its progress marker. If both live in one transactional store, you get exactly-once for that store.",
-      "elsewhere": "The transactional outbox uses the same move, writing the business row and the outgoing event in one transaction.",
+      "problem": "You ask for milk on the list. The process dies after the insert but before the step is recorded, so recovery runs the step again and milk appears twice. This is the dual-write problem: two records must change together, and a crash can land between them.",
+      "obvious": "Write from a plain DBOS step. Steps run at least once, so a crash after the write and before the checkpoint runs the write again.",
+      "solution": "Every structured write goes through `registerTransactionalStep`, a DBOS datasource transaction. The app write and a row in `dbos.transaction_completion` commit in one Postgres transaction, so both land or neither does. On replay, DBOS finds that row and returns the saved output without running the write again.",
+      "tradeoff": "The guarantee covers only this database, so WhatsApp sends and calendar writes need idempotency keys or delivery classes. It requires the completion table to sit beside the app data. We keep the DBOS journal there too, so one Postgres holds everything, and we run its backups ourselves.",
+      "concept": "Atomic commit of an effect and its progress marker. Code may run more than once while the effect lands once, which is why stream-processing writers often say effectively-once. DBOS's own docs say exactly-once.",
+      "elsewhere": "The transactional outbox uses the same move, writing the business row and the outgoing message in one transaction.",
       "code": [
         { "path": "src/orchestration/steps.ts", "symbol": "registerTransactionalStep" },
         { "path": "tests/integration/dbos-spike.test.ts", "symbol": "never re-applies the state write" }
       ],
-      "proof": "The T8 spike showed that re-running a workflow ID returns the same output without reapplying the write. Kill-mid-flight tests SIGKILL a run, recover it, and assert identical output with each effect once."
+      "proof": "The T8 spike showed that re-running a workflow ID returns the same output without reapplying the write. A kill-mid-flight test SIGKILLs a run, recovers it, and asserts identical output with no double effect.",
+      "refs": [
+        { "label": "Transactions and datasources (DBOS docs)", "url": "https://docs.dbos.dev/typescript/tutorials/transaction-tutorial" },
+        { "label": "Transactional outbox (microservices.io)", "url": "https://microservices.io/patterns/data/transactional-outbox" }
+      ]
     },
     {
-      "id": "dead-man",
-      "title": "External dead-man's switch",
+      "id": "dead-mans-switch",
+      "title": "Dead man's switch",
+      "aka": ["Heartbeat monitoring", "Watchdog alert", "Dead-man ping (project term)"],
       "reminder": "A monitor can't report its own death, so something outside must notice the silence.",
       "group": "reliability",
       "source": "ops",
@@ -390,16 +409,20 @@ footer p { margin: 0; }
       "problem": "The host dies at 3am. Reminders stop firing, nobody gets a message, and the in-process health monitor died with everything else.",
       "obvious": "Have the app check itself and alert on Telegram. Telegram does keep alerts off the WhatsApp socket, but a dead process sends nothing, and a network cut makes the send itself fail.",
       "solution": "`createDeadmanPinger` pings healthchecks.io every 60 seconds, and that service raises the alert from outside when pings stop. A failed ping is logged through `onPingError` and never thrown, because a missed ping is the signal the service exists to catch.",
-      "tradeoff": "A ping proves the process is alive, nothing more. It also needs its own network path, so a broken ping route looks the same as a dead host and can raise a false alarm.",
-      "concept": "Invert the alarm: require a regular proof of life, and treat silence as the failure.",
-      "elsewhere": "Prometheus setups often run an always-firing Watchdog alert for the same reason, so an outside service can detect when alerting itself has died.",
+      "tradeoff": "A ping proves the process is alive, not that it works. It also needs its own network path, and a broken route looks just like a dead host. An egress bug dropped the ping about hourly until `v2.3.7`.",
+      "concept": "Invert the alarm: require regular proof of life and treat silence as the failure.",
+      "elsewhere": "Prometheus teams route an always-firing Watchdog alert to an external service that alerts when it stops. Kubernetes separates the related questions into liveness and readiness probes.",
       "code": [
         { "path": "src/ops/deadman.ts", "symbol": "createDeadmanPinger" },
         { "path": "src/main.ts", "symbol": "onPingError" },
         { "path": "src/ops/health.ts", "symbol": "createHealthMonitor" }
       ],
       "proof": "`kill -9` raised the alert in about 2 minutes (T14), and the drill passed again from the real host at T45.",
-      "scar": "From 2026-07-28 to 2026-08-10 WhatsApp was down for 12 days 19 hours while the ping stayed green. The process was healthy and the socket wasn't, which is why liveness and connectivity need separate checks."
+      "scar": "From 2026-07-28 to 2026-08-10 WhatsApp was down for 12 days 19 hours while the ping stayed green. The process was healthy and the socket wasn't, which is why liveness and connectivity need separate checks.",
+      "refs": [
+        { "label": "End-to-end watchdog alerts (PromLabs)", "url": "https://training.promlabs.com/training/monitoring-and-debugging-prometheus/metrics-based-meta-monitoring/end-to-end-watchdog-alerts/" },
+        { "label": "Liveness, readiness and startup probes (Kubernetes docs)", "url": "https://www.kubernetes.io/docs/concepts/configuration/liveness-readiness-startup-probes/" }
+      ]
     }
   ]
 }
@@ -433,7 +456,7 @@ footer p { margin: 0; }
   }
 
   function searchText(c) {
-    return [c.title, c.reminder, c.problem, c.obvious, c.solution, c.tradeoff, c.concept, c.elsewhere, c.proof, c.scar || '']
+    return [c.title, c.aka.join(' '), c.reminder, c.problem, c.obvious, c.solution, c.tradeoff, c.concept, c.elsewhere, c.proof, c.scar || '']
       .concat(c.code.map(function (r) { return r.path + ' ' + r.symbol; }))
       .join(' ').toLowerCase();
   }
@@ -524,6 +547,7 @@ footer p { margin: 0; }
       reveal.type = 'button';
       reveal.addEventListener('click', function () {
         state.revealed[c.id] = true;
+        state.focus = '#' + c.id + ' h2 a';
         render();
       });
       card.appendChild(reveal);
@@ -537,6 +561,7 @@ footer p { margin: 0; }
     h2.appendChild(link);
     head.appendChild(h2);
     head.appendChild(el('p', 'reminder', c.reminder));
+    head.appendChild(el('p', 'aka', 'Also called: ' + c.aka.join(', ')));
     var tags = el('div', 'tags');
     var maturity = byId(data.maturity, c.maturity);
     var mTag = el('span', 'tag m-' + c.maturity, maturity.label);
@@ -551,7 +576,7 @@ footer p { margin: 0; }
     field(fields, 'Obvious fix', c.obvious);
     field(fields, 'How we solve it', c.solution);
     field(fields, 'Trade-off', c.tradeoff);
-    field(fields, 'General concept', c.concept);
+    field(fields, 'Pattern', c.concept);
     field(fields, 'Elsewhere', c.elsewhere);
 
     var codeRow = el('div', 'field');
@@ -574,14 +599,42 @@ footer p { margin: 0; }
 
     field(fields, 'Proof', c.proof);
     if (c.scar) field(fields, 'Scar', c.scar);
+
+    var refRow = el('div', 'field');
+    refRow.appendChild(el('dt', '', 'Sources'));
+    var refDd = el('dd');
+    var refList = el('ul', 'refs');
+    c.refs.forEach(function (r) {
+      var li = el('li');
+      var a = el('a', '', r.label);
+      a.href = r.url;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      li.appendChild(a);
+      refList.appendChild(li);
+    });
+    refDd.appendChild(refList);
+    refRow.appendChild(refDd);
+    fields.appendChild(refRow);
+
     card.appendChild(fields);
+    if (state.recall) {
+      var hide = el('button', 'link-button hide-answer', 'Hide the answer');
+      hide.type = 'button';
+      hide.addEventListener('click', function () {
+        delete state.revealed[c.id];
+        state.focus = '#' + c.id + ' .reveal';
+        render();
+      });
+      card.appendChild(hide);
+    }
     return card;
   }
 
   function renderRail(list) {
     var rail = document.getElementById('rail');
     rail.textContent = '';
-    rail.hidden = state.recall;
+    rail.parentElement.classList.toggle('is-recall', state.recall);
     data.groups.forEach(function (g) {
       var items = list.filter(function (c) { return c.group === g.id; });
       if (!items.length) return;
@@ -634,6 +687,13 @@ footer p { margin: 0; }
     var recall = document.getElementById('recall');
     recall.setAttribute('aria-pressed', String(state.recall));
     recall.textContent = state.recall ? 'Recall mode on' : 'Recall mode';
+
+    // Rendering replaces the cards, so focus has to be put back by hand.
+    if (state.focus) {
+      var next = document.querySelector(state.focus);
+      state.focus = null;
+      if (next) next.focus();
+    }
   }
 
   function openFromHash() {
