@@ -2,7 +2,7 @@
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Kalam:wght@400;700&display=swap" rel="stylesheet">
 <style>
 /* Tokens are the backoffice "warm paper" system (backoffice/src/styles.css).
    Layout: a reference manual. The message-flow map on top, an index rail on
@@ -28,6 +28,12 @@
   --mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
   --display: 'Fraunces', 'Iowan Old Style', Georgia, serif;
   --sans: 'Hanken Grotesk', system-ui, -apple-system, sans-serif;
+  /* Hand-drawn diagram: the sketch face and one hue per kind of box. */
+  --hand: 'Kalam', 'Comic Sans MS', cursive;
+  --d-flow: #b5613b;
+  --d-store: #a87a00;
+  --d-ext: #0f74c5;
+  --d-ops: #2f8a5a;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -46,6 +52,10 @@
     --amber-ink: oklch(0.84 0.12 80);
     --amber-soft: oklch(0.33 0.05 75);
     --shadow: 0 1px 2px oklch(0 0 0 / 0.35), 0 8px 24px -8px oklch(0 0 0 / 0.5);
+    --d-flow: #e08a62;
+    --d-store: #d6a92e;
+    --d-ext: #5aa6ea;
+    --d-ops: #5cc08a;
     color-scheme: dark;
   }
 }
@@ -65,10 +75,15 @@
   --amber-ink: oklch(0.84 0.12 80);
   --amber-soft: oklch(0.33 0.05 75);
   --shadow: 0 1px 2px oklch(0 0 0 / 0.35), 0 8px 24px -8px oklch(0 0 0 / 0.5);
+  --d-flow: #e08a62;
+  --d-store: #d6a92e;
+  --d-ext: #5aa6ea;
+  --d-ops: #5cc08a;
   color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body {
   background: var(--bg);
   color: var(--ink);
@@ -264,6 +279,82 @@ dd code { padding: 1px 4px; background: var(--surface-2); border-radius: 4px; }
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius);
 }
+/* View tabs */
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.tab {
+  padding: 7px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  text-decoration: none;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+}
+.tab[aria-current="page"] { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+
+/* System diagram. rough.js writes sentinel colours as SVG attributes; these
+   rules repaint them from the theme tokens, since attributes can't read CSS
+   variables. */
+.diagram-view { display: grid; gap: 20px; }
+.diagram-intro { margin: 0; max-width: 66ch; color: var(--muted); }
+.diagram-wrap {
+  overflow-x: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+#diagram-svg { display: block; width: 100%; min-width: 980px; height: auto; }
+#diagram-svg [stroke="#010101"] { stroke: var(--ink); }
+#diagram-svg [stroke="#020202"] { stroke: var(--d-flow); opacity: 0.5; }
+#diagram-svg [stroke="#030303"] { stroke: var(--d-store); opacity: 0.55; }
+#diagram-svg [stroke="#040404"] { stroke: var(--d-ext); opacity: 0.5; }
+#diagram-svg [stroke="#050505"] { stroke: var(--d-ops); opacity: 0.55; }
+#diagram-svg [stroke="#060606"] { stroke: var(--muted); }
+#diagram-svg [fill="#030303"] { fill: var(--d-store); opacity: 0.3; }
+#diagram-svg text { font-family: var(--hand); }
+.d-title { font-size: 21px; font-weight: 700; fill: var(--ink); }
+.d-line { font-size: 16.5px; fill: var(--ink); opacity: 0.8; }
+.d-note { font-size: 15px; fill: var(--muted); }
+.d-badge { cursor: pointer; }
+.d-badge circle { fill: var(--accent); stroke: var(--surface); stroke-width: 2; }
+.d-badge text { font-family: var(--sans); font-size: 13px; font-weight: 700; fill: var(--surface); }
+.d-badge.is-active circle, .d-badge:focus-visible circle { fill: var(--ink); }
+.d-badge:focus { outline: none; }
+.scroll-hint { margin: 0; font-size: 13px; color: var(--muted); }
+@media (min-width: 1000px) { .scroll-hint { display: none; } }
+.legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px 28px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr));
+}
+.legend li {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+}
+.legend li.is-active { background: var(--surface); border-color: var(--accent); }
+.legend-num {
+  width: 28px;
+  height: 28px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--surface);
+  background: var(--accent);
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+}
+.legend b { display: block; font-size: 15px; }
+.legend p { margin: 2px 0 0; font-size: 14px; color: var(--muted); }
+.legend a { font-size: 14px; }
+
 footer { font-size: 14px; color: var(--muted); max-width: 72ch; }
 footer p { margin: 0; }
 @media (prefers-reduced-motion: no-preference) {
@@ -276,7 +367,25 @@ footer p { margin: 0; }
     <div class="eyebrow">Ezra · household WhatsApp assistant</div>
     <h1>System concepts</h1>
     <p class="lede">Each card starts from a real problem in the product, shows why the obvious fix fails, and then covers what we built. Use recall mode to test yourself.</p>
+    <nav class="tabs" aria-label="Views">
+      <a class="tab" id="tab-concepts" href="#concepts">Concepts</a>
+      <a class="tab" id="tab-diagram" href="#diagram">System diagram</a>
+    </nav>
   </header>
+
+  <section class="diagram-view" id="view-diagram" hidden aria-labelledby="tab-diagram">
+    <p class="diagram-intro">The whole system on one page. Each numbered marker is a concept; select it to find it in the list below, and follow the link to its card where one exists.</p>
+    <p class="scroll-hint">Scroll the drawing sideways to see all of it.</p>
+    <div class="diagram-wrap">
+      <svg id="diagram-svg" viewBox="0 0 1420 940" role="img" aria-labelledby="diagram-title diagram-desc">
+        <title id="diagram-title">Ezra system diagram</title>
+        <desc id="diagram-desc">WhatsApp messages and scheduled sweeps enter one conversation lane on an EC2 host. A durable handleTurn workflow calls Claude and tools, parks risky actions for approval, and replies through a send step. Everything is stored in one Postgres. Monitoring, alerts and backups sit outside the host.</desc>
+      </svg>
+    </div>
+    <ol class="legend" id="legend"></ol>
+  </section>
+
+  <div id="view-concepts">
 
   <section class="map" aria-labelledby="map-heading">
     <div class="map-title">
@@ -300,11 +409,253 @@ footer p { margin: 0; }
     <nav class="rail" id="rail" aria-label="Concept index"></nav>
     <main class="cards" id="cards"></main>
   </div>
+  </div>
 
   <footer>
     <p>Pilot version with 3 of about 50 planned cards. Facts were checked against the code and pinned library source on 2026-11-05. Code links open the current <code>main</code> branch.</p>
   </footer>
 </div>
+
+<script src="https://cdn.jsdelivr.net/npm/roughjs@4.6.6/bundled/rough.js"></script>
+<script>
+// System diagram. Every box, arrow and marker is data below, so the drawing
+// stays easy to correct when the architecture moves. Facts checked against the
+// code on 2026-11-23.
+window.EzraDiagram = (function () {
+  var NS = 'http://www.w3.org/2000/svg';
+  // Sentinel colours: CSS in <style> repaints them from the theme tokens.
+  var INK = '#010101';
+  var SOFT = '#060606';
+  var FILL = { flow: '#020202', store: '#030303', ext: '#040404', ops: '#050505' };
+
+  var host = { x: 210, y: 40, w: 970, h: 740, label: 'EC2 host · one Node process · default-deny egress' };
+
+  var boxes = [
+    { x: 30, y: 130, w: 150, h: 400, kind: 'ext', title: 'WhatsApp', lines: ['family group', 'messages', 'and ✅ replies'] },
+    { x: 240, y: 110, w: 210, h: 130, kind: 'flow', title: 'Ingestion', lines: ['allowlist', 'durable enqueue,', 'then ack'] },
+    { x: 240, y: 290, w: 210, h: 110, kind: 'flow', title: 'Scheduled sweeps', lines: ['reminders · every minute', 'approval expiry · 5 min'] },
+    { x: 500, y: 170, w: 200, h: 150, kind: 'flow', title: 'Conversation lane', lines: ['one turn at a time', 'a burst becomes', 'one turn'] },
+    { x: 750, y: 80, w: 390, h: 440, kind: null, title: 'handleTurn · durable workflow', lines: [] },
+    { x: 780, y: 125, w: 330, h: 44, kind: 'flow', title: 'load context', lines: [], small: true },
+    { x: 780, y: 185, w: 330, h: 44, kind: 'flow', title: 'route turn · Jev (shadow)', lines: [], small: true },
+    { x: 780, y: 245, w: 330, h: 100, kind: 'flow', title: 'Claude ⇄ tools', lines: ['capped rounds', 'every tool_use gets a tool_result'] },
+    { x: 780, y: 360, w: 160, h: 80, kind: 'flow', title: 'Park', lines: ['confirm-before', '→ pending_actions'] },
+    { x: 955, y: 360, w: 155, h: 80, kind: 'flow', title: 'Compaction', lines: ['long transcripts'] },
+    { x: 780, y: 455, w: 330, h: 44, kind: 'flow', title: 'persist', lines: [], small: true },
+    { x: 500, y: 400, w: 200, h: 110, kind: 'flow', title: 'Send step', lines: ['delivery class', 'checked vs sent_log'] },
+    { x: 240, y: 600, w: 210, h: 120, kind: 'ops', title: 'Ops monitors', lines: ['socket health', 'dead-man ping'] },
+    { x: 1210, y: 100, w: 180, h: 80, kind: 'ext', title: 'Claude API', lines: ['prompt cache'] },
+    { x: 1210, y: 195, w: 180, h: 70, kind: 'ext', title: 'TypeSafe Jev', lines: ['turn routing'] },
+    { x: 1210, y: 285, w: 180, h: 90, kind: 'ext', title: 'Google Calendar', lines: ['deterministic', 'event IDs'] },
+    { x: 1210, y: 390, w: 180, h: 70, kind: 'ext', title: 'Voyage', lines: ['embeddings'] },
+    { x: 1210, y: 475, w: 180, h: 70, kind: 'ext', title: 'Langfuse', lines: ['traces'] },
+    { x: 240, y: 820, w: 200, h: 90, kind: 'ops', title: 'healthchecks.io', lines: ['alerts when pings stop'] },
+    { x: 480, y: 820, w: 200, h: 90, kind: 'ops', title: 'Telegram', lines: ['alert channel'] },
+    { x: 880, y: 820, w: 240, h: 90, kind: 'store', title: 'S3 backups', lines: ['age-encrypted · PITR'] }
+  ];
+
+  var db = {
+    x: 480, y: 590, w: 620, h: 150, ry: 18, title: 'One Postgres',
+    lines: ['DBOS journal · inbox · lists, reminders, facts', 'pending_actions · sent_log · pgvector'],
+    note: 'each write commits with its completion record'
+  };
+
+  // [x1, y1, x2, y2, label?, dashed?, [labelX, labelY]?]
+  var arrows = [
+    [180, 190, 240, 175],
+    [450, 175, 500, 215],
+    [450, 345, 500, 280],
+    [700, 245, 750, 245],
+    [750, 477, 700, 477],
+    [500, 455, 180, 455, 'reply'],
+    [920, 520, 920, 590, 'state', true],
+    [600, 510, 600, 590, 'sent_log', true],
+    [1140, 140, 1210, 140],
+    [1140, 215, 1210, 230],
+    [1140, 320, 1210, 330],
+    [1140, 420, 1210, 425],
+    [1140, 490, 1210, 510, null, true],
+    [300, 720, 300, 820, 'ping every 60 s'],
+    [420, 720, 560, 820, 'socket alerts', false, [520, 772]],
+    [440, 865, 480, 865],
+    [960, 740, 1000, 820, 'encrypted backups', false, [858, 802]]
+  ];
+
+  var concepts = [
+    { n: 1, x: 450, y: 110, name: 'Guaranteed delivery', text: 'Each message is stored durably before WhatsApp gets its ack, so a crash means redelivery, not a lost message.' },
+    { n: 2, x: 212, y: 232, name: 'Message loop prevention', text: "The Baileys adapter drops echoes of its own sends by message ID. It can't use WhatsApp's fromMe flag, because the builder's own messages carry it too." },
+    { n: 3, x: 700, y: 170, name: 'Sequential convoy', text: 'One lane per conversation runs one turn at a time, so two people and the sweeps never race on the same lists.' },
+    { n: 4, x: 500, y: 320, name: 'Aggregator (debounce)', text: 'A burst of messages from one person becomes a single turn. The grouping happens after the messages are already durable.' },
+    { n: 5, x: 1140, y: 80, name: 'Durable execution', text: 'Every step is journaled. After a crash the workflow replays from the top and skips finished steps, and a lint rule bans clocks and randomness in its body.' },
+    { n: 6, x: 1110, y: 245, name: 'Bounded agent loop', text: 'Model rounds are capped and end with a forced final answer, and every tool_use gets a tool_result.' },
+    { n: 7, x: 1390, y: 100, name: 'Prompt caching', text: 'The system prompt stays byte-stable so it caches. Per-turn state, such as the current time, comes after it.' },
+    { n: 8, x: 1110, y: 360, name: 'Context compaction', text: 'Long transcripts fold into an embedded summary that keeps open commitments word for word.' },
+    { n: 9, x: 780, y: 360, name: 'Asynchronous human-in-the-loop approval', card: 'async-human-in-the-loop', text: 'Confirm-before tools park in pending_actions and the turn ends. A quoted ✅ runs them later in a fresh turn.' },
+    { n: 10, x: 1390, y: 285, name: 'Revalidation and deterministic IDs', text: "The calendar slot is checked again just before the write, and the event ID comes from the action ID, so a retry can't double-book." },
+    { n: 11, x: 700, y: 400, name: 'Delivery semantics', text: 'Each send is declared at-least-once or at-most-once and checked against sent_log.' },
+    { n: 12, x: 1100, y: 600, name: 'Exactly-once state writes', card: 'exactly-once-state-writes', text: 'Each write commits with its completion record in one transaction, so a replay never writes twice.' },
+    { n: 13, x: 440, y: 820, name: "Dead man's switch", card: 'dead-mans-switch', text: "healthchecks.io alerts when the 60-second ping stops, which catches a dead host the app can't report." },
+    { n: 14, x: 680, y: 820, name: 'Failure domain isolation', text: 'Alerts go out over Telegram, never over the WhatsApp socket they report on.' },
+    { n: 15, x: 1180, y: 40, name: 'Default-deny egress', text: 'nftables drops traffic to any host not on the allowlist, which limits what a compromised dependency can reach.' },
+    { n: 16, x: 1120, y: 820, name: 'Encrypted point-in-time backups', text: "Backups go to S3 encrypted with age. The host holds only the public key, so it can't decrypt its own backups." },
+    { n: 17, x: 1110, y: 185, name: 'Turn routing in shadow mode', text: 'Jev proposes a model tier for each turn. Since 2026-10-30 it runs in shadow: the proposal is logged and the turn runs on the standard tier.' },
+    { n: 18, x: 780, y: 245, name: 'Spotlighting untrusted content', text: 'Calendar, recall and fact results are fenced as data before the model reads them, as a defence against prompt injection.' }
+  ];
+
+  // Plain-SVG stand-in with the same calls, used when the CDN is unreachable.
+  function plainCanvas() {
+    function node(tag, attrs) {
+      var e = document.createElementNS(NS, tag);
+      Object.keys(attrs).forEach(function (k) { e.setAttribute(k, attrs[k]); });
+      return e;
+    }
+    function style(o) {
+      var a = { stroke: o.stroke || INK, 'stroke-width': o.strokeWidth || 1.4, fill: 'none' };
+      if (o.strokeLineDash) a['stroke-dasharray'] = o.strokeLineDash.join(' ');
+      return a;
+    }
+    function merge(a, b) { Object.keys(b).forEach(function (k) { a[k] = b[k]; }); return a; }
+    return {
+      rectangle: function (x, y, w, h, o) { return node('rect', merge({ x: x, y: y, width: w, height: h, rx: 6 }, style(o))); },
+      line: function (x1, y1, x2, y2, o) { return node('line', merge({ x1: x1, y1: y1, x2: x2, y2: y2 }, style(o))); },
+      linearPath: function (pts, o) { return node('polyline', merge({ points: pts.map(function (p) { return p.join(','); }).join(' ') }, style(o))); },
+      ellipse: function (cx, cy, w, h, o) { return node('ellipse', merge({ cx: cx, cy: cy, rx: w / 2, ry: h / 2 }, style(o))); },
+      path: function (d, o) { return node('path', merge({ d: d }, style(o))); }
+    };
+  }
+
+  function text(svg, x, y, value, cls) {
+    var t = document.createElementNS(NS, 'text');
+    t.setAttribute('x', x);
+    t.setAttribute('y', y);
+    t.setAttribute('class', cls);
+    t.textContent = value;
+    svg.appendChild(t);
+    return t;
+  }
+
+  var drawn = false;
+  var onSelect = null;
+
+  function draw() {
+    if (drawn) return;
+    drawn = true;
+    var svg = document.getElementById('diagram-svg');
+    var rc = window.rough ? window.rough.svg(svg) : plainCanvas();
+    var seed = 1;
+    function opts(extra) {
+      var o = { stroke: INK, strokeWidth: 1.4, roughness: 1.1, bowing: 1, seed: seed++ };
+      Object.keys(extra || {}).forEach(function (k) { o[k] = extra[k]; });
+      return o;
+    }
+    function fill(kind) {
+      return kind ? { fill: FILL[kind], fillStyle: 'hachure', hachureGap: 7, fillWeight: 0.8, hachureAngle: -41 } : {};
+    }
+
+    svg.appendChild(rc.rectangle(host.x, host.y, host.w, host.h, opts({ stroke: SOFT, strokeLineDash: [10, 8], roughness: 0.7 })));
+    text(svg, host.x + 20, host.y + 28, host.label, 'd-note');
+
+    boxes.forEach(function (b) {
+      svg.appendChild(rc.rectangle(b.x, b.y, b.w, b.h, opts(fill(b.kind))));
+      if (b.small) {
+        text(svg, b.x + 14, b.y + 28, b.title, 'd-line');
+        return;
+      }
+      text(svg, b.x + 14, b.y + 28, b.title, 'd-title');
+      b.lines.forEach(function (line, i) { text(svg, b.x + 14, b.y + 52 + i * 20, line, 'd-line'); });
+    });
+
+    var cx = db.x + db.w / 2;
+    var body = 'M' + db.x + ' ' + (db.y + db.ry) +
+      ' L' + db.x + ' ' + (db.y + db.h - db.ry) +
+      ' A' + db.w / 2 + ' ' + db.ry + ' 0 0 0 ' + (db.x + db.w) + ' ' + (db.y + db.h - db.ry) +
+      ' L' + (db.x + db.w) + ' ' + (db.y + db.ry);
+    svg.appendChild(rc.path(body, opts(fill('store'))));
+    svg.appendChild(rc.ellipse(cx, db.y + db.ry, db.w, db.ry * 2, opts({ fill: FILL.store, fillStyle: 'solid' })));
+    text(svg, db.x + 24, db.y + 66, db.title, 'd-title');
+    db.lines.forEach(function (line, i) { text(svg, db.x + 24, db.y + 92 + i * 20, line, 'd-line'); });
+    text(svg, db.x + 24, db.y + 134, db.note, 'd-note');
+
+    arrows.forEach(function (a) {
+      var x1 = a[0], y1 = a[1], x2 = a[2], y2 = a[3];
+      var dash = a[5] ? { strokeLineDash: [6, 6] } : {};
+      svg.appendChild(rc.line(x1, y1, x2, y2, opts(Object.assign({ roughness: 0.9 }, dash))));
+      var angle = Math.atan2(y2 - y1, x2 - x1);
+      var head = function (turn) {
+        return [x2 - 12 * Math.cos(angle + turn), y2 - 12 * Math.sin(angle + turn)];
+      };
+      svg.appendChild(rc.linearPath([head(0.45), [x2, y2], head(-0.45)], opts({ roughness: 0.6 })));
+      if (a[4] && a[6]) {
+        text(svg, a[6][0], a[6][1], a[4], 'd-note');
+      } else if (a[4]) {
+        var vertical = Math.abs(x2 - x1) < Math.abs(y2 - y1);
+        text(svg, (x1 + x2) / 2 + (vertical ? 10 : -20), (y1 + y2) / 2 + (vertical ? 4 : -8), a[4], 'd-note');
+      }
+    });
+
+    concepts.forEach(function (c) {
+      var g = document.createElementNS(NS, 'g');
+      g.setAttribute('class', 'd-badge');
+      g.setAttribute('id', 'badge-' + c.n);
+      g.setAttribute('tabindex', '0');
+      g.setAttribute('role', 'button');
+      g.setAttribute('aria-label', 'Concept ' + c.n + ': ' + c.name);
+      var circle = document.createElementNS(NS, 'circle');
+      circle.setAttribute('cx', c.x);
+      circle.setAttribute('cy', c.y);
+      circle.setAttribute('r', 14);
+      g.appendChild(circle);
+      var t = text(g, c.x, c.y + 4.5, String(c.n), '');
+      t.setAttribute('text-anchor', 'middle');
+      g.addEventListener('click', function () { select(c.n, true); });
+      g.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(c.n, true); }
+      });
+      svg.appendChild(g);
+    });
+
+    var legend = document.getElementById('legend');
+    concepts.forEach(function (c) {
+      var li = document.createElement('li');
+      li.id = 'legend-' + c.n;
+      var num = document.createElement('button');
+      num.type = 'button';
+      num.className = 'legend-num';
+      num.textContent = String(c.n);
+      num.setAttribute('aria-label', 'Show concept ' + c.n + ' on the diagram');
+      num.addEventListener('click', function () { select(c.n, false); });
+      li.appendChild(num);
+      var body = document.createElement('div');
+      var name = document.createElement('b');
+      name.textContent = c.name;
+      body.appendChild(name);
+      var p = document.createElement('p');
+      p.textContent = c.text;
+      body.appendChild(p);
+      if (c.card) {
+        var a = document.createElement('a');
+        a.href = '#' + c.card;
+        a.textContent = 'Read the card';
+        body.appendChild(a);
+      }
+      li.appendChild(body);
+      legend.appendChild(li);
+    });
+  }
+
+  function select(n, fromDiagram) {
+    concepts.forEach(function (c) {
+      document.getElementById('badge-' + c.n).classList.toggle('is-active', c.n === n);
+      document.getElementById('legend-' + c.n).classList.toggle('is-active', c.n === n);
+    });
+    var target = fromDiagram ? document.getElementById('legend-' + n) : document.getElementById('badge-' + n);
+    if (fromDiagram) target.scrollIntoView({ block: 'nearest' });
+    else target.scrollIntoView({ block: 'center', inline: 'center' });
+  }
+
+  return { draw: draw, concepts: concepts };
+})();
+</script>
 
 <!-- Card data. `code` entries are {path, symbol} pairs so `pnpm check:docs` can
      verify each file exists and still contains the symbol. Cite symbols, never
@@ -696,8 +1047,17 @@ footer p { margin: 0; }
     }
   }
 
+  function showView(name) {
+    document.getElementById('view-diagram').hidden = name !== 'diagram';
+    document.getElementById('view-concepts').hidden = name !== 'concepts';
+    document.getElementById('tab-diagram').setAttribute('aria-current', name === 'diagram' ? 'page' : 'false');
+    document.getElementById('tab-concepts').setAttribute('aria-current', name === 'concepts' ? 'page' : 'false');
+    if (name === 'diagram' && window.EzraDiagram) window.EzraDiagram.draw();
+  }
+
   function openFromHash() {
     var id = location.hash.slice(1);
+    showView(id === 'diagram' ? 'diagram' : 'concepts');
     if (!byId(data.concepts, id)) return;
     state.query = '';
     state.group = state.source = state.maturity = state.stage = null;
